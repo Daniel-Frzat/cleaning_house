@@ -1,0 +1,82 @@
+# Cleaning House — Backend
+
+**الحالة:** Phase 0 (Foundation) — مكتمل الهيكل الأساسي
+**Architecture:** v1.1 (Frozen Baseline)
+**Framework:** Django + Django Ninja + PostgreSQL
+
+---
+
+## ✅ ما هو موجود في Phase 0
+
+- هيكل مشروع Django + Ninja كامل، مقسّم إلى Settings حسب البيئة (`dev` / `staging` / `production`)
+- اتصال PostgreSQL عبر متغيرات بيئية (`.env`)
+- JWT Auth مُفعّل بنيويًا (`django-ninja-jwt`) — بدون أي منطق أعمال
+- هيكل أدوار (`apps/accounts/roles.py`) يحتوي فقط الأدوار المؤكدة: `Customer`, `Contractor`, `Admin`
+- Celery + Redis مُعدّان مع Health-check Task واحد فقط
+- Logging مركزي (Console + Rotating File)
+- API Docs تلقائية عبر Django Ninja (`/api/docs`)
+- Testing infra (`pytest` + `pytest-django`) مع اختبار Smoke واحد
+- `adapters/` — طبقة Interfaces مجردة (Abstract) لكل تكامل خارجي، **بدون أي تنفيذ فعلي**
+
+## ❌ ما هو غير موجود عمدًا (ولن يُضاف قبل حسم القرارات المرتبطة)
+
+- **لا Domain Models فعلية.** `apps/accounts/models.py` فارغ عمدًا.
+- **لا منطق أعمال (Business Logic) من أي نوع.**
+- **لا تنفيذ فعلي لأي Provider خارجي** (Payment, SMS, Storage, Push, GPS, Address Validation, Business Registry) — فقط Interfaces مجردة في `adapters/`.
+- **لا دور PropertyManager** ضمن الأدوار — 🔴 Blocking Decision غير محسوم بعد.
+
+---
+
+## 🚀 التشغيل المحلي (بدون Docker)
+
+```bash
+# 1) إنشاء بيئة افتراضية
+python3 -m venv venv
+source venv/bin/activate        # على Windows: venv\Scripts\activate
+
+# 2) تثبيت الحزم
+pip install -r requirements.txt
+
+# 3) إعداد متغيرات البيئة
+cp .env.example .env
+# عدّل القيم داخل .env حسب بيئتك المحلية (خصوصًا DB_* و SECRET_KEY)
+
+# 4) تأكد من تشغيل PostgreSQL و Redis محليًا
+#    (يجب تثبيتهما بشكل منفصل على جهازك — غير مضمّنين هنا لأنك اخترت عدم استخدام Docker)
+
+# 5) تطبيق الهجرات الأساسية (Django الافتراضية فقط — لا Domain migrations بعد)
+python manage.py migrate
+
+# 6) تشغيل الخادم
+python manage.py runserver
+
+# 7) (اختياري) تشغيل Celery Worker في نافذة طرفية منفصلة
+celery -A config worker -l info
+```
+
+## 🧪 تشغيل الاختبارات
+
+```bash
+pytest
+```
+
+## 📖 API Docs
+
+بعد تشغيل الخادم، افتح:
+http://127.0.0.1:8000/api/docs
+
+
+---
+
+## 📌 الخطوة التالية (بعد اعتماد Phase 0)
+
+بحسب "Recommended Implementation Order" (قسم 29 من المرجع المعماري):
+
+> **الخطوة 2: Identity Domain + Roles**
+> قرار مطلوب أولاً: هل يُعرَّف PropertyManager هنا كـRole أم يُؤجَّل؟
+
+لا تبدأ Detailed Models لـIdentity Domain قبل حسم هذا القرار صراحة.
+
+---
+
+*هذا الملف يوثّق فقط نطاق Phase 0. راجع `Cleaning_House_Project_Reference.md` للـArchitecture الكامل، و`External_Requirements_Cleaning_House.md` لكل التكاملات الخارجية المعلّقة.*

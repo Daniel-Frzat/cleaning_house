@@ -1,0 +1,37 @@
+# ============================================================
+# Cleaning House — Phase 0 (Foundation) Dependencies
+# ============================================================
+# ملاحظة: هذه الحزم تغطي فقط البنية التحتية (Phase 0).
+# أي حزمة خاصة بـProvider خارجي محدد (Payment, SMS, Storage...)
+# لن تُضاف قبل حسم القرار المرتبط بها في Open Decisions.
+
+# --- Core Framework ---
+Django==5.0.7
+django-ninja==1.1.0
+
+# --- Database ---
+# ملاحظة: psycopg2-binary قد لا يوفر wheel جاهزة لـPython 3.14 (إصدار حديث جدًا)
+# psycopg (v3) هو البديل الحديث الأكثر توافقًا وصيانة نشطة. إذا فشل التثبيت
+# رغم ذلك، فهذا يعني عدم توفر wheel للنسخة 3.14 بعد ويتطلب إما:
+#   (أ) تثبيت Build Tools (Visual C++) لبناء الحزمة من المصدر، أو
+#   (ب) استخدام Python 3.12/3.13 بدلاً من 3.14
+psycopg[binary]==3.3.5
+
+# --- Environment Config ---
+python-decouple==3.8
+
+# --- Auth (JWT) ---
+django-ninja-jwt==5.3.1
+
+# --- Background Jobs ---
+celery==5.4.0
+redis==5.0.7
+
+# --- Testing ---
+pytest==8.2.2
+pytest-django==4.8.0
+pytest-cov==5.0.0
+
+# --- Dev Quality ---
+black==24.4.2
+flake8==7.1.0

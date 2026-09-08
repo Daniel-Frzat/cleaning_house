@@ -1,0 +1,60 @@
+# ============================================================
+# Cleaning House — .gitignore
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# --- Virtual Environment ---
+venv/
+env/
+ENV/
+.venv/
+
+# --- Environment Variables (لا ترفع القيم الحقيقية أبدًا) ---
+.env
+.env.local
+.env.*.local
+
+# --- Database ---
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+
+# --- Django ---
+staticfiles/
+media/
+*.log
+
+# --- Logs ---
+logs/*.log
+!logs/.gitkeep
+
+# --- Testing / Coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Celery ---
+celerybeat-schedule
+celerybeat.pid
+
+# --- Build / Distribution ---
+build/
+dist/
+*.egg
