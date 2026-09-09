@@ -6,7 +6,10 @@
 # لن تُضاف قبل حسم القرار المرتبط بها في Open Decisions.
 
 # --- Core Framework ---
-Django==5.0.7
+# Django 5.2 LTS: مطلوب لدعم Python 3.14.
+# Django 5.0.x يفشل على 3.14 في django/template/context.py (BaseContext.__copy__
+# كان ينسخ super() object) ما يُعطّل كل صفحات Admin بخطأ 500.
+Django==5.2.17
 django-ninja==1.1.0
 
 # --- Database ---

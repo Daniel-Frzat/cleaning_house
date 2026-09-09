@@ -31,11 +31,13 @@ THIRD_PARTY_APPS = [
     "ninja_jwt",
 ]
 
-# ملاحظة: apps.accounts موجود هنا كـ"هيكل فقط" (Auth Foundation + Roles skeleton).
-# النماذج التفصيلية (User, OTPVerification, SocialAccount...) هي جزء من
-# Identity Domain في Phase 1 ولم تُصمم بعد بالتفصيل.
+# apps.accounts — Identity Domain.
+# Phase 1 / Step 1: User Model المخصص (phone كمعرّف أساسي).
+# Phase 1: User + OTPVerification + SocialAccount.
 LOCAL_APPS = [
     "apps.accounts",
+    # Properties & Address Domain — PropertyAddress كيان منفصل (Change Set قسم 20)
+    "apps.properties",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -80,6 +82,13 @@ ASGI_APPLICATION = "config.asgi.application"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ------------------------------------------------------------
+# Authentication — Custom User Model (Identity Domain, Phase 1)
+# ⚠️ قرار أحادي الاتجاه في Django: يجب ضبطه قبل أول migration للمشروع.
+# المعرّف الأساسي هو phone (OTP-based auth) — لا يوجد حقل username.
+# ------------------------------------------------------------
+AUTH_USER_MODEL = "accounts.User"
+
+# ------------------------------------------------------------
 # Internationalization
 # ------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
@@ -104,6 +113,50 @@ NINJA_JWT = {
 }
 
 # ------------------------------------------------------------
+# Provider Adapters
+# ------------------------------------------------------------
+# SMS Gateway Provider ما زال قرارًا مفتوحًا (🟢 غير معطِّل).
+# الافتراضي هنا adapter تطويري يطبع الرمز في الـconsole فقط.
+# عند حسم الـProvider: يُستبدل هذا المسار فقط — دون تعديل كود الـDomain.
+SMS_ADAPTER = config(
+    "SMS_ADAPTER",
+    default="adapters.sms.dev_console.DevConsoleSMSAdapter",
+)
+
+# صمّام أمان: DevConsoleSMSAdapter يرفض العمل عند DEBUG=False إلا إذا
+# فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
+SMS_DEV_ALLOW_INSECURE = config("SMS_DEV_ALLOW_INSECURE", default=False, cast=bool)
+
+# ------------------------------------------------------------
+# Social Auth (Sign in with Apple / Google — Phase 1)
+# ------------------------------------------------------------
+# التحقق الفعلي من التوكنات يتطلب إعدادات تشغيلية (Apple Developer keys،
+# Google OAuth client IDs) تُدار عبر متغيرات بيئة وهي خارج نطاق هذه الخطوة.
+# الافتراضي هنا adapter وهمي للاختبار/التطوير فقط. عند تجهيز الاعتمادات
+# يُستبدل هذا المسار فقط — دون تعديل كود الـDomain.
+SOCIAL_AUTH_ADAPTER = config(
+    "SOCIAL_AUTH_ADAPTER",
+    default="adapters.social_auth.fake.FakeSocialAuthAdapter",
+)
+
+# صمّام أمان: FakeSocialAuthAdapter يرفض العمل عند DEBUG=False إلا إذا
+# فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
+SOCIAL_AUTH_ALLOW_FAKE = config("SOCIAL_AUTH_ALLOW_FAKE", default=False, cast=bool)
+
+# ------------------------------------------------------------
+# OTP Policy (Identity Domain)
+# ------------------------------------------------------------
+# ⚠️ القيم أدناه "defaults آمنة بانتظار تأكيد Product Owner"
+#    (defaults pending product-owner confirmation).
+#    وجود Rate Limiting/Expiry/Max Attempts هو متطلب أمني إلزامي حسب
+#    الـChange Set، لكن الأرقام نفسها لم تُعتمد كقاعدة عمل نهائية.
+#    لا تُعامل هذه الأرقام كـBusiness Rule محسومة.
+OTP_EXPIRY_SECONDS = config("OTP_EXPIRY_SECONDS", default=300, cast=int)  # 5 دقائق
+OTP_MAX_ATTEMPTS = config("OTP_MAX_ATTEMPTS", default=5, cast=int)
+OTP_RESEND_COOLDOWN_SECONDS = config("OTP_RESEND_COOLDOWN_SECONDS", default=60, cast=int)
+OTP_CODE_LENGTH = config("OTP_CODE_LENGTH", default=6, cast=int)
+
+# ------------------------------------------------------------
 # Celery / Redis (Background Jobs infra only — no tasks with
 # business logic yet; Dispatch expiry / Escrow checks / etc.
 # سيُضافون في مراحلهم الخاصة حسب Domain)
@@ -126,7 +179,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
-            "format": "[{asctime}] {levelname} {name} — {message}",
+            "format": "[{asctime}] {levelname} {name} | {message}",
             "style": "{",
         },
     },
@@ -138,6 +191,7 @@ LOGGING = {
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOGS_DIR / "app.log",
+            "encoding": "utf-8",
             "maxBytes": 1024 * 1024 * 5,  # 5MB
             "backupCount": 5,
             "formatter": "verbose",

@@ -1,6 +1,7 @@
 # Cleaning House — Backend
 
-**الحالة:** Phase 0 (Foundation) — مكتمل الهيكل الأساسي
+**الحالة:** Phase 0 (Foundation) — مكتمل · Identity Domain — ✅ مكتمل
+(User، OTPVerification، SocialAccount، JWT Auth Endpoints — 77/77 اختبارًا ناجحًا)
 **Architecture:** v1.1 (Frozen Baseline)
 **Framework:** Django + Django Ninja + PostgreSQL
 
@@ -23,7 +24,9 @@
 - **لا Domain Models فعلية.** `apps/accounts/models.py` فارغ عمدًا.
 - **لا منطق أعمال (Business Logic) من أي نوع.**
 - **لا تنفيذ فعلي لأي Provider خارجي** (Payment, SMS, Storage, Push, GPS, Address Validation, Business Registry) — فقط Interfaces مجردة في `adapters/`.
-- **لا دور PropertyManager** ضمن الأدوار — 🔴 Blocking Decision غير محسوم بعد.
+> ℹ️ الأدوار: `CUSTOMER` / `CONTRACTOR` / `ADMIN` — **نهائية ومؤكدة**.
+> PropertyManager ليس دورًا مستقلًا: حُسم أنه نفس كيان `CUSTOMER`
+> (راجع Change Set — قسم 12، محسوم بتاريخ 2026-09-09).
 
 ---
 
@@ -72,10 +75,11 @@ http://127.0.0.1:8000/api/docs
 
 بحسب "Recommended Implementation Order" (قسم 29 من المرجع المعماري):
 
-> **الخطوة 2: Identity Domain + Roles**
-> قرار مطلوب أولاً: هل يُعرَّف PropertyManager هنا كـRole أم يُؤجَّل؟
+> **الخطوة 2: Identity Domain + Roles** — ✅ مكتملة.
+> قرار PropertyManager محسوم: PropertyManager = CUSTOMER، وليس دورًا
+> مستقلًا (Change Set — قسم 12).
 
-لا تبدأ Detailed Models لـIdentity Domain قبل حسم هذا القرار صراحة.
+الأدوار المعتمدة نهائيًا: `CUSTOMER` / `CONTRACTOR` / `ADMIN`.
 
 ---
 

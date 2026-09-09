@@ -1,16 +1,15 @@
 """
-Roles Skeleton — Phase 0 (Auth Foundation)
+Roles — Identity Domain (Phase 1)
 
-يحتوي فقط على الأدوار المؤكدة صراحة في المرجع المعماري (قسم 19):
+الأدوار المؤكدة في المرجع المعماري (قسم 19):
     Customer, Contractor, Admin
 
-⚠️ PropertyManager غير مُدرَج هنا عمدًا — هو 🔴 Blocking Decision
-(راجع قسم 27 → البند #5) ولم يُحسم بعد ما إذا كان:
-    - Role مستقل ضمن نظام الصلاحيات
-    - أم صفة إضافية على حساب Customer موجود
-    - أم كيان مختلف تمامًا
+✅ PropertyManager: قرار محسوم — PropertyManager = CUSTOMER
+   (راجع Change Set — قسم 12). لا يُعرَّف كـRole مستقل، ولا يُضاف إلى
+   هذا الـEnum. أي سلوك خاص بمدير العقار يُبنى فوق حساب Customer.
 
-لا تضف PropertyManager هنا حتى يُحسم القرار صراحة مع Daniel.
+⚠️ هذا هو المصدر الوحيد لتعريف الأدوار (Single Source of Truth).
+   لا تُعِد تعريف هذا الـEnum في أي مكان آخر — استورده من هنا.
 """
 
 from django.db import models
