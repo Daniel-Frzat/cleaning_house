@@ -44,6 +44,9 @@ LOCAL_APPS = [
     # Contractor Profile Domain — ContractorProfile (بيانات يستهلكها
     # Dispatch لاحقًا §36.7؛ لا منطق مطابقة ولا adapters هنا).
     "apps.contractors",
+    # Booking Domain — Booking + BookingServiceSelection (Change Set §36.1، §20).
+    # هيكل فقط: لا إسناد ولا عروض ولا حساب سعر في هذه المرحلة.
+    "apps.bookings",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -173,6 +176,22 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+
+# ------------------------------------------------------------
+# Celery Beat — المهام الدورية
+# ------------------------------------------------------------
+# انتهاء مهلة عروض الإسناد (§36.6): العرض غير المُجاب عليه خلال 60 دقيقة
+# يُعامل معاملة الرفض ويُطلق التتابع نفسه. المهمة تكرارية (idempotent)
+# حسب Infra §15 — تشغيلها مرتين لا يُنتج تتابعًا مكرَّرًا.
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = {
+    "expire-pending-dispatch-offers": {
+        "task": "bookings.expire_pending_offers",
+        # كل دقيقة: المهلة 60 دقيقة، فالدقة بالدقيقة كافية ورخيصة
+        "schedule": crontab(minute="*"),
+    },
+}
 
 # ------------------------------------------------------------
 # Logging (قسم 24 من المرجع — Observability)

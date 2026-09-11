@@ -278,9 +278,20 @@ def test_invalid_address_rolls_back_property_creation(customer):
 # ============================================================
 @pytest.mark.django_db
 def test_no_out_of_scope_foreign_keys():
-    """لا FK لـBooking / Job / QualityGuarantee في هذه الخطوة."""
+    """
+    لا FK لـBooking / Job / QualityGuarantee في هذه الخطوة.
+
+    ⚠️ الفحص على الحقول الأمامية (forward) وحدها: القاعدة أن نطاق العقارات
+       لا يعرف النطاقات اللاحقة ولا يشير إليها. أمّا إشارة نطاق لاحق إلى
+       Property (مثل Booking.property) فتُنشئ accessor عكسيًا تلقائيًا على
+       Property، وهو ليس FK يملكه هذا النطاق ولا يخرق حدوده — الاتجاه هو
+       المهم، لا مجرد وجود العلاقة.
+    """
     for model in (Property, PropertyAddress):
         for field in model._meta.get_fields():
+            # العكسي auto_created وغير concrete — نتجاوزه
+            if field.auto_created and not field.concrete:
+                continue
             related = getattr(field, "related_model", None)
             if related is not None:
                 assert related.__name__ not in ("Booking", "Job", "QualityGuarantee")
