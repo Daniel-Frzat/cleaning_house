@@ -38,6 +38,12 @@ LOCAL_APPS = [
     "apps.accounts",
     # Properties & Address Domain — PropertyAddress كيان منفصل (Change Set قسم 20)
     "apps.properties",
+    # Service Catalog & Pricing Domain — ServiceType + PricingConfig
+    # (Change Set §36.2، §5). التسعير لكل خدمة، وسعر الكيلومتر عام.
+    "apps.services",
+    # Contractor Profile Domain — ContractorProfile (بيانات يستهلكها
+    # Dispatch لاحقًا §36.7؛ لا منطق مطابقة ولا adapters هنا).
+    "apps.contractors",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

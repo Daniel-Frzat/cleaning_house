@@ -6,7 +6,11 @@ Root URL Configuration.
   - /api/health/  → Health-check بسيط للتأكد من أن التطبيق يعمل
   - /api/auth/    → Identity Domain (OTP / Social / JWT)
   - /api/properties → Properties & Address Domain (CUSTOMER only)
+  - /api/admin/   → Service Catalog & Pricing Domain (ADMIN only)
+  - /api/contractor/ → Contractor Profile Domain (CONTRACTOR only, self-service)
+  - /api/admin/contractors → Contractor records (ADMIN only, read-only)
 
+⚠️ /api/admin/ مسار الإدارة عبر الـAPI — لا علاقة له بـ/admin/ (Django Admin).
 ⚠️ لا يوجد بعد أي Endpoint لـDomains العمل (Booking, Payment, ...).
 """
 
@@ -16,6 +20,9 @@ from ninja import NinjaAPI
 
 from apps.accounts.api.auth import router as auth_router
 from apps.properties.api.properties import router as properties_router
+from apps.contractors.api.admin_contractors import router as admin_contractors_router
+from apps.contractors.api.profile import router as contractor_profile_router
+from apps.services.api.catalog import router as admin_catalog_router
 
 api = NinjaAPI(
     title="Cleaning House API",
@@ -32,6 +39,13 @@ def health_check(request):
 
 api.add_router("/auth/", auth_router)
 api.add_router("/properties", properties_router)
+# كتالوج الخدمات والتسعير — ADMIN فقط. لا نقطة نهاية للعميل في هذه المرحلة.
+api.add_router("/admin", admin_catalog_router)
+# ملف المقاول — مسارات ذاتية بالكامل (لا تقبل معرّفًا من العميل).
+api.add_router("/contractor", contractor_profile_router)
+# سجلات المقاولين للإدارة — قراءة فقط. مسارات /contractors* لا تتعارض
+# مع /services* و /pricing-config في الـrouter الآخر المركّب على /admin.
+api.add_router("/admin", admin_contractors_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
