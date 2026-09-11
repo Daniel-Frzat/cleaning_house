@@ -11,10 +11,11 @@ Root URL Configuration.
   - /api/admin/contractors → Contractor records (ADMIN only, read-only)
   - /api/bookings → Booking Domain (CUSTOMER only)
   - /api/contractor/offers → Dispatch offers response (CONTRACTOR only)
+  - /api/bookings/{id}/payment → Payment status (owner CUSTOMER or ADMIN)
 
 ⚠️ /api/admin/ مسار الإدارة عبر الـAPI — لا علاقة له بـ/admin/ (Django Admin).
 ⚠️ السعر يُكشف للعميل فقط بعد قبول مقاول للعرض (§36.1).
-⚠️ لا يوجد بعد أي Endpoint لـPayment / Escrow / Invoice.
+⚠️ الدفع شحن مباشر لحظة التأكيد (§36.4) — لا escrow ولا Invoice بعد.
 """
 
 from django.contrib import admin
@@ -24,6 +25,7 @@ from ninja import NinjaAPI
 from apps.accounts.api.auth import router as auth_router
 from apps.bookings.api.bookings import router as bookings_router
 from apps.bookings.api.offers import router as contractor_offers_router
+from apps.payments.api.payments import router as payments_router
 from apps.properties.api.properties import router as properties_router
 from apps.contractors.api.admin_contractors import router as admin_contractors_router
 from apps.contractors.api.profile import router as contractor_profile_router
@@ -56,6 +58,9 @@ api.add_router("/bookings", bookings_router)
 # رد المقاول على عروض الإسناد — مسارات /offers/* لا تتعارض مع /profile*
 # في الـrouter الآخر المركّب على /contractor.
 api.add_router("/contractor", contractor_offers_router)
+# الدفع — يُركَّب على /bookings لأن المسار /bookings/{id}/payment.
+# لا تعارض مع مسارات الحجوزات: تلك /bookings و /bookings/{id} فقط.
+api.add_router("/bookings", payments_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

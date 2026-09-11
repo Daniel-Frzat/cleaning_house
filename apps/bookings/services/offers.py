@@ -154,7 +154,32 @@ def accept_offer(user, offer_id):
         price,
         distance_km,
     )
+
+    # 📌 الشحن المباشر لحظة التأكيد (§36.4) — بعد تثبيت المعاملة لا داخلها:
+    #    فشل المزوّد لا يجوز أن يُلغي تأكيدًا صحيحًا. والدفعة الفاشلة لا
+    #    تُغيّر حالة الحجز (سياسة مفتوحة — راجع payments/services).
+    transaction.on_commit(lambda: _charge_after_commit(booking))
+
     return offer
+
+
+def _charge_after_commit(booking):
+    """
+    يُطلق الشحن المباشر بعد تثبيت تأكيد الحجز.
+
+    الاستثناءات تُبتلع وتُسجَّل: الحجز مؤكَّد فعلًا، وخطأ في طبقة الدفع
+    يجب ألا يتحول إلى 500 على طلب قبول ناجح. الدفعة الفاشلة تبقى مسجَّلة
+    بحالة FAILED، والحجز كما هو.
+    """
+    from apps.payments.services.payments import charge_for_booking
+
+    try:
+        charge_for_booking(booking)
+    except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
+        logger.exception(
+            "Automatic charge failed after booking confirmation (booking_id=%s)",
+            booking.id,
+        )
 
 
 @transaction.atomic

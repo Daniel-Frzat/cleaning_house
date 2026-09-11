@@ -47,6 +47,9 @@ LOCAL_APPS = [
     # Booking Domain — Booking + BookingServiceSelection (Change Set §36.1، §20).
     # هيكل فقط: لا إسناد ولا عروض ولا حساب سعر في هذه المرحلة.
     "apps.bookings",
+    # Payment Domain — شحن مباشر لحظة تأكيد الحجز (§36.4، §8؛ Infra §2).
+    # لا escrow ولا authorize/capture — المزوّد الفعلي قرار مفتوح.
+    "apps.payments",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -151,6 +154,24 @@ SOCIAL_AUTH_ADAPTER = config(
 # صمّام أمان: FakeSocialAuthAdapter يرفض العمل عند DEBUG=False إلا إذا
 # فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
 SOCIAL_AUTH_ALLOW_FAKE = config("SOCIAL_AUTH_ALLOW_FAKE", default=False, cast=bool)
+
+# ------------------------------------------------------------
+# Payment Provider (Payment Domain — §36.4، §8؛ Infra §2)
+# ------------------------------------------------------------
+# 🟡 مزوّد الدفع (PSP) قرار مفتوح. لا تنفيذ حقيقي في كود الإنتاج.
+# الافتراضي هنا adapter وهمي للتطوير/الاختبار فقط. عند حسم المزوّد
+# يُستبدل هذا المسار فقط — دون تعديل كود الـDomain.
+PAYMENT_PROVIDER_ADAPTER_CLASS = config(
+    "PAYMENT_PROVIDER_ADAPTER_CLASS",
+    default="apps.payments.adapters.fake_adapter.FakePaymentAdapter",
+)
+
+# صمّام أمان: FakePaymentAdapter يرفض العمل عند DEBUG=False إلا إذا فُعّل
+# هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية) — نفس نمط
+# SMS_DEV_ALLOW_INSECURE و SOCIAL_AUTH_ALLOW_FAKE.
+PAYMENTS_ALLOW_FAKE_ADAPTER = config(
+    "PAYMENTS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
+)
 
 # ------------------------------------------------------------
 # OTP Policy (Identity Domain)
