@@ -500,32 +500,41 @@ def test_no_celery_task_references_job_confirmation():
         assert "AWAITING_CUSTOMER_CONFIRMATION" not in source, path
 
 
-def test_confirm_has_no_payout_or_notification_side_effect():
+def test_confirm_triggers_payout_only_as_isolated_post_commit_effect():
     """
-    ⚠️ §36.5 مؤجَّل: الدالة تنفّذ الانتقال وحده — لا payout ولا إشعار.
-       الفحص على استيرادات الوحدة كلها وعلى جسم الدالة نفسها.
+    ⚠️ تغيّر النطاق في مرحلة Payout (§36.5): الدفع صار موصولًا — لكن
+       كأثر جانبي معزول عبر transaction.on_commit، لا داخل الانتقال.
+
+    🔒 ما يبقى محفوظًا من الحارس الأصلي:
+       - جسم confirm_job_completion نفسه لا يستدعي الدفع مباشرة، ولا
+         يُشعر، ولا يُجدول: يسجّل الأثر على on_commit فقط.
+       - لا إشعارات ولا Celery في وحدة المهام إطلاقًا.
+       - استيراد نطاق الدفع يحدث داخل الدالة المؤجَّلة (lazy) لا على
+         مستوى الوحدة، فلا اقتران وقت الاستيراد.
     """
     import ast
     import inspect
 
     from apps.jobs.services import jobs as mod
 
-    source = inspect.getsource(mod)
-    tree = ast.parse(source)
+    tree = ast.parse(inspect.getsource(mod))
 
-    imported = set()
-    for node in ast.walk(tree):
+    # 1) لا استيراد على مستوى الوحدة لإشعارات/Celery/فواتير
+    module_imports = set()
+    for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module)
+            module_imports.add(node.module)
         elif isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
+            module_imports.update(a.name for a in node.names)
 
-    for name in imported:
+    for name in module_imports:
         low = name.lower()
-        for forbidden in ("payout", "notification", "notify", "celery", "invoice"):
-            assert forbidden not in low, f"jobs service imports {name}"
+        for forbidden in ("notification", "notify", "celery", "invoice", "payout"):
+            assert forbidden not in low, (
+                f"jobs service imports {name} at module level"
+            )
 
-    # جسم الدالة: لا استدعاءات خارج الانتقال
+    # 2) جسم confirm_job_completion: لا دفع مباشر ولا إشعار ولا جدولة
     func = next(
         n for n in ast.walk(tree)
         if isinstance(n, ast.FunctionDef) and n.name == "confirm_job_completion"
@@ -539,16 +548,32 @@ def test_confirm_has_no_payout_or_notification_side_effect():
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
     }
 
-    for forbidden in ("send", "notify", "payout", "delay", "apply_async", "charge"):
+    for forbidden in (
+        "release_payout_for_booking", "send", "notify", "delay", "apply_async",
+        "charge",
+    ):
         assert forbidden not in called, f"confirm_job_completion calls {forbidden}"
 
+    # 3) الأثر مسجَّل على on_commit لا منفَّذ فورًا
+    assert "on_commit" in called, "payout must be deferred to transaction.on_commit"
 
-def test_payout_domain_does_not_exist():
-    """§36.5 مؤجَّل — لا نطاق Payout في المشروع أصلًا."""
+
+def test_payout_domain_exists_without_any_batching():
+    """
+    ⚠️ تغيّر النطاق في مرحلة Payout: النطاق موجود الآن.
+
+    🔒 ما يبقى محفوظًا: القرار المحسوم أن الدفع فوري لكل حجز — فلا
+       كيان تجميع ولا حالة مؤجَّلة في نطاق الدفع.
+    """
     import pathlib
 
-    assert not list(pathlib.Path("apps").glob("*payout*"))
-    assert not list(pathlib.Path("apps").glob("*payouts*"))
+    from apps.payouts.models import PayoutStatus
+
+    assert pathlib.Path("apps/payouts").is_dir()
+    assert set(PayoutStatus.values) == {"PENDING", "SUCCEEDED", "FAILED"}
+
+    for forbidden in ("BATCHED", "SCHEDULED", "QUEUED"):
+        assert forbidden not in PayoutStatus.values
 
 
 def test_api_layer_still_has_no_orm():

@@ -53,6 +53,9 @@ LOCAL_APPS = [
     # Job Execution Domain — Job + JobPhoto (§20، §36.3؛ Infra §7).
     # لا إلغاء (بند مفتوح #12)، ولا تخزين ملفات حقيقي.
     "apps.jobs",
+    # Payout Domain — Payout (§36.5). دفع فوري لكل حجز، صفر عمولة،
+    # لا تجميع ولا دفعات مجمَّعة (قرار محسوم).
+    "apps.payouts",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -191,6 +194,22 @@ JOB_STORAGE_ADAPTER_CLASS = config(
 # PAYMENTS_ALLOW_FAKE_ADAPTER و SMS_DEV_ALLOW_INSECURE.
 JOBS_ALLOW_FAKE_STORAGE_ADAPTER = config(
     "JOBS_ALLOW_FAKE_STORAGE_ADAPTER", default=False, cast=bool
+)
+
+# ------------------------------------------------------------
+# Payout Provider (Payout Domain — §36.5)
+# ------------------------------------------------------------
+# 🟡 مزوّد الدفع للمقاولين قرار مفتوح. لا تنفيذ حقيقي في كود الإنتاج.
+# الافتراضي هنا adapter وهمي لا يحوّل أي مبلغ — للتطوير/الاختبار فقط.
+PAYOUT_PROVIDER_ADAPTER_CLASS = config(
+    "PAYOUT_PROVIDER_ADAPTER_CLASS",
+    default="apps.payouts.adapters.fake_adapter.FakePayoutAdapter",
+)
+
+# صمّام أمان: FakePayoutAdapter يرفض العمل عند DEBUG=False إلا إذا فُعّل
+# هذا الخيار صراحةً — نفس نمط PAYMENTS_ALLOW_FAKE_ADAPTER.
+PAYOUTS_ALLOW_FAKE_ADAPTER = config(
+    "PAYOUTS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
 )
 
 # ------------------------------------------------------------

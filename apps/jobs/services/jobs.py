@@ -14,8 +14,10 @@ Job Service — Jobs Domain (Change Set §20، §36.3)
 ⚠️ لا تأكيد تلقائي بمرور الوقت: §36.3 يحسم أن العميل وحده يؤكّد — لا
    مهلة، ولا مهمة دورية، ولا بديل إداري. أي آلية زمنية هنا تخالف النص.
 
-⚠️ الدفع للمقاول (Payout — §36.5) مؤجَّل صراحةً: confirm_job_completion
-   تنفّذ الانتقال وحده ولا تُطلق أي أثر جانبي.
+📌 الدفع للمقاول (Payout — §36.5): تأكيد العميل هو المُحفِّز الوحيد.
+   يُطلق عبر transaction.on_commit بعد تثبيت الانتقال — نفس نمط hook
+   الشحن (§43) وhook إنشاء المهمة (§45): فشل الدفع لا يجوز أن يُلغي
+   تأكيدًا صحيحًا، ولا يُغيّر حالة المهمة.
 """
 
 import logging
@@ -260,8 +262,8 @@ def confirm_job_completion(job, customer_user):
     ⚠️ لا مهلة ولا تأكيد تلقائي: لا شيء في هذه الدالة (ولا في أي مهمة
        دورية) ينقل الحالة بمرور الوقت.
 
-    ⚠️ لا أثر جانبي: الدفع للمقاول (§36.5) مؤجَّل، ولا إشعارات. هذه
-       الدالة مسؤولة عن الانتقال وحده — وهذا مقصود، لا نقص.
+    📌 يُطلق دفع المقاول (§36.5) بعد تثبيت المعاملة — لا داخلها. الدالة
+       نفسها مسؤولة عن الانتقال وحده، والدفع أثر جانبي معزول.
     """
     if customer_user is None or not customer_user.is_authenticated:
         raise JobPermissionError("Authentication required.")
@@ -290,7 +292,32 @@ def confirm_job_completion(job, customer_user):
     logger.info(
         "Job completion confirmed (job_id=%s, by=%s)", job.id, customer_user.id
     )
+
+    # 📌 دفع المقاول فورًا بعد تثبيت التأكيد (§36.5) — بعد المعاملة لا
+    #    داخلها: فشل المزوّد لا يجوز أن يُلغي تأكيدًا صحيحًا.
+    transaction.on_commit(lambda: _release_payout_after_commit(job.booking))
+
     return job
+
+
+def _release_payout_after_commit(booking):
+    """
+    يُطلق دفع المقاول بعد تثبيت تأكيد العميل (§36.5).
+
+    الاستثناءات تُبتلع وتُسجَّل: المهمة مؤكَّدة فعلًا، وخطأ في نطاق الدفع
+    يجب ألا يتحول إلى 500 على طلب تأكيد ناجح. الدفعة الفاشلة تبقى مسجَّلة
+    بحالة FAILED، والمهمة والحجز كما هما (سياسة مفتوحة — راجع
+    payouts/services).
+    """
+    from apps.payouts.services.payouts import release_payout_for_booking
+
+    try:
+        release_payout_for_booking(booking)
+    except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
+        logger.exception(
+            "Automatic payout failed after job confirmation (booking_id=%s)",
+            booking.id,
+        )
 
 
 def get_job_by_booking_for_customer(customer_user, booking_id):

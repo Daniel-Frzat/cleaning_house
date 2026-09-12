@@ -30,3 +30,12 @@ def _allow_fake_storage_adapter(settings):
     لم يُفعَّل هذا الخيار (Infra §7).
     """
     settings.JOBS_ALLOW_FAKE_STORAGE_ADAPTER = True
+
+
+@pytest.fixture(autouse=True)
+def _allow_fake_payout_adapter(settings):
+    """
+    FakePayoutAdapter يرفض العمل عند DEBUG=False ما لم يُفعَّل هذا الخيار
+    (نفس نمط FakePaymentAdapter — §43).
+    """
+    settings.PAYOUTS_ALLOW_FAKE_ADAPTER = True

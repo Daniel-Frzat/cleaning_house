@@ -14,6 +14,7 @@ Root URL Configuration.
   - /api/bookings/{id}/payment → Payment status (owner CUSTOMER or ADMIN)
   - /api/bookings/{id}/job → Job status + photos (customer/admin/assigned contractor)
   - /api/contractor/jobs/{id}/photos → Before/after photo upload (assigned contractor)
+  - /api/bookings/{id}/payout → Contractor payout status (payee contractor or ADMIN)
 
 ⚠️ /api/admin/ مسار الإدارة عبر الـAPI — لا علاقة له بـ/admin/ (Django Admin).
 ⚠️ السعر يُكشف للعميل فقط بعد قبول مقاول للعرض (§36.1).
@@ -30,6 +31,7 @@ from apps.bookings.api.offers import router as contractor_offers_router
 from apps.jobs.api.jobs import booking_router as jobs_booking_router
 from apps.jobs.api.jobs import contractor_router as jobs_contractor_router
 from apps.payments.api.payments import router as payments_router
+from apps.payouts.api.payouts import router as payouts_router
 from apps.properties.api.properties import router as properties_router
 from apps.contractors.api.admin_contractors import router as admin_contractors_router
 from apps.contractors.api.profile import router as contractor_profile_router
@@ -68,6 +70,8 @@ api.add_router("/bookings", payments_router)
 # تنفيذ المهام — عرض المهمة عبر الحجز، ورفع الصور للمقاول المُسنَد.
 api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)
+# دفع المقاول — قراءة فقط (المقاول المستحِق أو الإدارة). لا مسار إطلاق يدوي.
+api.add_router("/bookings", payouts_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
