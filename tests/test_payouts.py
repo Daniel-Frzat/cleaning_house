@@ -640,15 +640,45 @@ def test_payee_contractor_can_view_payout(client, completed, contractor):
 
 
 @pytest.mark.django_db
-def test_provider_reference_hidden_from_contractor(client, completed, contractor):
+def test_provider_reference_key_absent_for_contractor(client, completed, contractor):
+    """
+    🔒 الحجب هيكلي: المفتاح **غائب** من JSON لغير الإدارة، لا موجودًا
+       بقيمة null. الفحص على المفاتيح نفسها لا على القيمة.
+    """
     booking, _ = completed
     contractor_user, _ = contractor
     payout = psvc.release_payout_for_booking(booking)
-    assert payout.provider_reference
+    assert payout.provider_reference  # موجود فعلًا في قاعدة البيانات
 
     r = client.get(f"/api/bookings/{booking.id}/payout", **auth(contractor_user))
+    body = r.json()
 
-    assert r.json()["provider_reference"] is None
+    assert "provider_reference" not in body.keys()
+    assert payout.provider_reference not in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_admin_keeps_provider_reference_key_even_when_none(
+    client, customer, service_type, contractor, admin_user
+):
+    """
+    🔒 الفرق المقصود: المفتاح يظهر للإدارة حتى بقيمة None (دفعة فاشلة
+       بلا مرجع) — وهذا يغاير غيابه الكامل لغير الإدارة.
+    """
+    _, profile = contractor
+    booking, _ = make_completed_job(
+        customer, service_type, profile, price=FAILURE_SENTINEL_AMOUNT
+    )
+    payout = psvc.release_payout_for_booking(booking)
+    assert payout.status == PayoutStatus.FAILED
+    assert payout.provider_reference is None
+
+    body = client.get(
+        f"/api/bookings/{booking.id}/payout", **auth(admin_user)
+    ).json()
+
+    assert "provider_reference" in body.keys()
+    assert body["provider_reference"] is None
 
 
 @pytest.mark.django_db
@@ -657,9 +687,11 @@ def test_provider_reference_visible_to_admin(client, completed, admin_user):
     payout = psvc.release_payout_for_booking(booking)
 
     r = client.get(f"/api/bookings/{booking.id}/payout", **auth(admin_user))
+    body = r.json()
 
     assert r.status_code == 200, r.content
-    assert r.json()["provider_reference"] == payout.provider_reference
+    assert "provider_reference" in body.keys()
+    assert body["provider_reference"] == payout.provider_reference
 
 
 @pytest.mark.django_db

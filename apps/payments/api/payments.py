@@ -7,8 +7,10 @@ Payments API — Payment Domain (Change Set §36.4)
 🔒 الصلاحية: CUSTOMER مالك الحجز، أو ADMIN. غيرهما 404 — نفس سياسة
    apps/bookings: لا نكشف وجود حجز/دفعة لغير صاحبها.
 
-🔒 provider_reference لا يُكشف للعميل إطلاقًا (تفصيل تشخيصي داخلي):
-   يُحجب بناءً على دور الطالب، لا على وجود القيمة.
+🔒 provider_reference لا يُكشف للعميل إطلاقًا — والحجب **هيكلي**: يُختار
+   شكل المخرجات حسب الدور قبل الإرجاع (PaymentAdminOut للإدارة،
+   PaymentOut العام لغيرها)، فالمفتاح غائب كليًا من JSON لغير الإدارة
+   لا مجرد null. (تصحيح رجعي لعيب §43.)
 
 ⚠️ ConfirmedRole مستورد هنا لغرض العرض (الحجب) لا للتحكم في الوصول:
    قرار الوصول كله في طبقة الخدمة. لا استعلام ORM في هذا الملف.
@@ -17,13 +19,15 @@ Payments API — Payment Domain (Change Set §36.4)
    (apps/bookings/services/offers.py) ولا يُطلقه العميل يدويًا.
 """
 
+from typing import Union
+
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import payments as svc
-from .schemas import ErrorOut, PaymentOut
+from .schemas import ErrorOut, PaymentAdminOut, PaymentOut
 
 router = Router(tags=["Payments"], auth=JWTAuth())
 
@@ -37,28 +41,38 @@ def _not_found():
     return _error(404, "payment_not_found", "No payment found for this booking.")
 
 
-def _serialize(payment, *, include_provider_reference):
+def _serialize(payment, *, as_admin):
     """
-    🔒 provider_reference يُملأ فقط للإدارة. للعميل يبقى None دائمًا.
+    يبني نسخة الشكل المناسب للدور — الاختيار يسبق الإرجاع.
+
+    🔒 غير الإدارة يحصل على PaymentOut الذي لا يُعرِّف provider_reference
+       إطلاقًا، فالمفتاح غائب من JSON لا موجودًا بقيمة null.
     """
-    return {
+    common = {
         "id": payment.id,
         "booking_id": payment.booking_id,
         "amount": payment.amount,
         "method": payment.method,
         "status": payment.status,
-        "provider_reference": (
-            payment.provider_reference if include_provider_reference else None
-        ),
         "failure_reason": payment.failure_reason,
         "created_at": payment.created_at,
         "updated_at": payment.updated_at,
     }
 
+    if as_admin:
+        return PaymentAdminOut(
+            **common, provider_reference=payment.provider_reference
+        )
+
+    return PaymentOut(**common)
+
 
 @router.get(
     "/{booking_id}/payment",
-    response={200: PaymentOut, 404: ErrorOut},
+    # ⚠️ الشكل العام **أولًا** في الاتحاد: Pydantic يجرّب الأعضاء بالترتيب،
+    #    فلو سبق PaymentAdminOut لَوسّع نسخة الشكل العام وأعاد إضافة
+    #    provider_reference بقيمة null — وهو بالضبط العيب المُصلَح هنا.
+    response={200: Union[PaymentOut, PaymentAdminOut], 404: ErrorOut},
     summary="Retrieve the payment for a booking (owner customer or admin)",
 )
 def retrieve_payment(request, booking_id: str):
@@ -71,4 +85,4 @@ def retrieve_payment(request, booking_id: str):
         return _not_found()
 
     is_admin = request.user.role == ConfirmedRole.ADMIN
-    return 200, _serialize(payment, include_provider_reference=is_admin)
+    return 200, _serialize(payment, as_admin=is_admin)

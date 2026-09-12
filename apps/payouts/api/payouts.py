@@ -10,7 +10,9 @@ Payouts API — Payout Domain (Change Set §36.5)
 🔒 العميل لا يرى دفعة المقاول إطلاقًا: ما يدفعه العميل شأنه (Payment)،
    وما يستلمه المقاول شأن المقاول والإدارة.
 
-🔒 provider_reference للإدارة وحدها (تفصيل تشخيصي داخلي).
+🔒 provider_reference للإدارة وحدها — والحجب **هيكلي**: يُختار شكل
+   المخرجات حسب الدور قبل الإرجاع (PayoutAdminOut للإدارة، PayoutOut
+   العام لغيرها)، فالمفتاح غائب كليًا من JSON لغير الإدارة لا مجرد null.
 
 ⚠️ لا نقطة نهاية لإطلاق الدفع: الدفع يقع تلقائيًا لحظة تأكيد العميل
    (apps/jobs/services/jobs.py) ولا يُطلقه المقاول ولا الإدارة يدويًا.
@@ -18,13 +20,15 @@ Payouts API — Payout Domain (Change Set §36.5)
 ⚠️ لا استعلام ORM في هذا الملف: كل شيء عبر طبقة الخدمة (راجع §43).
 """
 
+from typing import Union
+
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import payouts as svc
-from .schemas import ErrorOut, PayoutOut
+from .schemas import ErrorOut, PayoutAdminOut, PayoutOut
 
 router = Router(tags=["Payouts"], auth=JWTAuth())
 
@@ -38,28 +42,38 @@ def _not_found():
     return _error(404, "payout_not_found", "No payout found for this booking.")
 
 
-def _serialize(payout, *, include_provider_reference):
+def _serialize(payout, *, as_admin):
     """
-    🔒 provider_reference يُملأ فقط للإدارة. للمقاول يبقى None دائمًا.
+    يبني نسخة الشكل المناسب للدور — الاختيار يسبق الإرجاع.
+
+    🔒 غير الإدارة يحصل على PayoutOut الذي لا يُعرِّف provider_reference
+       إطلاقًا، فالمفتاح غائب من JSON لا موجودًا بقيمة null.
     """
-    return {
+    common = {
         "id": payout.id,
         "booking_id": payout.booking_id,
         "contractor_id": payout.contractor_id,
         "amount": payout.amount,
         "status": payout.status,
-        "provider_reference": (
-            payout.provider_reference if include_provider_reference else None
-        ),
         "failure_reason": payout.failure_reason,
         "created_at": payout.created_at,
         "updated_at": payout.updated_at,
     }
 
+    if as_admin:
+        return PayoutAdminOut(
+            **common, provider_reference=payout.provider_reference
+        )
+
+    return PayoutOut(**common)
+
 
 @router.get(
     "/{booking_id}/payout",
-    response={200: PayoutOut, 404: ErrorOut},
+    # ⚠️ الشكل العام **أولًا** في الاتحاد: Pydantic يجرّب الأعضاء بالترتيب،
+    #    فلو سبق PayoutAdminOut لَوسّع نسخة الشكل العام وأعاد إضافة
+    #    provider_reference بقيمة null — وهو بالضبط العيب المُصلَح هنا.
+    response={200: Union[PayoutOut, PayoutAdminOut], 404: ErrorOut},
     summary="Retrieve the contractor payout for a booking (payee contractor or admin)",
 )
 def retrieve_payout(request, booking_id: str):
@@ -72,4 +86,4 @@ def retrieve_payout(request, booking_id: str):
         return _not_found()
 
     is_admin = request.user.role == ConfirmedRole.ADMIN
-    return 200, _serialize(payout, include_provider_reference=is_admin)
+    return 200, _serialize(payout, as_admin=is_admin)
