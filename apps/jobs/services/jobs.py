@@ -295,7 +295,10 @@ def confirm_job_completion(job, customer_user):
 
     # 📌 دفع المقاول فورًا بعد تثبيت التأكيد (§36.5) — بعد المعاملة لا
     #    داخلها: فشل المزوّد لا يجوز أن يُلغي تأكيدًا صحيحًا.
-    transaction.on_commit(lambda: _release_payout_after_commit(job.booking))
+    # robust=True: طبقة حماية من الإطار فوق try/except الداخلي (Django 5.0+).
+    transaction.on_commit(
+        lambda: _release_payout_after_commit(job.booking), robust=True
+    )
 
     return job
 

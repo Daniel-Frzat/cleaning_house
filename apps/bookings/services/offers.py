@@ -159,8 +159,11 @@ def accept_offer(user, offer_id):
     #    داخلها: فشل أيّهما لا يجوز أن يُلغي تأكيدًا صحيحًا.
     #      1) الشحن المباشر (§36.4)
     #      2) إنشاء مهمة التنفيذ بحالة IN_PROGRESS (§20، §36.3)
-    transaction.on_commit(lambda: _charge_after_commit(booking))
-    transaction.on_commit(lambda: _start_job_after_commit(booking))
+    # robust=True: طبقة حماية من الإطار فوق try/except الداخلي في كل hook.
+    #   العزل الحالي يعتمد على انضباط كل دالة؛ هذا يضمنه من الإطار أيضًا،
+    #   فلو رُفع استثناء من خارج try/except بالخطأ لا يُسقط الـhook التالي.
+    transaction.on_commit(lambda: _charge_after_commit(booking), robust=True)
+    transaction.on_commit(lambda: _start_job_after_commit(booking), robust=True)
 
     return offer
 

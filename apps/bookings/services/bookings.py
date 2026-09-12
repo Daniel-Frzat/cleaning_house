@@ -225,7 +225,9 @@ def create_booking(user, property_id, service_selections):
     # ⚠️ الإسناد التلقائي بعد نجاح المعاملة لا داخلها (§36.1):
     #    فشل الإسناد لا يجوز أن يُلغي حجزًا صالحًا. و"لا مقاول متاح"
     #    ليس فشلًا أصلًا — يبقى الحجز PENDING بلا عرض (القرار المفتوح #16).
-    transaction.on_commit(lambda: _dispatch_after_commit(booking))
+    # robust=True: طبقة حماية من الإطار فوق try/except الداخلي — استثناء
+    #   غير متوقع من خارجه لا يُسقط بقية hooks نفس المعاملة (Django 5.0+).
+    transaction.on_commit(lambda: _dispatch_after_commit(booking), robust=True)
 
     return booking
 
