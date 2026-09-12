@@ -21,3 +21,12 @@ def _allow_fake_payment_adapter(settings):
     (نفس نمط DevConsoleSMSAdapter — Change Set §31).
     """
     settings.PAYMENTS_ALLOW_FAKE_ADAPTER = True
+
+
+@pytest.fixture(autouse=True)
+def _allow_fake_storage_adapter(settings):
+    """
+    FakeStorageAdapter يهمل محتوى الملفات، فيرفض العمل عند DEBUG=False ما
+    لم يُفعَّل هذا الخيار (Infra §7).
+    """
+    settings.JOBS_ALLOW_FAKE_STORAGE_ADAPTER = True

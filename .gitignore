@@ -31,7 +31,7 @@ media/
 *.log
 
 # --- Logs ---
-logs/*.log
+logs/
 !logs/.gitkeep
 
 # --- Testing / Coverage ---

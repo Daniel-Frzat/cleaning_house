@@ -50,6 +50,9 @@ LOCAL_APPS = [
     # Payment Domain — شحن مباشر لحظة تأكيد الحجز (§36.4، §8؛ Infra §2).
     # لا escrow ولا authorize/capture — المزوّد الفعلي قرار مفتوح.
     "apps.payments",
+    # Job Execution Domain — Job + JobPhoto (§20، §36.3؛ Infra §7).
+    # لا إلغاء (بند مفتوح #12)، ولا تخزين ملفات حقيقي.
+    "apps.jobs",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -171,6 +174,23 @@ PAYMENT_PROVIDER_ADAPTER_CLASS = config(
 # SMS_DEV_ALLOW_INSECURE و SOCIAL_AUTH_ALLOW_FAKE.
 PAYMENTS_ALLOW_FAKE_ADAPTER = config(
     "PAYMENTS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
+)
+
+# ------------------------------------------------------------
+# Storage Provider (Jobs Domain — Infra §7)
+# ------------------------------------------------------------
+# 🟢 مزوّد التخزين (S3 أو مشابه) قرار مفتوح. لا تنفيذ حقيقي في كود الإنتاج.
+# الافتراضي هنا adapter وهمي لا يخزّن شيئًا — للتطوير/الاختبار فقط.
+JOB_STORAGE_ADAPTER_CLASS = config(
+    "JOB_STORAGE_ADAPTER_CLASS",
+    default="apps.jobs.adapters.fake_adapter.FakeStorageAdapter",
+)
+
+# صمّام أمان: FakeStorageAdapter يهمل محتوى الملفات، فيرفض العمل عند
+# DEBUG=False إلا إذا فُعّل هذا الخيار صراحةً — نفس نمط
+# PAYMENTS_ALLOW_FAKE_ADAPTER و SMS_DEV_ALLOW_INSECURE.
+JOBS_ALLOW_FAKE_STORAGE_ADAPTER = config(
+    "JOBS_ALLOW_FAKE_STORAGE_ADAPTER", default=False, cast=bool
 )
 
 # ------------------------------------------------------------

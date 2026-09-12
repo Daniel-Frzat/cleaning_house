@@ -155,10 +155,12 @@ def accept_offer(user, offer_id):
         distance_km,
     )
 
-    # 📌 الشحن المباشر لحظة التأكيد (§36.4) — بعد تثبيت المعاملة لا داخلها:
-    #    فشل المزوّد لا يجوز أن يُلغي تأكيدًا صحيحًا. والدفعة الفاشلة لا
-    #    تُغيّر حالة الحجز (سياسة مفتوحة — راجع payments/services).
+    # 📌 لحظة التأكيد تُطلق أثرين جانبيين، كلاهما بعد تثبيت المعاملة لا
+    #    داخلها: فشل أيّهما لا يجوز أن يُلغي تأكيدًا صحيحًا.
+    #      1) الشحن المباشر (§36.4)
+    #      2) إنشاء مهمة التنفيذ بحالة IN_PROGRESS (§20، §36.3)
     transaction.on_commit(lambda: _charge_after_commit(booking))
+    transaction.on_commit(lambda: _start_job_after_commit(booking))
 
     return offer
 
@@ -178,6 +180,24 @@ def _charge_after_commit(booking):
     except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
         logger.exception(
             "Automatic charge failed after booking confirmation (booking_id=%s)",
+            booking.id,
+        )
+
+
+def _start_job_after_commit(booking):
+    """
+    يُنشئ مهمة التنفيذ بعد تثبيت تأكيد الحجز (§20، §36.3).
+
+    الاستثناءات تُبتلع وتُسجَّل: الحجز مؤكَّد فعلًا، وخطأ في نطاق المهام
+    يجب ألا يتحول إلى 500 على طلب قبول ناجح.
+    """
+    from apps.jobs.services.jobs import create_job_for_booking
+
+    try:
+        create_job_for_booking(booking)
+    except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
+        logger.exception(
+            "Automatic job creation failed after booking confirmation (booking_id=%s)",
             booking.id,
         )
 
