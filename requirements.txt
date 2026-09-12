@@ -20,6 +20,12 @@ django-ninja==1.1.0
 #   (ب) استخدام Python 3.12/3.13 بدلاً من 3.14
 psycopg[binary]==3.3.5
 
+# --- WSGI Server (Production) ---
+# gunicorn هو الخادم الفعلي بالإنتاج — runserver ممنوع خارج التطوير.
+# لا whitenoise ولا uvicorn: الواجهة API بحتة عبر django-ninja على WSGI
+# قياسي. الملفات الساكنة (للوحة Admin) مسألة منفصلة تُحسم إن احتُجنا إليها.
+gunicorn==26.2.0
+
 # --- Environment Config ---
 python-decouple==3.8
 
