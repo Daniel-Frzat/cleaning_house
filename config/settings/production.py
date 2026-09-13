@@ -42,3 +42,47 @@ CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+
+# ============================================================
+# ⚠️⚠️ مؤقت للتشخيص — يُزال فور انتهاء الغرض ⚠️⚠️
+# ============================================================
+# يسجّل ترويسات أول 5 طلبات لـ/api/health لمعرفة ما يصل فعلًا من بروكسي
+# Railway (خصوصًا HTTP_X_FORWARDED_PROTO و wsgi.url_scheme).
+#
+# ⚠️ موضعه أول القائمة إلزامي: SecurityMiddleware هو من يُنفّذ إعادة
+#    التوجيه، فلو جاء قبله لانتهى الطلب بـ301 ولم يُسجَّل شيء إطلاقًا.
+#
+# ⚠️ في production.py وحده — dev.py و staging.py لم تُمسّا.
+#
+# 🔒 لا يسجّل أي ترويسة Authorization: تُحجب صراحةً أدناه حتى لا يتسرّب
+#    توكن JWT إلى سجلات النشر.
+
+
+class _TempDebugHeadersMiddleware:
+    """مؤقت: يطبع ترويسات الطلب مرة واحدة لكل من أول 5 طلبات صحة."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.count = 0
+
+    def __call__(self, request):
+        if request.path == "/api/health" and self.count < 5:
+            self.count += 1
+            import logging
+
+            logger = logging.getLogger("django")
+            headers = {
+                k: v
+                for k, v in request.META.items()
+                if (k.startswith("HTTP_") or k in ("wsgi.url_scheme", "SERVER_PROTOCOL"))
+                # 🔒 لا نُسرّب بيانات اعتماد في السجل
+                and k not in ("HTTP_AUTHORIZATION", "HTTP_COOKIE")
+            }
+            logger.warning(f"TEMP_DEBUG_HEADERS: {headers}")
+        return self.get_response(request)
+
+
+MIDDLEWARE = [
+    "config.settings.production._TempDebugHeadersMiddleware",
+    *MIDDLEWARE,  # noqa: F405 — موروثة من base
+]
