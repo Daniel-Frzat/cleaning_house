@@ -29,6 +29,16 @@ gunicorn==26.2.0
 # --- Environment Config ---
 python-decouple==3.8
 
+# --- Timezone Database ---
+# مطلوبة صراحةً لموعد الزيارة (apps/bookings/services/timezone.py):
+# zoneinfo القياسية تقرأ قاعدة IANA من النظام، وويندوز لا يحملها أصلًا،
+# وصور لينكس المصغّرة (slim/alpine) كثيرًا ما تُسقطها. بدونها يرفع
+# ZoneInfo("Australia/Sydney") استثناء ZoneInfoNotFoundError فينكسر
+# إنشاء الحجز.
+# ⚠️ كانت تصل ضمنيًا عبر Django/celery/psycopg — الاعتماد على تبعية
+#    عابرة لحزمة وقت-تشغيل إلزامية هشّ، فثُبِّتت هنا صراحةً.
+tzdata==2026.3
+
 # --- Auth (JWT) ---
 django-ninja-jwt==5.3.1
 

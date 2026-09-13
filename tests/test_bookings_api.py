@@ -6,9 +6,11 @@ Booking API Integration Tests — Booking Domain (Change Set §36.1، §20)
 ضبط اللقطة.
 """
 
+import datetime
 import json
 import uuid
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.test import Client
@@ -111,12 +113,26 @@ def retired(db):
     return make_service("Retired Cleaning", is_active=False)
 
 
-def booking_payload(prop, selections):
+def next_business_slot(days=3, hour=10, minute=0):
+    """
+    موعد صالح افتراضيًا: بعد أيام، الساعة 10 صباحًا بتوقيت سيدني.
+
+    يُحسب بتوقيت العقار (NSW في هذه الاختبارات) لا بتوقيت الخادم، وإلا
+    لاختلفت النتيجة بين بيئة وأخرى.
+    """
+    local = datetime.datetime.now(ZoneInfo("Australia/Sydney")) + datetime.timedelta(
+        days=days
+    )
+    return local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def booking_payload(prop, selections, scheduled_at=None):
     return {
         "property_id": str(prop.id),
         "service_selections": [
             {"service_type_id": str(s.id), "room_count": n} for s, n in selections
         ],
+        "scheduled_at": (scheduled_at or next_business_slot()).isoformat(),
     }
 
 
@@ -198,7 +214,11 @@ def test_zero_selections_is_rejected(client, customer_a, property_a):
     r = post(
         client,
         "/api/bookings",
-        {"property_id": str(property_a.id), "service_selections": []},
+        {
+            "property_id": str(property_a.id),
+            "service_selections": [],
+            "scheduled_at": next_business_slot().isoformat(),
+        },
         **auth(customer_a),
     )
 
@@ -286,6 +306,7 @@ def test_unknown_service_id_is_rejected(client, customer_a, property_a):
             "service_selections": [
                 {"service_type_id": str(uuid.uuid4()), "room_count": 1}
             ],
+            "scheduled_at": next_business_slot().isoformat(),
         },
         **auth(customer_a),
     )
@@ -322,6 +343,7 @@ def test_cannot_create_booking_on_nonexistent_property(client, customer_a, gener
         {
             "property_id": str(uuid.uuid4()),
             "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
+            "scheduled_at": next_business_slot().isoformat(),
         },
         **auth(customer_a),
     )

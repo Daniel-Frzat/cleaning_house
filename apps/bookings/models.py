@@ -71,6 +71,31 @@ class Booking(models.Model):
         default=BookingStatus.PENDING,
     )
 
+    # ------------------------------------------------------------
+    # موعد الزيارة
+    # ------------------------------------------------------------
+    # 📌 نقطة زمنية واحدة بالـUTC — لا نطاق ولا مدة ولا معرّف فترة.
+    #    المدة وسياسة التكرار بندان مفتوحان (🟡 #17) ولا يُفترضان هنا.
+    #
+    # ⚠️ nullable على مستوى قاعدة البيانات لتوافق الصفوف السابقة وحدها.
+    #    الإنشاء الجديد عبر الـAPI يفرضه إلزاميًا في الـschema.
+    scheduled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Visit date and time, stored in UTC.",
+    )
+
+    # 🔒 للعرض فقط: اسم IANA مشتق من ولاية عنوان العقار وقت الإنشاء
+    #    (services/timezone.py). لا يدخل أي حساب لاحق — التحويل للعرض
+    #    يتم منه، والتسعير والإسناد لا يقرآنه إطلاقًا.
+    customer_timezone = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="IANA timezone derived from the property address; display only.",
+    )
+
     # 📌 لقطة السعر المجمَّدة (§36.2). null حتى يقبل مقاولٌ العرض.
     # ⚠️ لا يُعاد حسابه بعد ضبطه — تغيّر أسعار الكتالوج لاحقًا لا يمسّه.
     computed_price = models.DecimalField(

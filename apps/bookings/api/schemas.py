@@ -38,11 +38,17 @@ class BookingIn(Schema):
     ⚠️ status غير موجود عمدًا: كل حجز جديد يبدأ PENDING.
     ⚠️ computed_price و assigned_contractor غير موجودين — لا يُقبلان من
        العميل ولا يُضبطان في هذه المرحلة.
+
+    📌 scheduled_at إلزامي هنا (ISO 8601). بلا إزاحة توقيت يُفسَّر بتوقيت
+       المنطقة المحسوبة من عنوان العقار؛ وبإزاحة صريحة يُحترم كما وصل.
+       الطرفان يُخزَّنان UTC.
+    ⚠️ customer_timezone غير موجود: يُشتق من العنوان ولا يُقبل من العميل.
     """
 
     property_id: uuid.UUID
     # القائمة الفارغة تُرفض في طبقة الخدمة برسالة مفهومة (400)
     service_selections: list[ServiceSelectionIn]
+    scheduled_at: datetime
 
 
 class ServiceSelectionOut(Schema):
@@ -76,6 +82,14 @@ class BookingOut(Schema):
     # None قبل التأكيد، واللقطة بعده
     computed_price: Optional[Decimal] = None
     assigned_contractor_id: Optional[uuid.UUID] = None
+    # 📌 موعد الزيارة بالـUTC كما هو مخزَّن.
+    #    Optional لأن الصفوف السابقة للحقل بلا موعد — لا لأن الإنشاء
+    #    الجديد يسمح بتركه (الـschema يفرضه إلزاميًا).
+    scheduled_at: Optional[datetime] = None
+    # نفس اللحظة محوَّلة لتوقيت العميل — الواجهة لا تحوّل بنفسها
+    scheduled_at_local: Optional[datetime] = None
+    # اسم IANA المستخدم في التحويل أعلاه (للعرض)
+    customer_timezone: str = ""
     service_selections: list[ServiceSelectionOut]
     created_at: datetime
     updated_at: datetime

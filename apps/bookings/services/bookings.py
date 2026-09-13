@@ -24,6 +24,8 @@ from apps.properties.services import properties as properties_svc
 from apps.services.models import ServiceType
 
 from ..models import Booking, BookingServiceSelection, BookingStatus
+from .scheduling import normalize_scheduled_at
+from .timezone import get_timezone_for_state
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +181,7 @@ def _resolve_selections(service_selections):
 # العمليات
 # ------------------------------------------------------------
 @transaction.atomic
-def create_booking(user, property_id, service_selections):
+def create_booking(user, property_id, service_selections, scheduled_at=None):
     """
     ينشئ حجزًا بحالة PENDING مع أسطر خدماته.
 
@@ -188,6 +190,15 @@ def create_booking(user, property_id, service_selections):
 
     الملكية تُفحص عبر properties_svc.get_property الذي يستدعي assert_owns —
     لا نكرّر منطق الملكية هنا.
+
+    📌 موعد الزيارة: المنطقة الزمنية تُشتق من ولاية عنوان العقار وتُخزَّن
+       للعرض، والموعد يُطبَّع إلى UTC ويُتحقق منه (ساعات العمل + المستقبل).
+
+    ⚠️ scheduled_at اختياري في التوقيع لا في المنتَج: طبقة الـAPI تفرضه
+       إلزاميًا في الـschema. بقاؤه اختياريًا هنا يُبقي المسارات الداخلية
+       (الاختبارات، الأوامر الإدارية) قادرة على إنشاء حجز بلا موعد، تمامًا
+       كالصفوف السابقة للحقل — ولا يفتح ثغرة في المسار العام.
+    ⚠️ لا فحص لتوفّر أي مقاول هنا: الإسناد يقع بعد الحجز لا قبله (§36.1).
     """
     assert_is_customer(user)
 
@@ -197,10 +208,22 @@ def create_booking(user, property_id, service_selections):
     # كل التحقق قبل أي كتابة
     resolved = _resolve_selections(service_selections)
 
+    address = getattr(prop, "address", None)
+    customer_timezone = get_timezone_for_state(getattr(address, "state", ""))
+
+    # يرفع SchedulingError عند موعد ماضٍ أو خارج الدوام
+    scheduled_utc = (
+        normalize_scheduled_at(scheduled_at, customer_timezone)
+        if scheduled_at is not None
+        else None
+    )
+
     booking = Booking(
         customer=user,
         property=prop,
         status=BookingStatus.PENDING,
+        scheduled_at=scheduled_utc,
+        customer_timezone=customer_timezone,
     )
     booking.full_clean()
     booking.save()

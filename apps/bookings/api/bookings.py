@@ -31,6 +31,7 @@ from apps.properties.services import properties as properties_svc
 
 from ..models import BookingStatus
 from ..services import bookings as svc
+from ..services import scheduling as scheduling_svc
 from .schemas import BookingIn, BookingOut, ErrorOut
 
 router = Router(tags=["Bookings"], auth=JWTAuth())
@@ -78,6 +79,13 @@ def _serialize(booking):
         "assigned_contractor_id": (
             booking.assigned_contractor_id if price_revealed else None
         ),
+        # 📌 الموعد يُعاد باللحظتين: UTC كما هو مخزَّن، والمحلية للعرض.
+        #    التحويل هنا لا في الواجهة (C01/C16).
+        "scheduled_at": booking.scheduled_at,
+        "scheduled_at_local": scheduling_svc.to_local(
+            booking.scheduled_at, booking.customer_timezone
+        ),
+        "customer_timezone": booking.customer_timezone,
         "service_selections": [
             {
                 "id": sel.id,
@@ -102,8 +110,15 @@ def _serialize(booking):
     description=(
         "**Who may call:** `CUSTOMER` only, and only against a property they "
         "own.\n\n"
-        "**Preconditions:** at least one service selection, and every selected "
-        "service must be active in the catalog.\n\n"
+        "**Preconditions:** at least one service selection, every selected "
+        "service must be active in the catalog, and `scheduled_at` must be in "
+        "the future and within business hours (07:00-19:00) in the property's "
+        "local timezone.\n\n"
+        "`scheduled_at` is required (ISO 8601). Sent without an offset it is "
+        "read in the timezone derived from the property's state; sent with an "
+        "explicit offset it is honoured as given. Either way it is stored in "
+        "UTC and returned as both `scheduled_at` (UTC) and "
+        "`scheduled_at_local`, so the client never has to convert.\n\n"
         "The booking is created as `PENDING` **with no price and no assigned "
         "contractor** — `computed_price` and `assigned_contractor_id` are `null` "
         "in the response, and the price is not calculated at this point.\n\n"
@@ -118,7 +133,8 @@ def _serialize(booking):
             400: {
                 "description": (
                     "No services were selected, a selected service is unknown or "
-                    "inactive, or a `room_count` is invalid."
+                    "inactive, a `room_count` is invalid, or `scheduled_at` is in "
+                    "the past or outside business hours (07:00-19:00 local time)."
                 )
             },
             403: {
@@ -142,7 +158,11 @@ def create_booking(request, payload: BookingIn):
             request.user,
             property_id=payload.property_id,
             service_selections=selections,
+            scheduled_at=payload.scheduled_at,
         )
+    except scheduling_svc.SchedulingError as exc:
+        # 400: موعد ماضٍ أو خارج ساعات العمل — نفس رتبة بقية قواعد العمل
+        return _error(400, exc.code, str(exc))
     except svc.InvalidCustomerRoleError as exc:
         return _error(403, exc.code, str(exc))
     except svc.BookingPermissionError as exc:
@@ -176,6 +196,9 @@ def create_booking(request, payload: BookingIn):
     description=(
         "**Who may call:** `CUSTOMER` only — the list is always scoped to the "
         "caller's own bookings, newest first.\n\n"
+        "Each booking carries its visit time as both `scheduled_at` (UTC) and "
+        "`scheduled_at_local`, alongside the `customer_timezone` used for the "
+        "conversion.\n\n"
         "`computed_price` and `assigned_contractor_id` are populated only for "
         "bookings that have reached `CONFIRMED`; on every other booking they are "
         "`null`.\n\n"
@@ -203,6 +226,9 @@ def list_bookings(request):
     summary="Retrieve one own booking",
     description=(
         "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n"
+        "The visit time is returned as both `scheduled_at` (UTC) and "
+        "`scheduled_at_local`, alongside the `customer_timezone` used for the "
+        "conversion.\n\n"
         "**Price visibility:** `computed_price` and `assigned_contractor_id` are "
         "returned only once the booking is `CONFIRMED` — that is, after a "
         "contractor has accepted the offer. While the booking is `PENDING` both "
