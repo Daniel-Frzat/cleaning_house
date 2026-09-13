@@ -106,6 +106,20 @@ def _serialize(prop):
     "",
     response={201: PropertyOut, 403: ErrorOut, 422: ErrorOut},
     summary="Create a property with its address",
+    description=(
+        "**Who may call:** `CUSTOMER` only.\n\n"
+        "Creates a property together with its address in a single transaction — "
+        "there is no separate address endpoint, and a property is never stored "
+        "without one.\n\n"
+        "The new property is owned by the caller and starts active.\n\n"
+        "**Side effects:** none beyond persisting the property and its address."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CUSTOMER`."},
+            422: {"description": "The property or address failed validation."},
+        }
+    },
 )
 def create_property(request, payload: PropertyIn):
     denied = _require_customer(request)
@@ -136,6 +150,14 @@ def create_property(request, payload: PropertyIn):
     "",
     response={200: list[PropertyOut], 403: ErrorOut},
     summary="List own properties",
+    description=(
+        "**Who may call:** `CUSTOMER` only — the list is always scoped to the "
+        "caller's own properties.\n\n"
+        "Returns **active properties only**. Deactivated ones are excluded here "
+        "but still exist and can still be referenced by past bookings.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not a `CUSTOMER`."}}},
 )
 def list_properties(request):
     """
@@ -159,6 +181,19 @@ def list_properties(request):
     "/{property_id}",
     response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut},
     summary="Retrieve one own property",
+    description=(
+        "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "A property that belongs to another customer returns the same `404` as one "
+        "that does not exist, so the response cannot be used to discover other "
+        "customers' properties."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CUSTOMER`."},
+            404: {"description": "No such property, or it belongs to another customer."},
+        }
+    },
 )
 def retrieve_property(request, property_id: str):
     denied = _require_customer(request)
@@ -181,6 +216,22 @@ def retrieve_property(request, property_id: str):
     "/{property_id}",
     response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Update own property and/or its address",
+    description=(
+        "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n"
+        "Partial update: only the fields present in the body are changed, and the "
+        "nested `address` object follows the same rule. The property and its "
+        "address are updated in one transaction.\n\n"
+        "**Side effects:** editing the address changes where future bookings for "
+        "this property are dispatched from. Bookings already made are not "
+        "recalculated."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CUSTOMER`."},
+            404: {"description": "No such property, or it belongs to another customer."},
+            422: {"description": "The submitted property or address fields failed validation."},
+        }
+    },
 )
 def update_property(request, property_id: str, payload: PropertyPatch):
     denied = _require_customer(request)
@@ -224,6 +275,20 @@ def update_property(request, property_id: str, payload: PropertyPatch):
     "/{property_id}",
     response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut},
     summary="Deactivate own property (soft delete)",
+    description=(
+        "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n"
+        "**Soft delete:** the row is kept and `is_active` is set to `false`. "
+        "Nothing is erased, because past bookings still reference this property. "
+        "The deactivated property is returned in the response.\n\n"
+        "**Side effects:** the property disappears from `GET /api/properties` and "
+        "can no longer be used for new bookings."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CUSTOMER`."},
+            404: {"description": "No such property, or it belongs to another customer."},
+        }
+    },
 )
 def delete_property(request, property_id: str):
     """

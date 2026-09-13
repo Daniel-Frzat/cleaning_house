@@ -79,6 +79,30 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key):
     "/jobs/{job_id}/photos",
     response={201: JobPhotoOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
     summary="Upload a before/after photo (assigned contractor only)",
+    description=(
+        "**Who may call:** the `CONTRACTOR` assigned to this job, and no one "
+        "else.\n\n"
+        "**Preconditions:** the job must still be in progress — photos are "
+        "refused with `409` once it has been marked done. `photo_type` must be "
+        "`BEFORE` or `AFTER`, and the file must not be empty.\n\n"
+        "Multipart upload. The bytes are handed to the configured storage "
+        "provider and are not written by this endpoint.\n\n"
+        "**Side effects:** the photo counts towards the proof required by "
+        "`mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\n"
+        "The response carries a `signed_url` for viewing the photo. The raw "
+        "`storage_key` is returned to administrators only and is `null` for "
+        "everyone else.\n\n"
+        "**Note:** no storage provider ships with this build, so uploads fail "
+        "until one is configured."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "`photo_type` is not `BEFORE`/`AFTER`, or the uploaded file is empty."},
+            403: {"description": "The caller is not the contractor assigned to this job."},
+            404: {"description": "No job with this id."},
+            409: {"description": "The job is no longer accepting photos."},
+        }
+    },
 )
 def upload_photo(
     request,
@@ -124,6 +148,28 @@ def upload_photo(
     "/{booking_id}/job",
     response={200: JobOut, 404: ErrorOut},
     summary="Retrieve the job for a booking (owner customer, admin, or assigned contractor)",
+    description=(
+        "**Who may call:** the booking's own customer, the contractor assigned to "
+        "it, or an `ADMIN`.\n\n"
+        "**Preconditions:** a job exists only after a contractor has accepted the "
+        "offer and the booking has been confirmed.\n\n"
+        "Returns the job's status, its timestamps, and its photos with viewing "
+        "URLs. The raw `storage_key` of each photo is returned to administrators "
+        "only and is `null` for everyone else.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "Every failure returns the same `404`: no such booking, no job yet, and "
+        "not being entitled to see it are indistinguishable in the response."
+    ),
+    openapi_extra={
+        "responses": {
+            404: {
+                "description": (
+                    "No such booking, no job for it yet, or the caller is not "
+                    "entitled to see it — deliberately indistinguishable."
+                )
+            }
+        }
+    },
 )
 def retrieve_job(request, booking_id: str):
     """
@@ -149,6 +195,26 @@ def retrieve_job(request, booking_id: str):
     "/jobs/{job_id}/mark-done",
     response={200: JobOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
     summary="Mark a job done (assigned contractor only)",
+    description=(
+        "**Who may call:** the `CONTRACTOR` assigned to this job, and no one "
+        "else.\n\n"
+        "**Preconditions:** the job must be in progress, and **at least one "
+        "`BEFORE` photo and one `AFTER` photo must already be uploaded** — "
+        "without both, the request is refused with `400`.\n\n"
+        "**Side effects:** the job moves to `AWAITING_CUSTOMER_CONFIRMATION` and "
+        "stops accepting photos. It does **not** complete the job and does not "
+        "release the payout: only the customer can complete it, via "
+        "`POST /api/bookings/{booking_id}/job/confirm`. Nothing completes the job "
+        "automatically if the customer never confirms."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "The required `BEFORE` and `AFTER` photos are not both present."},
+            403: {"description": "The caller is not the contractor assigned to this job."},
+            404: {"description": "No job with this id."},
+            409: {"description": "The job is not in a state that can be marked done."},
+        }
+    },
 )
 def mark_done(request, job_id: str):
     """
@@ -183,6 +249,27 @@ def mark_done(request, job_id: str):
     "/{booking_id}/job/confirm",
     response={200: JobOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
     summary="Confirm job completion (the booking's own customer only)",
+    description=(
+        "**Who may call:** the booking's **own customer**, exclusively. Not an "
+        "administrator, not another customer, and not the contractor — there is "
+        "no administrative override, and no timeout that confirms on the "
+        "customer's behalf.\n\n"
+        "**Preconditions:** the contractor must have marked the job done, so the "
+        "job is `AWAITING_CUSTOMER_CONFIRMATION`.\n\n"
+        "**Side effects:** the job becomes `COMPLETED`, and the contractor's "
+        "payout for this booking is released immediately afterwards. The payout "
+        "runs after the confirmation is committed and is isolated from it: if the "
+        "payout provider fails, the job stays validly completed and the payout is "
+        "recorded as failed rather than returned as an error here.\n\n"
+        "Photo `storage_key`s are never included in this response."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not the booking's own customer."},
+            404: {"description": "No such booking, or no job for it."},
+            409: {"description": "The job has not been marked done yet, or is already completed."},
+        }
+    },
 )
 def confirm_job(request, booking_id: str):
     """

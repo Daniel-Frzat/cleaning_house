@@ -99,6 +99,35 @@ def _serialize(booking):
     "",
     response={201: BookingOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Create a booking with its service selections (customer only)",
+    description=(
+        "**Who may call:** `CUSTOMER` only, and only against a property they "
+        "own.\n\n"
+        "**Preconditions:** at least one service selection, and every selected "
+        "service must be active in the catalog.\n\n"
+        "The booking is created as `PENDING` **with no price and no assigned "
+        "contractor** — `computed_price` and `assigned_contractor_id` are `null` "
+        "in the response, and the price is not calculated at this point.\n\n"
+        "**Side effects:** once the booking is committed, auto-dispatch runs and "
+        "offers it to the nearest available contractor. Dispatch happens outside "
+        "the creating transaction, so a dispatch failure never undoes a valid "
+        "booking; finding no eligible contractor is not an error either — the "
+        "booking simply stays `PENDING` with no active offer."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {
+                "description": (
+                    "No services were selected, a selected service is unknown or "
+                    "inactive, or a `room_count` is invalid."
+                )
+            },
+            403: {
+                "description": "The caller is not a `CUSTOMER`, or the property belongs to someone else."
+            },
+            404: {"description": "No property with this id."},
+            422: {"description": "The booking failed validation."},
+        }
+    },
 )
 def create_booking(request, payload: BookingIn):
     """
@@ -144,6 +173,15 @@ def create_booking(request, payload: BookingIn):
     "",
     response={200: list[BookingOut], 403: ErrorOut},
     summary="List own bookings",
+    description=(
+        "**Who may call:** `CUSTOMER` only — the list is always scoped to the "
+        "caller's own bookings, newest first.\n\n"
+        "`computed_price` and `assigned_contractor_id` are populated only for "
+        "bookings that have reached `CONFIRMED`; on every other booking they are "
+        "`null`.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not a `CUSTOMER`."}}},
 )
 def list_bookings(request):
     try:
@@ -163,6 +201,22 @@ def list_bookings(request):
     "/{booking_id}",
     response={200: BookingOut, 403: ErrorOut, 404: ErrorOut},
     summary="Retrieve one own booking",
+    description=(
+        "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n"
+        "**Price visibility:** `computed_price` and `assigned_contractor_id` are "
+        "returned only once the booking is `CONFIRMED` — that is, after a "
+        "contractor has accepted the offer. While the booking is `PENDING` both "
+        "are `null`, and no other endpoint reveals the price earlier.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "A booking that belongs to another customer returns the same `404` as one "
+        "that does not exist."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CUSTOMER`."},
+            404: {"description": "No such booking, or it belongs to another customer."},
+        }
+    },
 )
 def retrieve_booking(request, booking_id: str):
     """

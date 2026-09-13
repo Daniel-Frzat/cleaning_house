@@ -74,6 +74,29 @@ def _serialize(payment, *, as_admin):
     #    provider_reference بقيمة null — وهو بالضبط العيب المُصلَح هنا.
     response={200: Union[PaymentOut, PaymentAdminOut], 404: ErrorOut},
     summary="Retrieve the payment for a booking (owner customer or admin)",
+    description=(
+        "**Who may call:** the booking's own customer, or an `ADMIN`.\n\n"
+        "**Preconditions:** a payment record exists only once a contractor has "
+        "accepted the offer — the customer is charged directly at confirmation. "
+        "There is no escrow and no separate capture step, so there is no endpoint "
+        "to start or retry a payment; this one is read-only.\n\n"
+        "A `FAILED` payment means the charge did not go through while the booking "
+        "remains confirmed.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "Administrators additionally receive `provider_reference`; for the "
+        "customer that field is absent from the response body altogether, not "
+        "merely blank."
+    ),
+    openapi_extra={
+        "responses": {
+            404: {
+                "description": (
+                    "No such booking, no payment for it, or the caller is not "
+                    "entitled to see it — deliberately indistinguishable."
+                )
+            }
+        }
+    },
 )
 def retrieve_payment(request, booking_id: str):
     """

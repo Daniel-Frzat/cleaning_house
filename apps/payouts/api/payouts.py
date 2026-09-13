@@ -75,6 +75,29 @@ def _serialize(payout, *, as_admin):
     #    provider_reference بقيمة null — وهو بالضبط العيب المُصلَح هنا.
     response={200: Union[PayoutOut, PayoutAdminOut], 404: ErrorOut},
     summary="Retrieve the contractor payout for a booking (payee contractor or admin)",
+    description=(
+        "**Who may call:** the contractor being paid, or an `ADMIN`. The "
+        "customer cannot see the payout.\n\n"
+        "**Preconditions:** a payout record exists only once the customer has "
+        "confirmed job completion. It is released immediately and **per booking** "
+        "— payouts are never batched, and there is no endpoint to trigger or "
+        "retry one manually; this one is read-only.\n\n"
+        "The amount is the full booking price: no commission is deducted.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "Administrators additionally receive `provider_reference`; for the "
+        "contractor that field is absent from the response body altogether, not "
+        "merely blank."
+    ),
+    openapi_extra={
+        "responses": {
+            404: {
+                "description": (
+                    "No such booking, no payout for it, or the caller is not "
+                    "entitled to see it — deliberately indistinguishable."
+                )
+            }
+        }
+    },
 )
 def retrieve_payout(request, booking_id: str):
     """

@@ -66,6 +66,38 @@ def _handle_offer_errors(exc):
     "/offers/{offer_id}/accept",
     response={200: OfferResponseOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Accept a dispatch offer (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, and only the contractor the offer "
+        "was addressed to. Another contractor's offer returns `403`.\n\n"
+        "**Preconditions:** the offer must still be actionable — neither already "
+        "answered nor expired.\n\n"
+        "**This is the pivotal moment of the booking lifecycle.** On success:\n\n"
+        "1. The price is calculated and **frozen** onto the booking. It is never "
+        "recalculated afterwards, even if catalog prices change.\n"
+        "2. The booking moves to `CONFIRMED`, the contractor is assigned, and the "
+        "price becomes visible to the customer — this is the first moment it is.\n"
+        "3. The customer is charged directly (there is no escrow).\n"
+        "4. The job is created and starts `IN_PROGRESS`.\n\n"
+        "The distance used for pricing is the one recorded on **this offer**, not "
+        "a freshly measured one, so moving the contractor's profile between offer "
+        "and acceptance does not change the price.\n\n"
+        "Steps 3 and 4 run after the confirmation is committed and are isolated "
+        "from it: if the charge or the job creation fails, the booking stays "
+        "validly confirmed and the failure is recorded rather than returned as an "
+        "error here.\n\n"
+        "`next_offer` is always `null` in this response — the cascade stops at "
+        "acceptance."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {
+                "description": "The caller is not a `CONTRACTOR`, or the offer is addressed to someone else."
+            },
+            404: {"description": "No offer with this id."},
+            409: {"description": "The offer was already answered or has expired."},
+            422: {"description": "The offer could not be accepted — validation failed."},
+        }
+    },
 )
 def accept_offer(request, offer_id: str):
     """
@@ -96,6 +128,30 @@ def accept_offer(request, offer_id: str):
     "/offers/{offer_id}/decline",
     response={200: OfferResponseOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Decline a dispatch offer (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, and only the contractor the offer "
+        "was addressed to.\n\n"
+        "**Preconditions:** the offer must still be actionable — neither already "
+        "answered nor expired.\n\n"
+        "**Side effects:** declining immediately cascades the booking to the next "
+        "nearest available contractor, exactly as an expiry would. The new "
+        "offer's id is returned in `next_offer`, with no details about the "
+        "contractor behind it.\n\n"
+        "If no further contractor is eligible, `next_offer` is `null` and the "
+        "booking stays `PENDING` with no active offer. That is a normal outcome, "
+        "not an error; nothing cancels the booking automatically.\n\n"
+        "No price is calculated or revealed by declining."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {
+                "description": "The caller is not a `CONTRACTOR`, or the offer is addressed to someone else."
+            },
+            404: {"description": "No offer with this id."},
+            409: {"description": "The offer was already answered or has expired."},
+            422: {"description": "The offer could not be declined."},
+        }
+    },
 )
 def decline_offer(request, offer_id: str):
     """

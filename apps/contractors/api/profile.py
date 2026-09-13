@@ -90,6 +90,26 @@ def serialize(profile):
     "/profile",
     response={201: ContractorProfileOut, 403: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Create own contractor profile (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only. The profile is always created for "
+        "the caller — this endpoint accepts no contractor id.\n\n"
+        "**Preconditions:** the caller must not already have a profile; each "
+        "contractor has exactly one.\n\n"
+        "The profile carries the business name and the address the contractor "
+        "works from, including the coordinates used to measure distance when "
+        "dispatching bookings.\n\n"
+        "**Side effects:** the profile always starts `UNAVAILABLE`, so no booking "
+        "is dispatched to it until availability is switched on via "
+        "`PATCH /api/contractor/profile/availability`. Availability is ignored if "
+        "supplied here."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            409: {"description": "This contractor already has a profile."},
+            422: {"description": "The submitted profile fields failed validation."},
+        }
+    },
 )
 def create_profile(request, payload: ContractorProfileIn):
     """
@@ -120,6 +140,19 @@ def create_profile(request, payload: ContractorProfileIn):
     "/profile",
     response={200: ContractorProfileOut, 403: ErrorOut, 404: ErrorOut},
     summary="Retrieve own contractor profile",
+    description=(
+        "**Who may call:** `CONTRACTOR` only. Returns the caller's own profile — "
+        "there is no id in the path, so one contractor can never read another's "
+        "profile. Reading a specific profile by id is available to administrators "
+        "via `GET /api/admin/contractors/{profile_id}`.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+        }
+    },
 )
 def retrieve_profile(request):
     try:
@@ -141,6 +174,23 @@ def retrieve_profile(request):
     "/profile",
     response={200: ContractorProfileOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Update own contractor profile",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, on their own profile.\n\n"
+        "Partial update — only the fields present in the body are changed. "
+        "**Availability cannot be changed here**; it has its own endpoint, "
+        "`PATCH /api/contractor/profile/availability`.\n\n"
+        "**Side effects:** changing the address or coordinates changes the "
+        "distance used when dispatching future bookings, and therefore which "
+        "bookings this contractor is offered. Offers already made keep the "
+        "distance recorded on them."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+            422: {"description": "The submitted profile fields failed validation."},
+        }
+    },
 )
 def update_profile(request, payload: ContractorProfilePatch):
     """
@@ -175,6 +225,23 @@ def update_profile(request, payload: ContractorProfilePatch):
     "/profile/availability",
     response={200: ContractorProfileOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Toggle own availability (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, on their own profile. "
+        "Administrators deliberately cannot flip this on a contractor's behalf.\n\n"
+        "A deliberately lightweight endpoint carrying a single field, kept "
+        "separate from the general profile update because it is called often and "
+        "must not touch the rest of the profile.\n\n"
+        "**Side effects:** only an `AVAILABLE` contractor receives dispatch "
+        "offers. Switching to `UNAVAILABLE` stops new offers but does **not** "
+        "withdraw offers already sent or jobs already assigned."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+            422: {"description": "`availability_status` is not a valid value."},
+        }
+    },
 )
 def update_availability(request, payload: AvailabilityPatch):
     """
@@ -257,6 +324,24 @@ def _verification_error(exc):
     "/business-registration",
     response={201: BusinessRegistrationOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Submit own business registration (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, for themselves — the submission is "
+        "tied to the caller's profile and no contractor id is accepted.\n\n"
+        "**Preconditions:** the caller must already have a contractor profile.\n\n"
+        "Submits an ABN and business name for **manual administrative review**. "
+        "The ABN is only checked for shape (11 digits); no government registry or "
+        "third-party verification service is contacted.\n\n"
+        "**Side effects:** the submission is created as `PENDING` — there is no "
+        "self-approval. It becomes approved only when an administrator reviews it "
+        "via `PATCH /api/admin/business-registration/{registration_id}`."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+            422: {"description": "The ABN or business name failed validation."},
+        }
+    },
 )
 def submit_business_registration(request, payload: BusinessRegistrationIn):
     """
@@ -285,6 +370,20 @@ def submit_business_registration(request, payload: BusinessRegistrationIn):
     "/business-registration",
     response={200: list[BusinessRegistrationOut], 403: ErrorOut, 404: ErrorOut},
     summary="List own business registration submissions",
+    description=(
+        "**Who may call:** `CONTRACTOR` only — returns the caller's own "
+        "submissions and no one else's.\n\n"
+        "Several submissions are legitimate, because a contractor may re-submit "
+        "after a rejection. All of them are returned, newest first, each with its "
+        "status and, where rejected, the reason.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+        }
+    },
 )
 def list_business_registrations(request):
     """التعدد مسموح (إعادة تقديم بعد رفض) — تُعاد كلها، الأحدث أولًا."""
@@ -307,6 +406,23 @@ def list_business_registrations(request):
     "/insurance",
     response={201: InsuranceDocumentOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Submit own insurance document (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, for themselves.\n\n"
+        "**Preconditions:** the caller must already have a contractor profile.\n\n"
+        "`document_reference` is a **text reference plus an expiry date, not a "
+        "file upload** — no document bytes are stored by this endpoint. Review is "
+        "manual; no insurer or third-party service is contacted.\n\n"
+        "**Side effects:** the submission is created as `PENDING` and is approved "
+        "only by an administrator via "
+        "`PATCH /api/admin/insurance/{document_id}`."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+            422: {"description": "The document reference or expiry date failed validation."},
+        }
+    },
 )
 def submit_insurance(request, payload: InsuranceDocumentIn):
     """
@@ -337,6 +453,20 @@ def submit_insurance(request, payload: InsuranceDocumentIn):
     "/insurance",
     response={200: list[InsuranceDocumentOut], 403: ErrorOut, 404: ErrorOut},
     summary="List own insurance submissions",
+    description=(
+        "**Who may call:** `CONTRACTOR` only — returns the caller's own "
+        "submissions and no one else's.\n\n"
+        "Several submissions are legitimate, because insurance is renewed and may "
+        "be re-submitted after a rejection. All of them are returned, newest "
+        "first.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "The caller has no contractor profile yet."},
+        }
+    },
 )
 def list_insurance(request):
     """التعدد مسموح (تجديد التأمين) — تُعاد كلها، الأحدث أولًا."""

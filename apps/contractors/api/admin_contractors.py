@@ -50,6 +50,15 @@ def _error(status, code, detail):
     "/contractors",
     response={200: list[ContractorProfileOut], 403: ErrorOut},
     summary="List all contractor profiles (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Returns every contractor profile, available and unavailable alike — "
+        "filtering by availability belongs to dispatch, not to an administrative "
+        "listing.\n\n"
+        "**Side effects:** none — read-only. Administrators cannot edit a "
+        "contractor's profile or availability through this API at all."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not an `ADMIN`."}}},
 )
 def list_contractors(request):
     """
@@ -71,6 +80,21 @@ def list_contractors(request):
     "/contractors/{profile_id}",
     response={200: ContractorProfileOut, 403: ErrorOut, 404: ErrorOut},
     summary="Retrieve any contractor profile (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only. This is the only way to read a "
+        "contractor profile by id; contractors themselves use the self-service "
+        "`GET /api/contractor/profile`.\n\n"
+        "**Side effects:** none — read-only.\n\n"
+        "A non-administrator receives `403` rather than `404` here: unlike the "
+        "customer-owned resources, the existence of a contractor record is not "
+        "something this endpoint needs to conceal."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No contractor profile with this id."},
+        }
+    },
 )
 def retrieve_contractor(request, profile_id: str):
     try:
@@ -115,6 +139,16 @@ def _review_error(exc):
     "/verifications/pending",
     response={200: PendingVerificationsOut, 403: ErrorOut},
     summary="List all pending verifications (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "The review queue: every business registration and insurance document "
+        "still awaiting a decision, across all contractors. The two kinds are "
+        "returned in **separate lists** (`business_registrations` and "
+        "`insurance_documents`) because they are different entities with "
+        "different fields.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not an `ADMIN`."}}},
 )
 def list_pending_verifications(request):
     """
@@ -149,6 +183,25 @@ def list_pending_verifications(request):
         422: ErrorOut,
     },
     summary="Approve or reject a business registration (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only. This is a **human decision**: no "
+        "government registry or external verification service is consulted.\n\n"
+        "**Preconditions:** rejecting requires a `rejection_reason`; a rejection "
+        "without one is refused with `400` so that a contractor is never rejected "
+        "silently.\n\n"
+        "**Side effects:** the decision, the reviewing administrator and the "
+        "review time are recorded on the submission. Approval contributes to the "
+        "contractor's eligibility, which is computed from the current state of "
+        "their approved registration and insurance rather than stored as a flag."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "A rejection was submitted without a `rejection_reason`."},
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No business registration with this id."},
+            422: {"description": "`status` is not a valid review decision, or validation failed."},
+        }
+    },
 )
 def review_business_registration(request, registration_id: str, payload: ReviewPatch):
     """
@@ -186,6 +239,24 @@ def review_business_registration(request, registration_id: str, payload: ReviewP
         422: ErrorOut,
     },
     summary="Approve or reject an insurance document (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only. This is a **human decision**: no insurer "
+        "or external verification service is consulted.\n\n"
+        "**Preconditions:** rejecting requires a `rejection_reason`; a rejection "
+        "without one is refused with `400`.\n\n"
+        "**Side effects:** the decision, the reviewing administrator and the "
+        "review time are recorded on the document. Approval contributes to the "
+        "contractor's eligibility. Note that nothing re-checks the expiry date "
+        "afterwards — there is no scheduled re-verification."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "A rejection was submitted without a `rejection_reason`."},
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No insurance document with this id."},
+            422: {"description": "`status` is not a valid review decision, or validation failed."},
+        }
+    },
 )
 def review_insurance_document(request, document_id: str, payload: ReviewPatch):
     """🔒 نفس القاعدة: الرفض بلا سبب يعيد 400."""

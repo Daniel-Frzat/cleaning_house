@@ -37,14 +37,127 @@ from apps.contractors.api.admin_contractors import router as admin_contractors_r
 from apps.contractors.api.profile import router as contractor_profile_router
 from apps.services.api.catalog import router as admin_catalog_router
 
+API_DESCRIPTION = """
+REST API for **Cleaning House**, an Australian cleaning marketplace that connects
+customers with cleaning contractors. Built with Django and Django Ninja.
+
+## Authentication
+
+All endpoints require a JWT access token unless explicitly marked otherwise
+(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,
+`POST /api/auth/social/{provider}` and `GET /api/health` are public).
+
+Send the token on every protected request:
+
+```
+Authorization: Bearer <JWT access token>
+```
+
+There is no password login. A token is obtained either by verifying an SMS
+one-time password (OTP) or by logging in with Apple or Google (Social Login).
+Both flows return an `access` and a `refresh` token.
+
+## Roles
+
+Every user carries exactly one role, and it decides which endpoints are
+reachable:
+
+* **CUSTOMER** — owns properties, creates bookings, confirms job completion.
+* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,
+  executes jobs and uploads proof photos.
+* **ADMIN** — manages the service catalog and pricing, reviews contractor
+  verifications, and sees provider references hidden from other roles.
+
+Calling an endpoint with the wrong role returns `403`. On resources that are
+owned by a specific user, a request from a non-owner returns `404` instead of
+`403` wherever distinguishing the two would leak the existence of the resource.
+
+## Domains
+
+Eight domains are implemented end to end: Identity, Properties, Service
+Catalog & Pricing, Contractors (profile and verification), Bookings (with
+auto-dispatch and offers), Payments, Jobs, and Payouts.
+
+## Booking lifecycle
+
+A booking is created as `PENDING` with **no price and no contractor**. Dispatch
+then offers it to the nearest available contractor. The price is calculated and
+frozen onto the booking **only when a contractor accepts an offer** — that is
+also the first moment the price is visible to the customer. Acceptance moves the
+booking to `CONFIRMED`, charges the customer directly, and starts the job.
+The contractor marks the job done, the customer confirms it, and the contractor
+payout is released.
+
+## ⚠️ External providers
+
+Some external providers are **not selected yet**. Payment capture, contractor
+payout, photo storage, SMS/OTP delivery and social-login verification are all
+defined as abstract adapters, and no concrete implementation ships with this
+build. Until a provider is configured for each of them, those operations fail
+in a production deployment.
+""".strip()
+
 api = NinjaAPI(
     title="Cleaning House API",
-    version="0.2.0-phase1",
-    description="Identity Domain — OTP, social login, and JWT issuance.",
+    version="1.0.0",
+    description=API_DESCRIPTION,
+    # 📌 مخطط الأمان: JWTAuth يولّد {"type": "http", "scheme": "bearer"}
+    #    تلقائيًا في components.securitySchemes، وكل نقطة محمية تشير إليه.
+    #    ولا يمكن إثراؤه من هنا: django-ninja 1.1.0 يتجاهل مفاتيح
+    #    openapi_extra الموجودة أصلًا (`if k not in self`)، و"components"
+    #    منها. وإثراؤه بوراثة JWTAuth تغيير سلوكي ممنوع في مهمة توثيقية.
+    #    البديل: شرح `Authorization: Bearer <JWT access token>` في الوصف
+    #    أعلاه، وهو يظهر في صدر صفحة /api/docs.
+    openapi_extra={
+        "tags": [
+            {"name": "Auth", "description": "OTP and social login, JWT issuance."},
+            {"name": "Properties", "description": "Customer properties and their addresses."},
+            {
+                "name": "Admin — Service Catalog",
+                "description": "Service types and the global per-km price (ADMIN only).",
+            },
+            {
+                "name": "Contractor Profile",
+                "description": (
+                    "Contractor self-service: profile, availability, and "
+                    "verification submissions."
+                ),
+            },
+            {
+                "name": "Admin — Contractors",
+                "description": (
+                    "Contractor records and manual verification review (ADMIN only)."
+                ),
+            },
+            {"name": "Bookings", "description": "Customer bookings and their service selections."},
+            {
+                "name": "Contractor Offers",
+                "description": "Contractor responses to dispatch offers.",
+            },
+            {"name": "Payments", "description": "Customer payment for a booking."},
+            {"name": "Jobs", "description": "Job status and completion, seen from the booking."},
+            {
+                "name": "Contractor Jobs",
+                "description": "Job execution by the assigned contractor: photos and mark-done.",
+            },
+            {"name": "Payouts", "description": "Contractor payout for a completed booking."},
+            {"name": "System", "description": "Service health."},
+        ],
+    },
 )
 
 
-@api.get("/health", tags=["System"], auth=None)
+@api.get(
+    "/health",
+    tags=["System"],
+    auth=None,
+    summary="Service health check",
+    description=(
+        "Public, unauthenticated liveness probe used by the platform to decide "
+        "whether the process is up. No token is required and nothing is "
+        "persisted."
+    ),
+)
 def health_check(request):
     """يتأكد أن التطبيق والاتصال بقاعدة البيانات يعملان."""
     return {"status": "ok", "phase": "Phase 0 — Foundation"}

@@ -68,6 +68,30 @@ def _auth_response(user):
     response={200: OTPRequestOut, 429: ErrorOut, 400: ErrorOut},
     auth=None,
     summary="Request an OTP code",
+    description=(
+        "**Who may call:** anyone — this endpoint is public and needs no token.\n\n"
+        "Sends a one-time password by SMS to the given phone number and returns "
+        "how long it stays valid.\n\n"
+        "**Side effects:** an OTP is generated and handed to the configured SMS "
+        "provider. The response never contains the code, and it is deliberately "
+        "identical whether or not an account exists for the number, so it cannot "
+        "be used to discover registered users.\n\n"
+        "**Note:** no SMS provider ships with this build, so delivery fails until "
+        "one is configured."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {
+                "description": "The code could not be sent — invalid phone number or SMS provider failure."
+            },
+            429: {
+                "description": (
+                    "A code was requested too recently. `retry_after_seconds` says "
+                    "how long to wait before asking again."
+                )
+            },
+        }
+    },
 )
 def request_otp(request, payload: OTPRequestIn):
     """
@@ -104,6 +128,23 @@ def request_otp(request, payload: OTPRequestIn):
     response={200: AuthOut, 400: ErrorOut, 403: ErrorOut, 429: ErrorOut},
     auth=None,
     summary="Verify an OTP code and issue JWT",
+    description=(
+        "**Who may call:** anyone — this endpoint is public and needs no token.\n\n"
+        "**Preconditions:** a code must have been requested for this phone number "
+        "via `POST /api/auth/otp/request` and must not have expired.\n\n"
+        "On success returns an `access` and a `refresh` token together with the "
+        "user's id, phone, role and status.\n\n"
+        "**Side effects:** the first successful verification for an unknown phone "
+        "number **creates the account** with role `CUSTOMER`. The code is consumed "
+        "and cannot be reused."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "The code is invalid, expired, or verification failed."},
+            403: {"description": "The account exists but is not active."},
+            429: {"description": "Too many incorrect attempts for this code."},
+        }
+    },
 )
 def verify_otp(request, payload: OTPVerifyIn):
     """
@@ -139,6 +180,23 @@ def verify_otp(request, payload: OTPVerifyIn):
     response={200: AuthOut, 400: ErrorOut, 401: ErrorOut, 403: ErrorOut},
     auth=None,
     summary="Log in with Apple or Google",
+    description=(
+        "**Who may call:** anyone — this endpoint is public and needs no token.\n\n"
+        "Exchanges a provider token for Cleaning House JWTs. `provider` is either "
+        "`APPLE` or `GOOGLE` and is matched case-insensitively.\n\n"
+        "**Side effects:** the first successful login for an unknown provider "
+        "identity **creates the account** and links the social identity to it. "
+        "The response never echoes the provider's raw profile.\n\n"
+        "**Note:** no social-auth provider ships with this build, so token "
+        "verification fails until one is configured."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "Unsupported provider, or the social login could not be completed."},
+            401: {"description": "The provider token is invalid or was rejected by the provider."},
+            403: {"description": "The account exists but is not active."},
+        }
+    },
 )
 def social_login(request, provider: str, payload: SocialLoginIn):
     """
@@ -172,6 +230,14 @@ def social_login(request, provider: str, payload: SocialLoginIn):
     response={200: UserOut},
     auth=JWTAuth(),
     summary="Current authenticated user",
+    description=(
+        "**Who may call:** any authenticated user, in any role.\n\n"
+        "Returns the id, phone, role and status of the token's owner. The role is "
+        "also carried in the JWT claims, but this endpoint is the authoritative "
+        "source: a role changed after the token was issued is reflected here "
+        "first.\n\n"
+        "**Side effects:** none — read-only."
+    ),
 )
 def me(request):
     """

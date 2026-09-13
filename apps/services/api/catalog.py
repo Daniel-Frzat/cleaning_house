@@ -94,6 +94,20 @@ def _serialize_config(config):
     "/services",
     response={201: ServiceTypeOut, 403: ErrorOut, 422: ErrorOut},
     summary="Create a service type (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Adds a bookable service to the catalog with its own `base_price` and "
+        "`room_price`. Service names are unique. The service starts active and is "
+        "immediately bookable.\n\n"
+        "**Side effects:** none beyond creating the catalog entry — existing "
+        "bookings are untouched."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            422: {"description": "Validation failed, or a service with this name already exists."},
+        }
+    },
 )
 def create_service(request, payload: ServiceTypeIn):
     try:
@@ -112,6 +126,14 @@ def create_service(request, payload: ServiceTypeIn):
     "/services",
     response={200: list[ServiceTypeOut], 403: ErrorOut},
     summary="List all service types, active and inactive (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Returns the whole catalog **unfiltered**, including soft-deleted "
+        "services, so that an administrator can find an inactive service and "
+        "re-activate it.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not an `ADMIN`."}}},
 )
 def list_services(request):
     """
@@ -129,6 +151,17 @@ def list_services(request):
     "/services/{service_id}",
     response={200: ServiceTypeOut, 403: ErrorOut, 404: ErrorOut},
     summary="Retrieve one service type (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Returns one service type with its prices, whether it is active or not.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No service type with this id."},
+        }
+    },
 )
 def retrieve_service(request, service_id: str):
     try:
@@ -145,6 +178,21 @@ def retrieve_service(request, service_id: str):
     "/services/{service_id}",
     response={200: ServiceTypeOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
     summary="Update a service type, prices included (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Partial update — only the fields present in the body are changed. "
+        "`base_price` and `room_price` may be edited at any time.\n\n"
+        "**Side effects:** the new prices apply to **future** price calculations "
+        "only. Bookings whose price was already frozen at acceptance are never "
+        "recalculated, so changing a price here does not alter money already owed."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No service type with this id."},
+            422: {"description": "Validation failed, or another service already uses this name."},
+        }
+    },
 )
 def update_service(request, service_id: str, payload: ServiceTypePatch):
     """
@@ -177,6 +225,22 @@ def update_service(request, service_id: str, payload: ServiceTypePatch):
     "/services/{service_id}",
     response={200: ServiceTypeOut, 403: ErrorOut, 404: ErrorOut},
     summary="Soft-delete a service type (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "**Soft delete:** the row is kept and `is_active` is set to `false`, "
+        "because existing bookings still reference the service. The deactivated "
+        "service is returned in the response and can be re-activated with a "
+        "`PATCH`.\n\n"
+        "**Side effects:** the service can no longer be booked — a new booking "
+        "that includes it is rejected with `400`. Bookings already placed are "
+        "unaffected."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            404: {"description": "No service type with this id."},
+        }
+    },
 )
 def delete_service(request, service_id: str):
     """
@@ -200,6 +264,15 @@ def delete_service(request, service_id: str):
     "/pricing-config",
     response={200: PricingConfigOut, 403: ErrorOut},
     summary="Retrieve the global price_per_km (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Returns the single system-wide travel rate used in every price "
+        "calculation. This is one value for the whole platform, not one per "
+        "service, and the configuration row is created on first access if it does "
+        "not exist yet.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={"responses": {403: {"description": "The caller is not an `ADMIN`."}}},
 )
 def retrieve_pricing_config(request):
     try:
@@ -214,6 +287,20 @@ def retrieve_pricing_config(request):
     "/pricing-config",
     response={200: PricingConfigOut, 403: ErrorOut, 422: ErrorOut},
     summary="Update the global price_per_km (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Sets the single system-wide travel rate (§5). There is no per-service "
+        "override.\n\n"
+        "**Side effects:** the new rate applies to **future** price calculations "
+        "only. Bookings whose price was already frozen at acceptance are never "
+        "recalculated."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not an `ADMIN`."},
+            422: {"description": "`price_per_km` failed validation."},
+        }
+    },
 )
 def update_pricing_config(request, payload: PricingConfigPatch):
     """
