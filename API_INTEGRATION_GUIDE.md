@@ -502,7 +502,7 @@ A failed payout leaves the job `COMPLETED` and the booking `CONFIRMED`.
 
 ## 6. Endpoint reference
 
-41 endpoints across 8 domains. Unless a row says otherwise, every endpoint
+43 endpoints across 8 domains. Unless a row says otherwise, every endpoint
 requires `Authorization: Bearer <JWT access token>`.
 
 ### 6.1 System
@@ -667,11 +667,81 @@ It then disappears from the list endpoint and can no longer be booked.
 
 ---
 
-### 6.4 Admin — Service Catalog
+### 6.4 Services (public catalog)
 
-Defines what can be booked and at what price. **`ADMIN` only — there is no
-customer-facing catalog endpoint in this build.** A customer app cannot currently
-list services or prices through the API.
+The customer-facing catalog: what a client app reads so someone can pick what to
+book. The `id` returned here is exactly the `service_type_id` that
+`POST /api/bookings` expects.
+
+> **Pricing is deliberately absent from these two endpoints.** `room_price` and
+> `base_price` are not fields of this response **for any role, administrators
+> included** — the keys are absent from the JSON, not merely null. Raw prices are
+> internal administrative data; a customer sees one final total, and only after a
+> contractor accepts the booking. Administrators read prices from
+> `GET /api/admin/services` instead.
+
+#### `GET /api/services`
+
+**Who may call:** any authenticated user — no role restriction.
+
+Returns **only active services**. A service an administrator has deactivated
+never appears here, which matches booking creation rejecting it with `400`.
+
+```jsonc
+// 200 OK
+[
+  {
+    "id": "9a9ec0f3-c466-40d3-8861-cf8577e076e2",
+    "name": "Carpet Cleaning",
+    "description": "Steam clean for carpeted rooms"
+  },
+  {
+    "id": "ae907a34-a2dc-49f5-a59c-7d74b19ae051",
+    "name": "General Cleaning",
+    "description": "Standard home clean"
+  }
+]
+```
+
+Three fields, no more. An empty catalog returns `[]`, not `404`.
+
+**Errors:** `401` if the token is missing or invalid. There is no `403` — every
+authenticated role may read.
+
+#### `GET /api/services/{service_id}`
+
+**Who may call:** any authenticated user.
+
+```jsonc
+// 200 OK
+{
+  "id": "ae907a34-a2dc-49f5-a59c-7d74b19ae051",
+  "name": "General Cleaning",
+  "description": "Standard home clean"
+}
+```
+
+```jsonc
+// 404 Not Found — deactivated service, or one that never existed
+{
+  "code": "service_not_found",
+  "detail": "Service type not found."
+}
+```
+
+> A deactivated service returns a response **byte-for-byte identical** to one for
+> an unknown id, so the endpoint cannot be used to discover that a service was
+> withdrawn.
+
+**Errors:** `401` unauthenticated · `404` unknown **or** inactive.
+
+---
+
+### 6.5 Admin — Service Catalog
+
+Defines what can be booked and at what price. **`ADMIN` only.** These are the
+endpoints that expose and edit raw pricing; the read-only, price-free catalog for
+everyone else is [`GET /api/services`](#64-services-public-catalog) above.
 
 #### `POST /api/admin/services`
 
@@ -769,7 +839,7 @@ Required, **≥ 0**. Response shape as above. Not retroactive.
 
 ---
 
-### 6.5 Contractor Profile (self-service)
+### 6.6 Contractor Profile (self-service)
 
 **`CONTRACTOR` only.** None of these paths accepts a contractor id — the profile
 is always derived from the token, so one contractor can never read or modify
@@ -964,7 +1034,7 @@ All of the caller's insurance submissions, newest first. **Errors:** `403` · `4
 
 ---
 
-### 6.6 Admin — Contractors
+### 6.7 Admin — Contractors
 
 **`ADMIN` only.** Note the deliberate difference from customer-owned resources:
 these endpoints return `403` to a non-admin rather than `404`, because the
@@ -1084,7 +1154,7 @@ eligibility when it is next read.
 
 ---
 
-### 6.7 Bookings
+### 6.8 Bookings
 
 #### `POST /api/bookings`
 
@@ -1101,7 +1171,8 @@ Content-Type: application/json
       "service_type_id": "bba37709-a157-4c1d-8704-861b40245048",
       "room_count": 3
     }
-  ]
+  ],
+  "scheduled_at": "2026-09-19T09:00:00+10:00"
 }
 ```
 
@@ -1114,6 +1185,9 @@ Content-Type: application/json
   "status": "PENDING",
   "computed_price": null,
   "assigned_contractor_id": null,
+  "scheduled_at": "2026-09-18T23:00:00Z",
+  "scheduled_at_local": "2026-09-19T09:00:00+10:00",
+  "customer_timezone": "Australia/Sydney",
   "service_selections": [
     {
       "id": "7ccdbf8a-64fc-45d0-a99e-e131e8229bcf",
@@ -1126,6 +1200,13 @@ Content-Type: application/json
   "updated_at": "2026-09-13T10:15:18.400Z"
 }
 ```
+
+`scheduled_at` is **required**. Sent without an offset it is read in the
+property's local timezone; sent with one it is honoured as given. Either way it
+is stored and returned in UTC, alongside `scheduled_at_local` and the
+`customer_timezone` used for the conversion — so no client has to convert. The
+visit must be in the future and fall within **07:00–19:00 local time**, bounds
+inclusive, or the request is rejected with `400`.
 
 At least one selection is required; every selected service must be active.
 `room_count` must be an integer **≥ 0** (zero means the base fee alone). There is
@@ -1172,6 +1253,9 @@ assigned contractor:
   "status": "CONFIRMED",
   "computed_price": "215.37",
   "assigned_contractor_id": "3712646d-f1ab-49c3-b37f-300f5fd6bb8f",
+  "scheduled_at": "2026-09-18T23:00:00Z",
+  "scheduled_at_local": "2026-09-19T09:00:00+10:00",
+  "customer_timezone": "Australia/Sydney",
   "service_selections": [
     {
       "id": "7ccdbf8a-64fc-45d0-a99e-e131e8229bcf",
@@ -1198,7 +1282,7 @@ another customer**.
 
 ---
 
-### 6.8 Contractor Offers
+### 6.9 Contractor Offers
 
 **`CONTRACTOR` only**, and only the contractor the offer was addressed to.
 
@@ -1256,7 +1340,7 @@ details about the next contractor are exposed.
 
 ---
 
-### 6.9 Jobs
+### 6.10 Jobs
 
 #### `GET /api/bookings/{booking_id}/job`
 
@@ -1386,7 +1470,7 @@ this call still returns `200`.
 
 ---
 
-### 6.10 Payments
+### 6.11 Payments
 
 #### `GET /api/bookings/{booking_id}/payment`
 
@@ -1434,7 +1518,7 @@ entitled to see it are deliberately indistinguishable.
 
 ---
 
-### 6.11 Payouts
+### 6.12 Payouts
 
 #### `GET /api/bookings/{booking_id}/payout`
 
@@ -1599,6 +1683,7 @@ Which endpoints use which:
 | Contractor self-service | `403` | n/a — no id is accepted |
 | Contractor **offers** | `403` | `403` — another contractor's offer |
 | Admin endpoints (catalog, contractors) | `403` | `404` |
+| Public services catalog | n/a — every role may read | `404` if unknown or inactive |
 
 Three cases worth singling out:
 
@@ -1667,6 +1752,7 @@ Three fields are **absent from the JSON entirely** rather than returned as
 | `provider_reference` on a payment | `ADMIN` only | **key absent** |
 | `provider_reference` on a payout | `ADMIN` only | **key absent** |
 | `storage_key` on a job photo | `ADMIN` only | key present, value `null` |
+| `room_price` / `base_price` on `GET /api/services` | nobody — use `/api/admin/services` | **keys absent for every role** |
 
 The distinction is meaningful. For `provider_reference`, an **absent key** means
 "you may not see this"; a key **present with `null`** (which admins can see)
@@ -1690,7 +1776,8 @@ created as `CUSTOMER`.
 | `GET /api/auth/me` | ✅ | ✅ | ✅ |
 | `GET /api/health` | public | public | public |
 | **Properties** — all 5 endpoints | ✅ own only | ❌ 403 | ❌ 403 |
-| **Service catalog** — services, pricing config (7) | ❌ 403 | ❌ 403 | ✅ |
+| **Services (public catalog)** — list, retrieve (2) | ✅ no prices | ✅ no prices | ✅ no prices |
+| **Admin service catalog** — services, pricing config (7) | ❌ 403 | ❌ 403 | ✅ with prices |
 | **Contractor profile** — profile, availability (4) | ❌ 403 | ✅ own only | ❌ 403 |
 | **Contractor verification** — submit/list ABN + insurance (4) | ❌ 403 | ✅ own only | ❌ 403 |
 | **Admin contractors** — list, retrieve (2) | ❌ 403 | ❌ 403 | ✅ |
@@ -1708,9 +1795,10 @@ Notable consequences:
 - **`ADMIN` is not a superuser over this API.** Administrators cannot create
   bookings, cannot edit contractor profiles or availability, and **cannot confirm
   a job on a customer's behalf**.
-- **Customers cannot see the catalog.** There is no customer-facing services or
-  pricing endpoint, so a customer app must obtain `service_type_id` values some
-  other way.
+- **Customers can see the catalog but never its prices.** `GET /api/services`
+  gives any authenticated user the active services — id, name and description —
+  which is where a client app gets its `service_type_id` values. Raw prices stay
+  admin-only, and the price fields are absent from that response for every role.
 - **Contractors cannot see prices before accepting** and cannot list their
   pending offers.
 
@@ -1719,7 +1807,7 @@ Notable consequences:
 ## 9. Notes for Postman / Insomnia users
 
 The API publishes a complete OpenAPI 3.1 document that any OpenAPI-aware tool can
-import as a ready-made collection of all 41 endpoints:
+import as a ready-made collection of all 43 endpoints:
 
 ```
 https://cleaninghouse-production.up.railway.app/api/openapi.json

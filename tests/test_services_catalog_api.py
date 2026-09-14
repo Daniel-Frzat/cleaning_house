@@ -521,14 +521,31 @@ def test_non_admin_cannot_mutate_anything(client, admin_user, customer, contract
 
 
 @pytest.mark.django_db
-def test_no_customer_facing_catalog_endpoint_exists(client, customer):
+def test_no_customer_facing_pricing_endpoint_exists(client, customer):
     """
-    في هذه المرحلة لا توجد نقطة نهاية تكشف الكتالوج للعميل.
-    المسارات المتوقّعة مستقبلًا (Booking Domain) غير موجودة الآن.
+    لا نقطة نهاية تكشف الأسعار الخام للعميل.
+
+    ⚠️ عُدِّل عمدًا: كان هذا الاختبار يؤكد غياب /api/services كليًا (قيد
+       §37 حين كان الكتالوج إداريًا بحتًا). صار للعميل الآن مسار قراءة
+       عام (GET /api/services) يعرض الاسم والوصف فقط، فتضيّق الاختبار
+       إلى جوهره الأمني الباقي: لا مسار يكشف التسعير.
+
+       تغطية المسار العام نفسه في tests/test_services_public_api.py.
     """
-    for url in ("/api/services", "/api/service-types", "/api/pricing-config"):
+    # مسارات التسعير الخام تبقى غير موجودة للعميل
+    for url in ("/api/service-types", "/api/pricing-config"):
         r = client.get(url, **auth(customer))
         assert r.status_code == 404, f"{url} unexpectedly exists ({r.status_code})"
+
+    # الكتالوج العام موجود، لكنه بلا أي حقل تسعير
+    r = client.get("/api/services", **auth(customer))
+    assert r.status_code == 200, r.content
+    body = r.content.decode()
+    assert "room_price" not in body
+    assert "base_price" not in body
+
+    # والمسار الإداري يبقى محظورًا على العميل
+    assert client.get("/api/admin/services", **auth(customer)).status_code == 403
 
 
 # ============================================================

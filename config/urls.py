@@ -7,6 +7,7 @@ Root URL Configuration.
   - /api/auth/    → Identity Domain (OTP / Social / JWT)
   - /api/properties → Properties & Address Domain (CUSTOMER only)
   - /api/admin/   → Service Catalog & Pricing Domain (ADMIN only)
+  - /api/services → Public service catalog (any authenticated role, no prices)
   - /api/contractor/ → Contractor Profile Domain (CONTRACTOR only, self-service)
   - /api/admin/contractors → Contractor records (ADMIN only, read-only)
   - /api/bookings → Booking Domain (CUSTOMER only)
@@ -36,6 +37,7 @@ from apps.properties.api.properties import router as properties_router
 from apps.contractors.api.admin_contractors import router as admin_contractors_router
 from apps.contractors.api.profile import router as contractor_profile_router
 from apps.services.api.catalog import router as admin_catalog_router
+from apps.services.api.public_catalog import router as public_services_router
 
 API_DESCRIPTION = """
 REST API for **Cleaning House**, an Australian cleaning marketplace that connects
@@ -165,8 +167,11 @@ def health_check(request):
 
 api.add_router("/auth/", auth_router)
 api.add_router("/properties", properties_router)
-# كتالوج الخدمات والتسعير — ADMIN فقط. لا نقطة نهاية للعميل في هذه المرحلة.
+# كتالوج الخدمات والتسعير — ADMIN فقط (إنشاء/تعديل/تعطيل + سعر الكيلومتر).
 api.add_router("/admin", admin_catalog_router)
+# الكتالوج العام — قراءة فقط لأي مستخدم مصادَق عليه، بلا أي حقل تسعير.
+# مسار منفصل تمامًا عن /admin/services الذي يكشف الأسعار للإدارة.
+api.add_router("/services", public_services_router)
 # ملف المقاول — مسارات ذاتية بالكامل (لا تقبل معرّفًا من العميل).
 api.add_router("/contractor", contractor_profile_router)
 # سجلات المقاولين للإدارة — قراءة فقط. مسارات /contractors* لا تتعارض
