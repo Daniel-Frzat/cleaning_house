@@ -31,6 +31,7 @@ recording what came back.
 10. [Building the admin dashboard](#10-building-the-admin-dashboard)
 11. [Business rules that will surprise you](#11-business-rules-that-will-surprise-you)
 12. [Constants and enumerations](#12-constants-and-enumerations)
+13. [Deploying and first-run setup](#13-deploying-and-first-run-setup)
 
 ---
 
@@ -1064,6 +1065,116 @@ and jobs with `status=COMPLETED` and no related `payout`.
 | SA | `Australia/Adelaide` | yes (+9:30 / +10:30) |
 | NT | `Australia/Darwin` | **no** (+9:30) |
 | WA | `Australia/Perth` | no (+8:00) |
+
+---
+
+## 13. Deploying and first-run setup
+
+This section exists because the first deployment fails in two predictable ways,
+both of which look like application bugs and are not.
+
+### 13.1 Required environment variables
+
+Several settings are **required with no default** — the app refuses to start
+without them, deliberately, so that a misconfigured deployment fails loudly
+instead of silently running on the wrong settings.
+
+| Variable | Required in | Notes |
+| --- | --- | --- |
+| `DJANGO_ENV` | **all** | `dev` · `staging` · `production`. No default. |
+| `SECRET_KEY` | **all** | long random value |
+| `JWT_SIGNING_KEY` | **all** | a **different** random value |
+| `DB_NAME` | staging, production | |
+| `DB_USER` | staging, production | |
+| `DB_PASSWORD` | staging, production | |
+| `DB_HOST` | optional | defaults to `localhost` |
+| `DB_PORT` | optional | defaults to `5432` |
+| `ALLOWED_HOSTS` | production | comma-separated; the default is empty, which rejects every request |
+
+Generate the two keys with:
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key as k; print(k()); print(k())"
+```
+
+> `DJANGO_ENV` has no fallback on purpose. A deployment that quietly loaded dev
+> settings would run on **SQLite inside the container** — data would look fine
+> and then vanish on the next redeploy.
+
+### 13.2 ⚠️ This project does not read `DATABASE_URL`
+
+Railway, Heroku and similar platforms inject a single `DATABASE_URL`, plus
+`PG*`-prefixed variables. **This project reads neither.** It reads `DB_NAME`,
+`DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_PORT` separately, so attaching a
+Postgres service is not enough — the names do not line up and `DB_NAME` arrives
+empty:
+
+```
+django.core.exceptions.ImproperlyConfigured: settings.DATABASES is improperly
+configured. Please supply the NAME or OPTIONS['service'] value.
+```
+
+On Railway, map them explicitly in the service's **Variables** tab using
+references to the Postgres service:
+
+| Variable | Value |
+| --- | --- |
+| `DB_NAME` | `${{Postgres.PGDATABASE}}` |
+| `DB_USER` | `${{Postgres.PGUSER}}` |
+| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` |
+| `DB_HOST` | `${{Postgres.PGHOST}}` |
+| `DB_PORT` | `${{Postgres.PGPORT}}` |
+
+Replace `Postgres` with your database service's actual name. **Add a PostgreSQL
+service first if there isn't one** — otherwise there is no database at all.
+
+### 13.3 First-run checklist, in order
+
+```bash
+# 1 — confirm which database you are actually on
+python manage.py shell -c "from django.conf import settings; \
+print(settings.DATABASES['default']['ENGINE'], settings.DATABASES['default']['NAME'])"
+
+# 2 — create the tables
+python manage.py migrate
+
+# 3 — create the baseline services (see §7.2)
+python manage.py seed_services
+
+# 4 — verify, and copy the ids for the client
+python manage.py list_services
+```
+
+**Step 1 must print `django.db.backends.postgresql`.** If it prints `sqlite3`,
+stop: `DJANGO_ENV` is not set to `production`, and anything you seed will be
+written to a throwaway file inside the container.
+
+**Step 2 is not optional.** Skipping it makes step 3 fail with
+`relation "services_servicetype" does not exist`.
+
+### 13.4 Processes
+
+The `Procfile` declares three:
+
+```
+web:    gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+worker: celery -A config worker --loglevel=info
+beat:   celery -A config beat --loglevel=info
+```
+
+`web` alone serves the API. **`beat` is what expires dispatch offers** — without
+it, an unanswered offer never moves to `EXPIRED` and the booking never cascades
+to the next contractor. `worker` executes the tasks `beat` schedules. Both also
+need `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` pointing at Redis.
+
+### 13.5 Two failures that are not bugs
+
+| Symptom | Cause |
+| --- | --- |
+| `Unknown command: 'seed_services'` | the container is running an older deploy — redeploy the current commit |
+| `ImproperlyConfigured: settings.DATABASES …` | `DB_*` variables unset or empty — see §13.2 |
+
+Neither is an application defect; both are configuration.
 
 ---
 
