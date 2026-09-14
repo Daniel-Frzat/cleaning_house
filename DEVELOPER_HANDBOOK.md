@@ -525,6 +525,59 @@ Both login flows **create the account implicitly** on first success, always as
 > `GET /api/auth/me` beats the JWT claims: a role changed after the token was
 > issued shows up here first.
 
+> ### ⚠️ Never hard-code services as a client-side enum
+>
+> `service_selections[].service_type_id` in `POST /api/bookings` is a **UUID**,
+> and there is **no endpoint anywhere that accepts a service by name**. Sending a
+> name gives `422`; sending a made-up UUID gives `400 service_not_found`.
+>
+> So a client-side `enum { regular, deep, endOfLease }` has nothing to send when
+> the user actually books. Matching back by name is fragile in three ways, all
+> real:
+>
+> - `ServiceType.name` is editable at any time via
+>   `PATCH /api/admin/services/{id}`.
+> - An admin can add a fourth service, or more.
+> - An admin can deactivate one — it then **disappears** from `GET /api/services`
+>   and booking it returns `400 inactive_service`. Your list can shrink, not just
+>   grow.
+>
+> **Drive the list from `GET /api/services` and keep each `id`.** If your UI maps
+> services to fixed icons and local copy, key that map on **`id`, not `name`** —
+> the id never changes, the name can. Fall back to a generic icon for an
+> unrecognised service rather than dropping it silently.
+
+#### Getting the real ids
+
+The catalog starts **empty**: a fresh database has zero services, so
+`GET /api/services` returns `[]` until an admin creates some. Two management
+commands make the ids available without needing a token — useful because login
+is currently blocked in production (§1):
+
+```bash
+python manage.py seed_services          # create the three baseline services
+python manage.py seed_services --dry-run # preview; writes nothing
+python manage.py list_services          # table: id, name, active, description
+python manage.py list_services --json   # paste-ready JSON for the client
+```
+
+`seed_services` is **idempotent** and uses **fixed ids that are identical in
+every environment**, so a client icon map keyed on id can be written once:
+
+| Service | `service_type_id` |
+| --- | --- |
+| Regular Cleaning | `a1b2c3d4-0001-4000-8000-000000000001` |
+| Deep Cleaning | `a1b2c3d4-0002-4000-8000-000000000002` |
+| End of Lease Cleaning | `a1b2c3d4-0003-4000-8000-000000000003` |
+
+Re-running it never duplicates a service and **never overwrites an admin's
+edits** — prices and names stay under admin control via
+`PATCH /api/admin/services/{id}`. The seeded prices are starting values, not a
+pricing decision.
+
+> These three ids are pinned by a test. Changing one fails the build, because it
+> would break the icon map in every shipped client.
+
 ### 7.3 Role-gated
 
 **CUSTOMER** — properties (5), bookings (3), job confirm (1)
@@ -810,6 +863,13 @@ Two contractors racing to accept the same booking is the canonical case: one get
 | Earnings | `GET /api/bookings/{id}/payout` |
 
 ### 9.3 Things that will bite you
+
+**Services must come from the API, never from a client enum.** Booking takes a
+`service_type_id` UUID and nothing else — a hard-coded enum has no id to send
+when the user books. Keep your fixed icons and local "what's included" copy, but
+**key them on `id`**, populate the list from `GET /api/services`, and fall back
+to a generic icon for anything unrecognised. Full reasoning and the fixed ids are
+in §7.2.
 
 **Polling is the only option.** No push channel, no websocket, no
 offer-list endpoint. A customer learns of acceptance by polling the booking until
