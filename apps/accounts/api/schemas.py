@@ -10,6 +10,7 @@ API Schemas — Identity Domain (Phase 1)
 """
 
 import uuid
+from typing import Optional
 
 from ninja import Schema
 from pydantic import Field
@@ -50,10 +51,40 @@ class TokenPairOut(Schema):
 
 
 class UserOut(Schema):
+    """
+    بيانات المستخدم الحالي.
+
+    📌 full_name و email مكشوفان للمالك نفسه فقط — هذا الشكل لا يُستخدم
+       إلا في /auth/me وفي رد الدخول، وكلاهما يخص صاحب التوكن.
+
+    🔒 لا حقول امتياز أخرى: is_staff و is_superuser وgroups لا تُكشف
+       إطلاقًا، ولا password ولا last_login.
+    """
+
     id: uuid.UUID
     phone: str
     role: str
     status: str
+    # قد يكون "" (لم يُدخله المستخدم بعد)
+    full_name: str = ""
+    # قد يكون None (اختياري، ويُخزَّن NULL لا "")
+    email: Optional[str] = None
+
+
+class UserProfilePatch(Schema):
+    """
+    تعديل ذاتي للملف الشخصي.
+
+    ⚠️ حقلان لا ثالث لهما. phone و role و status غير موجودة عمدًا:
+       الأول معرّف الدخول (يحتاج تحقق OTP)، والباقيان حقول امتياز تُدار
+       من الإدارة — قبولهما هنا كان سيتيح تصعيد صلاحيات.
+
+    📌 التعديل جزئي: الحقل غير المُرسَل لا يُمس. إرسال email فارغًا يمسح
+       البريد (يصبح NULL)، وهو سلوك مقصود لا خطأ.
+    """
+
+    full_name: Optional[str] = Field(None, max_length=255)
+    email: Optional[str] = Field(None, max_length=254)
 
 
 class AuthOut(Schema):

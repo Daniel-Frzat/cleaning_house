@@ -258,7 +258,14 @@ Field types are Django's; the JSON type is what you actually receive.
 | `date_joined`, `updated_at` | datetime | |
 
 > `status` is the business state; `is_active` is the technical one. They are
-> deliberately independent. The API exposes only `id`, `phone`, `role`, `status`.
+> deliberately independent. The API exposes `id`, `phone`, `role`, `status`,
+> `full_name` and `email` — and nothing else. `is_staff`, `is_superuser`,
+> `password`, `last_login` and the permission relations are never returned.
+>
+> `full_name` and `email` are the only two a user can change themselves, via
+> `PATCH /api/auth/me`. `phone` is the login identifier and would need OTP
+> verification of the new number; `role` and `status` are privilege fields and
+> are managed by an administrator.
 
 **Related:** `OTPVerification` (stores only a `code_hash` — **the raw code is
 never stored**) and `SocialAccount` (unique per `provider` + `provider_user_id`).
@@ -500,7 +507,7 @@ Identical shape for both:
 
 ## 7. API surface by role
 
-43 endpoints. Full request/response examples live in
+44 endpoints. Full request/response examples live in
 [`API_INTEGRATION_GUIDE.md`](API_INTEGRATION_GUIDE.md); this is the map.
 
 ### 7.1 Public (no token)
@@ -519,7 +526,8 @@ Both login flows **create the account implicitly** on first success, always as
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/auth/me` | **authoritative** id/phone/role/status |
+| `GET` | `/api/auth/me` | **authoritative** id/phone/role/status + name/email |
+| `PATCH` | `/api/auth/me` | update **own** `full_name` and `email` only |
 | `GET` | `/api/services` | active services — **no prices** |
 | `GET` | `/api/services/{id}` | one active service — **no prices** |
 

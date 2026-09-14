@@ -16,6 +16,7 @@ Auth API — Identity Domain (Phase 1)
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from ninja import Router
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
@@ -35,6 +36,7 @@ from .schemas import (
     OTPVerifyIn,
     SocialLoginIn,
     UserOut,
+    UserProfilePatch,
 )
 
 router = Router(tags=["Auth"])
@@ -48,15 +50,27 @@ def _error(status, code, detail, retry_after_seconds=None):
     return status, payload
 
 
+def _serialize_user(user):
+    """
+    شكل المستخدم الموحَّد — مصدر واحد لـ/auth/me ولرد الدخول معًا.
+
+    🔒 قائمة حقول بيضاء صريحة: ما لا يُبنى هنا لا يظهر في أي رد. لا
+       is_staff ولا is_superuser ولا password ولا last_login.
+    """
+    return {
+        "id": user.id,
+        "phone": user.phone,
+        "role": user.role,
+        "status": user.status,
+        "full_name": user.full_name,
+        "email": user.email,
+    }
+
+
 def _auth_response(user):
     return {
         "tokens": issue_tokens_for_user(user),
-        "user": {
-            "id": user.id,
-            "phone": user.phone,
-            "role": user.role,
-            "status": user.status,
-        },
+        "user": _serialize_user(user),
     }
 
 
@@ -246,10 +260,60 @@ def me(request):
     الدور موجود أيضًا ضمن claims الـJWT، لكن هذه النقطة تبقى المرجع الأحدث
     (الدور قد يتغير بعد إصدار التوكن).
     """
-    user = request.user
-    return 200, {
-        "id": user.id,
-        "phone": user.phone,
-        "role": user.role,
-        "status": user.status,
-    }
+    return 200, _serialize_user(request.user)
+
+
+# ------------------------------------------------------------
+# PATCH /auth/me
+# ------------------------------------------------------------
+@router.patch(
+    "/me",
+    response={200: UserOut, 409: ErrorOut, 422: ErrorOut},
+    auth=JWTAuth(),
+    summary="Update own name and email",
+    description=(
+        "**Who may call:** any authenticated user, on their **own** account "
+        "only — the account is taken from the token and no user id is "
+        "accepted.\n\n"
+        "Partial update: only the fields present in the body are changed. "
+        "Sending `email` as an empty string clears it.\n\n"
+        "**Only `full_name` and `email` can be changed here.** `phone` is the "
+        "login identifier and would need OTP verification of the new number; "
+        "`role` and `status` are privilege fields managed by an "
+        "administrator. Neither is accepted, and sending one is rejected "
+        "rather than ignored.\n\n"
+        "**Side effects:** none beyond persisting the two fields. Email is "
+        "unique across accounts."
+    ),
+    openapi_extra={
+        "responses": {
+            409: {"description": "That email address is already used by another account."},
+            422: {"description": "The submitted values failed validation, or a field that cannot be changed here was sent."},
+        }
+    },
+)
+def update_me(request, payload: UserProfilePatch):
+    """
+    تعديل ذاتي — الاسم والبريد فقط.
+
+    🔒 الحساب يُشتق من التوكن: لا معرّف يُقبل من العميل، فلا مجال لتعديل
+       ملف مستخدم آخر.
+    """
+    fields = payload.dict(exclude_unset=True)
+
+    try:
+        user = identity_service.update_own_profile(request.user, **fields)
+    except identity_service.EmailAlreadyUsedError as exc:
+        # 409: تعارض مع حالة قائمة (حساب آخر يملك البريد)
+        return _error(409, exc.code, str(exc))
+    except ValidationError as exc:
+        detail = (
+            "; ".join(f"{f}: {' '.join(m)}" for f, m in exc.message_dict.items())
+            if hasattr(exc, "message_dict")
+            else "; ".join(exc.messages)
+        )
+        return _error(422, "validation_error", detail)
+    except identity_service.ProfileUpdateError as exc:
+        return _error(422, exc.code, str(exc))
+
+    return 200, _serialize_user(user)

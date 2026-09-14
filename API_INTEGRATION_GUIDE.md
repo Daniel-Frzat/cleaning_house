@@ -278,12 +278,14 @@ Authorization: Bearer <JWT access token>
 ```
 
 ```jsonc
-// 200 OK
+// 200 OK — a fresh account that has not set a name or email yet
 {
   "id": "37083f83-79d1-4a73-8070-cdf9452a69fc",
   "phone": "+61400000001",
   "role": "CUSTOMER",
-  "status": "ACTIVE"
+  "status": "ACTIVE",
+  "full_name": "",
+  "email": null
 }
 ```
 
@@ -291,6 +293,72 @@ The role is also embedded in the JWT claims, but **this endpoint is the
 authoritative source**: a role changed after the token was issued is reflected
 here first. Use it to decide which UI to show rather than trusting a decoded
 claim indefinitely.
+
+`full_name` defaults to an empty string and `email` to `null` — neither is
+collected during login, so both are unset until the user fills them in.
+
+### 3.6 Updating your own profile
+
+**Who may call:** any authenticated user, on their **own** account only — the
+account comes from the token and no user id is accepted.
+
+```http
+PATCH /api/auth/me
+Content-Type: application/json
+
+{
+  "full_name": "Grace Hopper",
+  "email": "grace@example.com"
+}
+```
+
+```jsonc
+// 200 OK — the full user object
+{
+  "id": "fa73dcb9-f9b1-43e3-be93-82f31cdf66f3",
+  "phone": "+61400990001",
+  "role": "CUSTOMER",
+  "status": "ACTIVE",
+  "full_name": "Grace Hopper",
+  "email": "grace@example.com"
+}
+```
+
+Partial update: omit a field and it is left alone. Sending `"email": ""`
+**clears** it — the response then shows `null`.
+
+> **Only these two fields can be changed.** `phone` is the login identifier and
+> would require OTP verification of the new number; `role` and `status` are
+> privilege fields managed by an administrator. Sending any of them has no
+> effect.
+
+Email is unique across accounts:
+
+```jsonc
+// 409 Conflict — another account already uses that address
+{
+  "code": "email_already_used",
+  "detail": "This email is already in use.",
+  "retry_after_seconds": null
+}
+```
+
+```jsonc
+// 422 Unprocessable Content — malformed address
+{
+  "code": "validation_error",
+  "detail": "email: Enter a valid email address.",
+  "retry_after_seconds": null
+}
+```
+
+> Note both bodies carry `retry_after_seconds: null` — every `/api/auth/*`
+> error does, because that domain's error schema declares it. It is only
+> non-null on `429 otp_resend_cooldown`. Also note this `422` is a **domain**
+> error with a `code` and a string `detail`, unlike the framework's `422`
+> described in [§7.1](#71-the-two-error-shapes), whose `detail` is an array.
+
+**Errors:** `401` unauthenticated · `409` email taken · `422` invalid value.
 
 ---
 
@@ -502,7 +570,7 @@ A failed payout leaves the job `COMPLETED` and the booking `CONFIRMED`.
 
 ## 6. Endpoint reference
 
-43 endpoints across 8 domains. Unless a row says otherwise, every endpoint
+44 endpoints across 8 domains. Unless a row says otherwise, every endpoint
 requires `Authorization: Bearer <JWT access token>`.
 
 ### 6.1 System
@@ -532,6 +600,7 @@ All four are covered with full examples in
 | `POST` | `/api/auth/otp/verify` | public | Verify the OTP, receive JWTs |
 | `POST` | `/api/auth/social/{provider}` | public | Log in with Apple or Google |
 | `GET` | `/api/auth/me` | any role | Current user's identity and role |
+| `PATCH` | `/api/auth/me` | any role | Update own `full_name` / `email` — see [§3.6](#36-updating-your-own-profile) |
 
 Error codes: `400` (invalid/expired code, unsupported provider), `401` (bad
 provider token), `403` (account not active), `429` (cooldown or too many
@@ -1807,7 +1876,7 @@ Notable consequences:
 ## 9. Notes for Postman / Insomnia users
 
 The API publishes a complete OpenAPI 3.1 document that any OpenAPI-aware tool can
-import as a ready-made collection of all 43 endpoints:
+import as a ready-made collection of all 44 endpoints:
 
 ```
 https://cleaninghouse-production.up.railway.app/api/openapi.json
