@@ -103,6 +103,13 @@ class PropertyPatch(Schema):
     address: Optional[AddressPatch] = None
 
 
+class ServiceabilityWarningOut(Schema):
+    """سبب عدم قابلية العقار للإسناد — نص جاهز للعرض ورمز ثابت للتفريع."""
+
+    code: str
+    message: str
+
+
 class PropertyOut(Schema):
     id: uuid.UUID
     # معرّف المالك فقط — لا بيانات حساب أخرى
@@ -113,6 +120,10 @@ class PropertyOut(Schema):
     created_at: datetime
     updated_at: datetime
     address: Optional[AddressOut] = None
+    # 📌 مشتقّ لا مخزَّن: null يعني العقار قابل للإسناد.
+    # ⚠️ عقار بلا إحداثيات يُنشأ بنجاح لكنه لا يُسنَد إليه مقاول أبدًا،
+    #    والفشل صامت في محرّك الترشيح. هذا الحقل يكشفه لحظة الإنشاء.
+    serviceability_warning: Optional[ServiceabilityWarningOut] = None
 
 
 class ErrorOut(Schema):

@@ -317,8 +317,8 @@ never stored**) and `SocialAccount` (unique per `provider` + `provider_user_id`)
 | --- | --- | --- |
 | `street_address` | string(255) | |
 | `suburb` | string(120) | |
-| `state` | enum | the 8 Australian states/territories |
-| `postcode` | string(4) | **exactly 4 digits** |
+| `state` | enum | the 8 Australian states/territories — **closed list, never free text** |
+| `postcode` | string(4) | **exactly 4 digits**, and must belong to `state` |
 | `country` | string(2) | always `"AU"`, **read-only** |
 | `latitude` / `longitude` | decimal(9,6) | **nullable — see warning** |
 | `raw_input` | text | optional, as originally typed |
@@ -332,6 +332,40 @@ never stored**) and `SocialAccount` (unique per `provider` + `provider_user_id`)
 > every contractor search silently. The booking is still accepted with `201` and
 > then never receives an offer, so clients should treat the two fields as
 > required, and the admin dashboard should surface properties that lack them.
+
+**`serviceability_warning`** — derived, on every property response
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `code` | string | stable identifier — branch on this |
+| `message` | string | display-ready English |
+
+`null` when the property is dispatchable. Today the only `code` is
+`missing_coordinates`. **Derived, not stored:** recomputed on every read, so it
+clears itself as soon as a `PATCH` adds the coordinates — there is no field to
+migrate and nothing that can go stale. It is deliberately a *warning*, not an
+error: the property is still created and read successfully.
+
+It exists because that failure was otherwise invisible until it surfaced much
+later as a booking stuck on `NO_CONTRACTOR`. The warning matches the dispatch
+engine's own condition exactly — if one changes without the other, a test fails.
+
+> ### Postcode / state consistency
+>
+> The postcode must fall within the state's range, or the request is `422`:
+> `"state": "VIC", "postcode": "2311"` is rejected because `2311` is NSW. The
+> message names the correct state so the client can offer a fix.
+>
+> This is a **consistency check, not address verification** — it says the
+> postcode belongs to that state, not that the street exists. Real address
+> verification needs an external provider (open decision #23, still unresolved).
+> Ranges are the official Australia Post ones and are applied generously; shared
+> ranges (ACT inside NSW numbering) accept both. Where in doubt it accepts,
+> because wrongly rejecting a real address is worse than storing a typo.
+>
+> **Why it matters beyond tidiness:** the booking's timezone is derived from
+> `state`, and business hours (07:00–19:00) are enforced in that timezone. A
+> wrong state means a wrong window, by up to three hours.
 
 ### 5.3 `ServiceType` / `PricingConfig`
 
@@ -1011,6 +1045,16 @@ a location drops out of every search. The booking still returns `201` and then
 **never receives an offer, with no error anywhere**. Capture the device's GPS and
 treat both fields as required; a property saved without them can be repaired with
 `PATCH /api/properties/{id}`.
+
+For properties, you no longer have to detect this yourself — read
+`serviceability_warning` off any property response (`null` means fine) and show
+a badge in the properties list. There is no equivalent field on the contractor
+side yet.
+
+**`state` is a picker, not a text field.** One of `NSW VIC QLD WA SA TAS ACT NT`.
+A city name is rejected (`"Melbourne"` → `422`; Melbourne is `VIC`). The postcode
+must also belong to the state, so `VIC` + `2311` is `422` with a message naming
+NSW. Validate both locally before submitting — you have everything you need.
 
 **Polling is the only option.** No push channel, no websocket, no
 offer-list endpoint. A customer learns of acceptance by polling the booking until

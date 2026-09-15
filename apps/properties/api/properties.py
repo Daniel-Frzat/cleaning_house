@@ -30,6 +30,7 @@ from ninja_jwt.authentication import JWTAuth
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import properties as svc
+from ..services import serviceability as serviceability_svc
 from .schemas import ErrorOut, PropertyIn, PropertyOut, PropertyPatch
 
 router = Router(tags=["Properties"], auth=JWTAuth())
@@ -96,6 +97,8 @@ def _serialize(prop):
             "longitude": address.longitude,
             "raw_input": address.raw_input,
         },
+        # 📌 يُحسب لحظيًا من العنوان — لا حقل مخزَّن يتقادم.
+        "serviceability_warning": serviceability_svc.serviceability_warning(prop),
     }
 
 

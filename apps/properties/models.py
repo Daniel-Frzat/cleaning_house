@@ -12,8 +12,11 @@ Properties & Address Models — Properties Domain (Phase 1)
 
 import uuid
 
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
+
+from .services.postcodes import postcode_state_error
 
 
 class PropertyType(models.TextChoices):
@@ -140,6 +143,22 @@ class PropertyAddress(models.Model):
             models.Index(fields=["suburb", "state"]),
             models.Index(fields=["postcode"]),
         ]
+
+    def clean(self):
+        """
+        🔒 يمنع عنوانًا متناقضًا: رمز بريدي من ولاية أخرى.
+
+        ⚠️ على النموذج لا على الـschema عمدًا: القاعدة تسري على الإنشاء
+           والتعديل ومسارات الإدارة معًا، ولا تعتمد على انضباط كل مسار.
+
+        المنطقة الزمنية للحجز تُشتق من state، فالولاية الخاطئة تعني نافذة
+        ساعات عمل خاطئة — لهذا الاتساق قاعدة بيانات لا تجميلًا.
+        """
+        super().clean()
+
+        error = postcode_state_error(self.postcode, self.state)
+        if error:
+            raise ValidationError({"postcode": error})
 
     def __str__(self):
         return f"{self.street_address}, {self.suburb} {self.state} {self.postcode}"

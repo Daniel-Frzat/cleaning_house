@@ -23,6 +23,12 @@ VALID_ADDRESS = {
     "postcode": "2026",
 }
 
+# رمز بريدي حقيقي لكل ولاية — الرمز والولاية يجب أن يتّسقا (models.clean)
+CAPITAL_POSTCODES = {
+    "NSW": "2000", "VIC": "3000", "QLD": "4000", "SA": "5000",
+    "WA": "6000", "TAS": "7000", "NT": "0800", "ACT": "2600",
+}
+
 VALID_PROPERTY = {
     "label": "Home",
     "property_type": "HOUSE",
@@ -133,7 +139,8 @@ def test_all_australian_states_accepted(client, customer_a):
         payload = {
             "label": f"P{i}",
             "property_type": "UNIT",
-            "address": {**VALID_ADDRESS, "state": state},
+            "address": {**VALID_ADDRESS, "state": state,
+                        "postcode": CAPITAL_POSTCODES[state]},
         }
         r = post(client, "/api/properties", payload, **auth(customer_a))
         assert r.status_code == 201, (state, r.content)

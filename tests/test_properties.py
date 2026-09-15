@@ -37,6 +37,12 @@ VALID_ADDRESS = {
     "postcode": "2026",
 }
 
+# رمز بريدي حقيقي لكل ولاية — الرمز والولاية يجب أن يتّسقا (models.clean)
+CAPITAL_POSTCODES = {
+    "NSW": "2000", "VIC": "3000", "QLD": "4000", "SA": "5000",
+    "WA": "6000", "TAS": "7000", "NT": "0800", "ACT": "2600",
+}
+
 
 # ============================================================
 # 3) العقار يتطلب مالكًا
@@ -81,7 +87,9 @@ def test_address_accepts_all_valid_australian_states(customer):
     for i, state in enumerate(AustralianState.values):
         prop = Property.objects.create(owner=customer, label=f"P{i}")
         address = PropertyAddress(
-            property=prop, **{**VALID_ADDRESS, "state": state}
+            property=prop,
+            **{**VALID_ADDRESS, "state": state,
+               "postcode": CAPITAL_POSTCODES[state]},
         )
         address.full_clean()  # يجب ألا يرفع
         address.save()
@@ -112,7 +120,11 @@ def test_invalid_postcode_raises_validation_error(customer, bad_postcode):
 @pytest.mark.django_db
 def test_valid_four_digit_postcode_is_accepted(customer):
     prop = Property.objects.create(owner=customer)
-    address = PropertyAddress(property=prop, **{**VALID_ADDRESS, "postcode": "0800"})
+    # 0800 دارون — الصفر البادئ يجب أن يبقى، والولاية تطابقه (NT)
+    address = PropertyAddress(
+        property=prop,
+        **{**VALID_ADDRESS, "state": AustralianState.NT, "postcode": "0800"},
+    )
     address.full_clean()
     address.save()
     assert address.postcode == "0800"

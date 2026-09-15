@@ -858,7 +858,8 @@ Content-Type: application/json
     "latitude": "-33.870000",
     "longitude": "151.210000",
     "raw_input": null
-  }
+  },
+  "serviceability_warning": null
 }
 ```
 
@@ -867,6 +868,36 @@ Content-Type: application/json
 (defaults to `HOUSE`). `state` is one of `NSW`, `VIC`, `QLD`, `WA`, `SA`, `TAS`,
 `ACT`, `NT`. `postcode` must be **exactly 4 digits**. `raw_input` is an optional
 free-text field for the address as originally typed.
+
+> ### `state` is a closed list — never free text
+>
+> It must be one of the eight codes above. A city name is **not** a state:
+> sending `"Melbourne"` returns `422`. Melbourne is in `VIC`, Sydney in `NSW`,
+> Brisbane in `QLD`. Build this field as a picker, not a text input.
+>
+> This is not cosmetic. The booking's timezone is derived from `state`, and the
+> 07:00–19:00 business-hours rule is applied in that timezone — the wrong state
+> means the wrong window, by up to three hours.
+>
+> ### The postcode must belong to the state
+>
+> `"suburb": "Fitzroy", "state": "VIC", "postcode": "2311"` is rejected with
+> `422`: `2311` is a NSW postcode, and Fitzroy is in Victoria (`3065`). The
+> error names the state the postcode actually belongs to, so you can offer a
+> correction:
+>
+> ```jsonc
+> // 422
+> {
+>   "code": "validation_error",
+>   "detail": "postcode: Postcode 2311 is not in VIC; it belongs to NSW."
+> }
+> ```
+>
+> This is a **consistency check, not address verification** — it confirms the
+> postcode belongs to that state, not that the street exists. Ranges are the
+> official Australia Post ones, applied generously: where a range is shared
+> (ACT sits inside the NSW numbering), both states are accepted.
 
 > **`country` is always `"AU"`** and is not accepted in the request — it is
 > read-only.
@@ -891,6 +922,30 @@ free-text field for the address as originally typed.
 > A property saved without coordinates can be fixed later with
 > `PATCH /api/properties/{id}` — send only the nested `address` object with the
 > two fields.
+
+**`serviceability_warning` tells you when this has happened.** Every property
+response carries it. It is `null` when the property is fine, and otherwise
+explains why no cleaner can be matched to it:
+
+```jsonc
+// 201 Created — saved, but not bookable
+{
+  "id": "…",
+  "address": { "…": "…", "latitude": null, "longitude": null },
+  "serviceability_warning": {
+    "code": "missing_coordinates",
+    "message": "This property has no GPS coordinates, so no cleaner can be matched to it. Set the location to make it bookable."
+  }
+}
+```
+
+Branch on `code` (stable); `message` is display-ready English. The field is
+**derived, not stored** — it is recomputed on every read, so it disappears by
+itself the moment you `PATCH` the coordinates in. No extra call is needed.
+
+Show it as a badge in the properties list and a warning on the address step:
+this is the one failure the customer can still fix *before* it turns into a
+booking that never receives an offer.
 
 **Errors:** `403` not a `CUSTOMER` · `422` validation failure.
 
