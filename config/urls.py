@@ -61,8 +61,7 @@ Both flows return an `access` and a `refresh` token.
 
 ## Roles
 
-Every user carries exactly one role, and it decides which endpoints are
-reachable:
+A user's permissions decide which endpoints are reachable:
 
 * **CUSTOMER** — owns properties, creates bookings, confirms job completion.
 * **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,
@@ -70,7 +69,16 @@ reachable:
 * **ADMIN** — manages the service catalog and pricing, reviews contractor
   verifications, and sees provider references hidden from other roles.
 
-Calling an endpoint with the wrong role returns `403`. On resources that are
+**One account can hold both the customer and contractor permissions** — the
+same login books cleans and, once approved, takes work. `ADMIN` is exclusive
+and is never combined with either.
+
+`GET /api/auth/me` returns `roles` (an array — read this), alongside
+`contractor_status` and `available_modes`. The singular `role` field is the
+account's primary role and is kept for backwards compatibility only: a
+dual-role account reports `"role": "CUSTOMER"` while `roles` holds both.
+
+Calling an endpoint without the required permission returns `403`. On resources that are
 owned by a specific user, a request from a non-owner returns `404` instead of
 `403` wherever distinguishing the two would leak the existence of the resource.
 
