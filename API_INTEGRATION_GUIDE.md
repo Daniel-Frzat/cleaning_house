@@ -226,9 +226,23 @@ Content-Type: application/json
 }
 ```
 
+The request body has **exactly one field, `token`** — a bare provider identity
+token. Any other field name (`id_token`, `access_token`, …) is rejected with
+`422`, and an empty string with `422`.
+
+> **Send the provider's own token, unwrapped.** The server calls the provider
+> directly to verify it. A token re-issued by an intermediary — a Firebase
+> `signInWithCredential` id-token, for example — is not the provider's token and
+> will not verify.
+
 The success body is **identical in shape** to the OTP verify response above
-(`tokens` + `user`). As with OTP, the first successful login for an unknown
-provider identity creates the account.
+(`tokens` + `user`) — note `tokens.access`, not a top-level `access`. As with
+OTP, the first successful login for an unknown provider identity creates the
+account.
+
+**Errors:** `400 unsupported_provider` (a `{provider}` other than the two) ·
+`401 social_auth_failed` (the provider rejected the token) · `403` the account
+is not active · `422` the body shape is wrong.
 
 ### 3.3 Using the token
 
@@ -2201,9 +2215,20 @@ for non-admins. Use `signed_url` to display photos in all cases.
 
 ## 8. Roles and permissions summary
 
-Every user has exactly one role: `CUSTOMER`, `CONTRACTOR` or `ADMIN`. Roles are
-assigned out-of-band; the API cannot change a role. New accounts are always
-created as `CUSTOMER`.
+Accounts are always created as `CUSTOMER`. A single account can hold **both**
+the customer and contractor permissions — one login, one `user_id`, one phone
+number, both sides of the marketplace. `ADMIN` is **exclusive**: it is never
+combined with either.
+
+Read permissions from the `roles` array on `GET /api/auth/me`, not from the
+singular `role`. The singular field is retained for backwards compatibility and
+reports only the primary role, so a dual-role account shows
+`"role": "CUSTOMER"` while `roles` holds both. A user becomes a contractor by
+creating a contractor profile on the account they already have; the API has no
+endpoint that assigns `ADMIN`.
+
+The table below reads per permission: a dual-role account gets the `CUSTOMER`
+column **and** the `CONTRACTOR` column.
 
 | Endpoint group | CUSTOMER | CONTRACTOR | ADMIN |
 | --- | :---: | :---: | :---: |
