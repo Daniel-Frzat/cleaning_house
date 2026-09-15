@@ -789,7 +789,9 @@ Content-Type: application/json
     "street_address": "12 George St",
     "suburb": "Sydney",
     "state": "NSW",
-    "postcode": "2000"
+    "postcode": "2000",
+    "latitude": "-33.870000",
+    "longitude": "151.210000"
   }
 }
 ```
@@ -811,8 +813,8 @@ Content-Type: application/json
     "state": "NSW",
     "postcode": "2000",
     "country": "AU",
-    "latitude": null,
-    "longitude": null,
+    "latitude": "-33.870000",
+    "longitude": "151.210000",
     "raw_input": null
   }
 }
@@ -827,10 +829,26 @@ free-text field for the address as originally typed.
 > **`country` is always `"AU"`** and is not accepted in the request — it is
 > read-only.
 >
-> **`latitude` and `longitude` are not accepted in the request and come back
-> `null`.** There is no geocoding in this build. This matters: **a property with
-> no coordinates can never be dispatched**, because distance cannot be measured.
-> Coordinates are currently populated out-of-band.
+> ### Send the device's GPS coordinates
+>
+> `latitude` and `longitude` are optional in the schema, but **a property
+> without them can never be dispatched** — the matching engine ranks contractors
+> by distance, and a property with no location drops out of every search
+> silently, with no error on the booking. The booking is accepted with `201` and
+> then simply never receives an offer.
+>
+> **Treat them as required in your UI.** Capture them from the device when the
+> customer confirms the address. They are optional here only so that properties
+> created before the field existed keep working.
+>
+> There is no geocoding on the server: it does not turn the street address into
+> coordinates, and it does not verify that the two agree. Values must be within
+> ±90 / ±180 or the request is rejected with `422`; they are not restricted to
+> Australia.
+>
+> A property saved without coordinates can be fixed later with
+> `PATCH /api/properties/{id}` — send only the nested `address` object with the
+> two fields.
 
 **Errors:** `403` not a `CUSTOMER` · `422` validation failure.
 
@@ -1151,6 +1169,13 @@ Content-Type: application/json
 
 **Every field is optional here** — all address fields default to `""`. But note:
 
+> **Send the device's GPS coordinates here too.** `latitude` and `longitude`
+> are what put a contractor into the matching engine's search. **A contractor
+> without them is never offered any work** — they simply receive nothing, with
+> no error to explain why. Same bounds as a property (±90 / ±180), same `422` on
+> an impossible value, and the same `PATCH /api/contractor/profile` to fix or
+> update them later.
+>
 > **The profile always starts `UNAVAILABLE`.** `availability_status` is not
 > accepted in the request body and is ignored if sent. Availability is a
 > deliberate, separate action.

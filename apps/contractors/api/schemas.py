@@ -19,6 +19,11 @@ from pydantic import Field
 from ..models import AustralianState, AvailabilityStatus, VerificationStatus
 
 
+# حدود الإحداثيات — فحص شكلي لا جغرافي (نفس قاعدة apps/properties).
+LatitudeField = Field(None, ge=-90, le=90, max_digits=9, decimal_places=6)
+LongitudeField = Field(None, ge=-180, le=180, max_digits=9, decimal_places=6)
+
+
 class ContractorProfileIn(Schema):
     """
     إنشاء ملف المقاول.
@@ -35,9 +40,11 @@ class ContractorProfileIn(Schema):
     state: Optional[AustralianState] = None
     postcode: str = Field("", pattern=r"^(\d{4})?$")
 
-    # تُملأ يدويًا — لا geocoding في هذه المرحلة (§34/§4)
-    latitude: Optional[Decimal] = None
-    longitude: Optional[Decimal] = None
+    # 📌 تصل من GPS الجهاز عند الالتقاط — لا geocoding على الخادم (§34/§4).
+    # ⚠️ المقاول بلا إحداثيات **لا يصله أي عرض إطلاقًا**: الترشيح يقيس
+    #    المسافة، ومن لا موقع له يسقط صامتًا بلا رسالة خطأ.
+    latitude: Optional[Decimal] = LatitudeField
+    longitude: Optional[Decimal] = LongitudeField
 
 
 class ContractorProfilePatch(Schema):
@@ -55,8 +62,8 @@ class ContractorProfilePatch(Schema):
     state: Optional[AustralianState] = None
     postcode: Optional[str] = Field(None, pattern=r"^(\d{4})?$")
 
-    latitude: Optional[Decimal] = None
-    longitude: Optional[Decimal] = None
+    latitude: Optional[Decimal] = LatitudeField
+    longitude: Optional[Decimal] = LongitudeField
 
 
 class AvailabilityPatch(Schema):

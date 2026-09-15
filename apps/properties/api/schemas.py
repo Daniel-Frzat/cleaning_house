@@ -21,28 +21,49 @@ from ..models import AustralianState, PropertyType
 # ------------------------------------------------------------
 # العنوان
 # ------------------------------------------------------------
+# حدود الإحداثيات الجغرافية — فحص شكلي لا جغرافي.
+# 📌 لا نقيّدها بحدود أستراليا: عنوان قرب الحدود البحرية أو خطأ بسيط في
+#    قراءة GPS كان سيُرفض بلا مبرر. الرفض هنا لقيمة مستحيلة فقط.
+LatitudeField = Field(None, ge=-90, le=90, max_digits=9, decimal_places=6)
+LongitudeField = Field(None, ge=-180, le=180, max_digits=9, decimal_places=6)
+
+
 class AddressIn(Schema):
     """
     حقول العنوان عند الإنشاء.
 
     country غير موجود عمدًا — منتج بسوق واحد، والحقل غير قابل للتعديل.
-    latitude/longitude غير موجودين — تُعبَّآن لاحقًا عبر GPS adapter (Phase 2).
+
+    📌 latitude/longitude اختياريان ويُرسَلان من GPS الجهاز عند الالتقاط.
+       ⚠️ العقار بلا إحداثيات **لا يُسنَد إليه أي مقاول إطلاقًا**: محرّك
+          الإسناد يقيس المسافة، ومن لا موقع له يسقط من الترشيح صامتًا.
+          فاجعلهما إلزاميين في الواجهة ولو كانا اختياريين هنا — الاختيارية
+          للتوافق مع العقارات القائمة لا لتشجيع تركهما.
     """
 
     street_address: str = Field(..., min_length=1, max_length=255)
     suburb: str = Field(..., min_length=1, max_length=120)
     state: AustralianState
     postcode: str = Field(..., pattern=r"^\d{4}$")
+    latitude: Optional[Decimal] = LatitudeField
+    longitude: Optional[Decimal] = LongitudeField
     raw_input: Optional[str] = None
 
 
 class AddressPatch(Schema):
-    """كل الحقول اختيارية — تعديل جزئي."""
+    """
+    كل الحقول اختيارية — تعديل جزئي.
+
+    📌 تحديث الإحداثيات متاح هنا: عقار أُنشئ بلا موقع (أو بموقع خاطئ)
+       يُصحَّح بـPATCH، فيصير قابلًا للإسناد.
+    """
 
     street_address: Optional[str] = Field(None, min_length=1, max_length=255)
     suburb: Optional[str] = Field(None, min_length=1, max_length=120)
     state: Optional[AustralianState] = None
     postcode: Optional[str] = Field(None, pattern=r"^\d{4}$")
+    latitude: Optional[Decimal] = LatitudeField
+    longitude: Optional[Decimal] = LongitudeField
     raw_input: Optional[str] = None
 
 

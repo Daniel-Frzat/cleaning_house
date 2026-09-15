@@ -317,11 +317,15 @@ never stored**) and `SocialAccount` (unique per `provider` + `provider_user_id`)
 | `latitude` / `longitude` | decimal(9,6) | **nullable — see warning** |
 | `raw_input` | text | optional, as originally typed |
 
-> ⚠️ **Coordinates are not set by the API.** There is no geocoding in this build,
-> and `POST /api/properties` does not accept them. **A property with no
-> coordinates can never be dispatched**, because distance cannot be measured.
-> They are currently populated out of band — the admin dashboard should surface
-> which properties lack them.
+> ⚠️ **Coordinates come from the device's GPS**, sent with the address on
+> `POST /api/properties` and fixable later with `PATCH`. There is no geocoding:
+> the server never derives them from the street address, nor checks that the two
+> agree. Range is validated (±90 / ±180, `422` otherwise) but not the country.
+>
+> **A property with no coordinates can never be dispatched** — it drops out of
+> every contractor search silently. The booking is still accepted with `201` and
+> then never receives an offer, so clients should treat the two fields as
+> required, and the admin dashboard should surface properties that lack them.
 
 ### 5.3 `ServiceType` / `PricingConfig`
 
@@ -355,7 +359,7 @@ never stored**) and `SocialAccount` (unique per `provider` + `provider_user_id`)
 | `business_name` | string(255) | may be empty |
 | `street_address`, `suburb`, `state`, `postcode` | | all may be empty |
 | `country` | string(2) | always `"AU"`, read-only |
-| `latitude` / `longitude` | decimal(9,6) | **entered manually; required for dispatch** |
+| `latitude` / `longitude` | decimal(9,6) | **from the device's GPS; required for dispatch** — a contractor without them is never offered work |
 | `availability_status` | enum | `AVAILABLE` · `UNAVAILABLE` — **default `UNAVAILABLE`** |
 
 **`BusinessRegistration`** and **`InsuranceDocument`** share a common review base:
