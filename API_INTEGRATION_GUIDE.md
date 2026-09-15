@@ -757,22 +757,59 @@ Returns **only active services**. A service an administrator has deactivated
 never appears here, which matches booking creation rejecting it with `400`.
 
 ```jsonc
-// 200 OK
+// 200 OK — the seeded catalog, trimmed to four of its seven rows
 [
   {
-    "id": "9a9ec0f3-c466-40d3-8861-cf8577e076e2",
-    "name": "Carpet Cleaning",
-    "description": "Steam clean for carpeted rooms"
+    "id": "a1b2c3d4-0104-4000-8000-000000000104",
+    "name": "Balcony Clean",
+    "description": "Sweep, mop and wipe down balcony surfaces and railings. Flat fee, not per room."
   },
   {
-    "id": "ae907a34-a2dc-49f5-a59c-7d74b19ae051",
-    "name": "General Cleaning",
-    "description": "Standard home clean"
+    "id": "a1b2c3d4-0002-4000-8000-000000000002",
+    "name": "Deep Cleaning",
+    "description": "Thorough clean including inside appliances, skirting boards, window tracks and detailed bathroom work."
+  },
+  {
+    "id": "a1b2c3d4-0101-4000-8000-000000000101",
+    "name": "Inside Oven Clean",
+    "description": "Degrease and detail the oven interior, racks and door glass. Flat fee, not per room."
+  },
+  {
+    "id": "a1b2c3d4-0001-4000-8000-000000000001",
+    "name": "Regular Cleaning",
+    "description": "Routine home clean: dusting, vacuuming, mopping, kitchen and bathroom surfaces."
   }
 ]
 ```
 
 Three fields, no more. An empty catalog returns `[]`, not `404`.
+
+**The list is sorted alphabetically by name**, so baseline services and add-ons
+are interleaved. If your UI groups them, sort and group client-side.
+
+#### Add-ons are ordinary services
+
+There is **no separate add-on concept** in this API. An add-on is a
+`ServiceType` whose per-room price is zero, so it costs a flat fee. The seeded
+catalog contains seven rows:
+
+| | `service_type_id` | Sent with |
+| --- | --- | --- |
+| Regular Cleaning | `a1b2c3d4-0001-4000-8000-000000000001` | a real `room_count` |
+| Deep Cleaning | `a1b2c3d4-0002-4000-8000-000000000002` | a real `room_count` |
+| End of Lease Cleaning | `a1b2c3d4-0003-4000-8000-000000000003` | a real `room_count` |
+| Inside Oven Clean | `a1b2c3d4-0101-4000-8000-000000000101` | `"room_count": 0` |
+| Interior Windows | `a1b2c3d4-0102-4000-8000-000000000102` | `"room_count": 0` |
+| Carpet Steam Clean | `a1b2c3d4-0103-4000-8000-000000000103` | `"room_count": 0` |
+| Balcony Clean | `a1b2c3d4-0104-4000-8000-000000000104` | `"room_count": 0` |
+
+These ids are **fixed in every environment**, so a client can key its icons and
+local copy on the id rather than the name — an administrator can rename a
+service, but never its id.
+
+> Because an add-on's per-room price is zero, sending the wrong `room_count`
+> for one cannot change what it costs. `0` is the correct value; anything else
+> produces the same price.
 
 **Errors:** `401` if the token is missing or invalid. There is no `403` — every
 authenticated role may read.
@@ -1237,36 +1274,48 @@ Content-Type: application/json
   "property_id": "2017681b-f93f-4cdc-8fab-eb1994adbc91",
   "service_selections": [
     {
-      "service_type_id": "bba37709-a157-4c1d-8704-861b40245048",
+      "service_type_id": "a1b2c3d4-0001-4000-8000-000000000001",
       "room_count": 3
+    },
+    {
+      "service_type_id": "a1b2c3d4-0101-4000-8000-000000000101",
+      "room_count": 0
     }
   ],
-  "scheduled_at": "2026-09-19T09:00:00+10:00"
+  "scheduled_at": "2026-09-20T09:00:00+10:00"
 }
 ```
+
+*(A baseline service with three rooms, plus one add-on at `room_count: 0`.)*
 
 ```jsonc
 // 201 Created
 {
-  "id": "7c79b140-a05b-4d23-a467-034b582b04e2",
-  "customer_id": "37083f83-79d1-4a73-8070-cdf9452a69fc",
+  "id": "108ef394-33ec-4b2d-954e-bbbc648bbaac",
+  "customer_id": "e25edee8-a403-4067-99fd-74f4b4e5b378",
   "property_id": "2017681b-f93f-4cdc-8fab-eb1994adbc91",
   "status": "PENDING",
   "computed_price": null,
   "assigned_contractor_id": null,
-  "scheduled_at": "2026-09-18T23:00:00Z",
-  "scheduled_at_local": "2026-09-19T09:00:00+10:00",
+  "scheduled_at": "2026-09-19T23:00:00Z",
+  "scheduled_at_local": "2026-09-20T09:00:00+10:00",
   "customer_timezone": "Australia/Sydney",
   "service_selections": [
     {
-      "id": "7ccdbf8a-64fc-45d0-a99e-e131e8229bcf",
-      "service_type_id": "bba37709-a157-4c1d-8704-861b40245048",
-      "service_type_name": "General Cleaning",
+      "id": "4eea7c75-0bcd-48cd-8980-f49dba384c57",
+      "service_type_id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "service_type_name": "Regular Cleaning",
       "room_count": 3
+    },
+    {
+      "id": "6ea4bcb6-2993-4345-aebc-36baccbf8bf2",
+      "service_type_id": "a1b2c3d4-0101-4000-8000-000000000101",
+      "service_type_name": "Inside Oven Clean",
+      "room_count": 0
     }
   ],
-  "created_at": "2026-09-13T10:15:18.400Z",
-  "updated_at": "2026-09-13T10:15:18.400Z"
+  "created_at": "2026-09-15T09:41:25.184Z",
+  "updated_at": "2026-09-15T09:41:25.184Z"
 }
 ```
 
@@ -1843,6 +1892,7 @@ created as `CUSTOMER`.
 | --- | :---: | :---: | :---: |
 | `POST /api/auth/*` (OTP, social) | public | public | public |
 | `GET /api/auth/me` | ✅ | ✅ | ✅ |
+| `PATCH /api/auth/me` — own name/email | ✅ | ✅ | ✅ |
 | `GET /api/health` | public | public | public |
 | **Properties** — all 5 endpoints | ✅ own only | ❌ 403 | ❌ 403 |
 | **Services (public catalog)** — list, retrieve (2) | ✅ no prices | ✅ no prices | ✅ no prices |
@@ -1868,6 +1918,9 @@ Notable consequences:
   gives any authenticated user the active services — id, name and description —
   which is where a client app gets its `service_type_id` values. Raw prices stay
   admin-only, and the price fields are absent from that response for every role.
+- **Add-ons are just services.** Four of the seven seeded rows carry a flat fee
+  instead of a per-room price; send them with `"room_count": 0`. Nothing in the
+  API marks them as add-ons — grouping them is a client decision.
 - **Contractors cannot see prices before accepting** and cannot list their
   pending offers.
 

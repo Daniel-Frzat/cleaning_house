@@ -141,6 +141,7 @@ the API cannot change a role — that is done in the Django admin site.
 
 | | CUSTOMER | CONTRACTOR | ADMIN |
 | --- | --- | --- | --- |
+| Reads and edits **own** name / email | ✅ | ✅ | ✅ |
 | Owns properties, creates bookings | ✅ | — | — |
 | Confirms job completion | ✅ **only for own booking** | — | — |
 | Contractor profile + availability | — | ✅ own only | — |
@@ -870,9 +871,12 @@ Two contractors racing to accept the same booking is the canonical case: one get
 | --- | --- |
 | Login | `POST /api/auth/otp/request` → `POST /api/auth/otp/verify` |
 | Bootstrap | `GET /api/auth/me` — branch the whole UI on `role` |
+| Profile / "Welcome back, {name}" | `GET /api/auth/me` → `full_name` |
+| Edit personal details | `PATCH /api/auth/me` — `full_name` and `email` only |
 | My properties | `GET /api/properties` |
 | Add property | `POST /api/properties` (property + address in **one** call) |
 | Pick a service | `GET /api/services` — use `id` as `service_type_id` |
+| Pick add-ons | same call — the flat-fee services, sent with `"room_count": 0` |
 | Create booking | `POST /api/bookings` — **show no price on this screen** |
 | Track booking | `GET /api/bookings` / `GET /api/bookings/{id}` — **poll** |
 | Job progress + photos | `GET /api/bookings/{id}/job` |
