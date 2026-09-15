@@ -30,14 +30,18 @@ def run(command, *args):
 # 1) البذر
 # ============================================================
 @pytest.mark.django_db
-def test_seed_creates_the_three_baseline_services():
+def test_seed_creates_every_baseline_service():
     assert ServiceType.objects.count() == 0
 
     run("seed_services")
 
-    assert ServiceType.objects.count() == 3
+    assert ServiceType.objects.count() == 7
     names = set(ServiceType.objects.values_list("name", flat=True))
-    assert names == {"Regular Cleaning", "Deep Cleaning", "End of Lease Cleaning"}
+    assert names == {
+        "Regular Cleaning", "Deep Cleaning", "End of Lease Cleaning",
+        "Inside Oven Clean", "Interior Windows", "Carpet Steam Clean",
+        "Balcony Clean",
+    }
 
 
 # 🔒 المعرّفات المنشورة، مكتوبة هنا حرفيًا لا مستوردة من SEED_SERVICES.
@@ -45,9 +49,22 @@ def test_seed_creates_the_three_baseline_services():
 #    شيئًا. هذه النسخة الثانية المستقلة هي ما يكسر البناء فعليًا لو غُيّر
 #    معرّف خدمة منشورة — وهو تغيير يكسر خريطة الأيقونات عند كل عميل.
 PUBLISHED_IDS = {
+    # الخدمات الأساسية — سعر غرفة + رسم أساسي
     "Regular Cleaning": "a1b2c3d4-0001-4000-8000-000000000001",
     "Deep Cleaning": "a1b2c3d4-0002-4000-8000-000000000002",
     "End of Lease Cleaning": "a1b2c3d4-0003-4000-8000-000000000003",
+    # الإضافات — رسم ثابت وحده (room_price = 0)
+    "Inside Oven Clean": "a1b2c3d4-0101-4000-8000-000000000101",
+    "Interior Windows": "a1b2c3d4-0102-4000-8000-000000000102",
+    "Carpet Steam Clean": "a1b2c3d4-0103-4000-8000-000000000103",
+    "Balcony Clean": "a1b2c3d4-0104-4000-8000-000000000104",
+}
+
+PUBLISHED_ADDON_IDS = {
+    "a1b2c3d4-0101-4000-8000-000000000101",
+    "a1b2c3d4-0102-4000-8000-000000000102",
+    "a1b2c3d4-0103-4000-8000-000000000103",
+    "a1b2c3d4-0104-4000-8000-000000000104",
 }
 
 
@@ -75,7 +92,7 @@ def test_seed_constants_still_declare_the_published_ids():
 def test_seeded_services_are_active_and_therefore_publicly_listed():
     run("seed_services")
 
-    assert ServiceType.objects.filter(is_active=True).count() == 3
+    assert ServiceType.objects.filter(is_active=True).count() == 7
 
 
 @pytest.mark.django_db
@@ -88,6 +105,165 @@ def test_seeded_services_have_a_description():
 
 
 # ============================================================
+# 1b) الإضافات (add-ons)
+# ============================================================
+@pytest.mark.django_db
+def test_addons_have_zero_room_price_and_a_flat_base_price():
+    """
+    📌 هذا ما يجعل "الإضافة" إضافةً: رسم ثابت لا يتغيّر بعدد الغرف.
+
+    المعادلة (room_price × room_count) + base_price تعطي base_price
+    وحده حين يكون room_price صفرًا.
+    """
+    run("seed_services")
+
+    for pk in PUBLISHED_ADDON_IDS:
+        addon = ServiceType.objects.get(pk=pk)
+        assert addon.room_price == Decimal("0.00"), addon.name
+        assert addon.base_price > 0, addon.name
+
+
+@pytest.mark.django_db
+def test_baseline_services_do_charge_per_room():
+    """الخدمات الأساسية عكس الإضافات — سعر غرفة موجب."""
+    run("seed_services")
+
+    for name in ("Regular Cleaning", "Deep Cleaning", "End of Lease Cleaning"):
+        service = ServiceType.objects.get(name=name)
+        assert service.room_price > 0, name
+
+
+@pytest.mark.django_db
+def test_addon_price_is_flat_whatever_the_room_count():
+    """
+    🔒 الحماية العملية: لو أرسلت الواجهة room_count خاطئًا لإضافة، لا
+       يتشوّه السعر — لأن room_price صفر.
+    """
+    from apps.services.services.pricing import calculate_price
+
+    run("seed_services")
+    oven = ServiceType.objects.get(name="Inside Oven Clean")
+
+    prices = {
+        calculate_price(
+            service_selections=[{"service_type_id": oven.id, "room_count": n}],
+            distance_km=Decimal("0"),
+        )
+        for n in (0, 1, 5, 100)
+    }
+
+    assert prices == {oven.base_price}
+
+
+@pytest.mark.django_db
+def test_addon_adds_its_flat_fee_on_top_of_a_baseline_service():
+    """التركيبة المتوقَّعة من الواجهة: خدمة أساسية + إضافة."""
+    from apps.services.services.pricing import calculate_price
+
+    run("seed_services")
+    regular = ServiceType.objects.get(name="Regular Cleaning")
+    oven = ServiceType.objects.get(name="Inside Oven Clean")
+
+    alone = calculate_price(
+        service_selections=[{"service_type_id": regular.id, "room_count": 3}],
+        distance_km=Decimal("0"),
+    )
+    together = calculate_price(
+        service_selections=[
+            {"service_type_id": regular.id, "room_count": 3},
+            {"service_type_id": oven.id, "room_count": 0},
+        ],
+        distance_km=Decimal("0"),
+    )
+
+    assert together == alone + oven.base_price
+
+
+@pytest.mark.django_db
+def test_addon_is_bookable_like_any_other_service(client):
+    """
+    ⚠️ لا يميّز الباكند الإضافة: تُحجز بنفس الطريقة تمامًا.
+
+    يثبت أن room_count=0 مقبول فعلًا في مسار الحجز الحقيقي.
+    """
+    import json as _json
+    from decimal import Decimal as _D
+
+    from apps.accounts.models import User
+    from apps.accounts.roles import ConfirmedRole
+    from apps.accounts.services.tokens import issue_tokens_for_user
+    from apps.properties.models import Property, PropertyAddress, PropertyType
+    import datetime
+    from zoneinfo import ZoneInfo
+
+    run("seed_services")
+    user = User.objects.create_user(phone="+61400779001", role=ConfirmedRole.CUSTOMER)
+    auth = {"HTTP_AUTHORIZATION": f"Bearer {issue_tokens_for_user(user)['access']}"}
+    prop = Property.objects.create(
+        owner=user, label="H", property_type=PropertyType.HOUSE
+    )
+    PropertyAddress.objects.create(
+        property=prop, street_address="1 St", suburb="Sydney",
+        state="NSW", postcode="2000",
+    )
+    slot = (
+        datetime.datetime.now(ZoneInfo("Australia/Sydney"))
+        + datetime.timedelta(days=3)
+    ).replace(hour=10, minute=0, second=0, microsecond=0)
+
+    regular = ServiceType.objects.get(name="Regular Cleaning")
+    oven = ServiceType.objects.get(name="Inside Oven Clean")
+
+    r = client.post(
+        "/api/bookings",
+        data=_json.dumps({
+            "property_id": str(prop.id),
+            "service_selections": [
+                {"service_type_id": str(regular.id), "room_count": 2},
+                {"service_type_id": str(oven.id), "room_count": 0},
+            ],
+            "scheduled_at": slot.isoformat(),
+        }),
+        content_type="application/json",
+        **auth,
+    )
+
+    assert r.status_code == 201, r.content
+    selections = r.json()["service_selections"]
+    assert len(selections) == 2
+    assert {s["service_type_name"] for s in selections} == {
+        "Regular Cleaning", "Inside Oven Clean"
+    }
+
+
+@pytest.mark.django_db
+def test_addons_appear_in_the_public_catalog(client):
+    """
+    ⚠️ لا قسم منفصل في الـAPI: الإضافات تظهر مع البقية في قائمة واحدة.
+       فصلها بصريًا قرار واجهة يُبنى على معرّفاتها الثابتة.
+    """
+    from apps.accounts.models import User
+    from apps.accounts.roles import ConfirmedRole
+    from apps.accounts.services.tokens import issue_tokens_for_user
+
+    run("seed_services")
+    user = User.objects.create_user(phone="+61400779002", role=ConfirmedRole.CUSTOMER)
+    auth = {"HTTP_AUTHORIZATION": f"Bearer {issue_tokens_for_user(user)['access']}"}
+
+    listed = client.get("/api/services", **auth).json()
+
+    assert len(listed) == 7
+    assert PUBLISHED_ADDON_IDS <= {s["id"] for s in listed}
+
+
+def test_addon_ids_constant_matches_the_published_set():
+    """ADDON_IDS يُشتق من room_price==0 — نتحقق أنه يطابق المنشور."""
+    from apps.services.management.commands.seed_services import ADDON_IDS
+
+    assert set(ADDON_IDS) == PUBLISHED_ADDON_IDS
+
+
+# ============================================================
 # 2) عدم التكرار
 # ============================================================
 @pytest.mark.django_db
@@ -95,8 +271,8 @@ def test_running_twice_creates_nothing_new():
     run("seed_services")
     output = run("seed_services")
 
-    assert ServiceType.objects.count() == 3
-    assert "0 created, 3 already existed" in output
+    assert ServiceType.objects.count() == 7
+    assert "0 created, 7 already existed" in output
 
 
 @pytest.mark.django_db
@@ -118,7 +294,7 @@ def test_seed_does_not_overwrite_admin_edits():
     service.refresh_from_db()
     assert service.name == "Renamed By Admin"
     assert service.room_price == Decimal("99.00")
-    assert ServiceType.objects.count() == 3
+    assert ServiceType.objects.count() == 7
 
 
 @pytest.mark.django_db
@@ -139,7 +315,7 @@ def test_seed_matches_by_name_when_id_differs():
     run("seed_services")
 
     assert ServiceType.objects.filter(name="Deep Cleaning").count() == 1
-    assert ServiceType.objects.count() == 3
+    assert ServiceType.objects.count() == 7
 
 
 # ============================================================
@@ -158,8 +334,8 @@ def test_dry_run_after_seeding_reports_all_existing():
     run("seed_services")
     output = run("seed_services", "--dry-run")
 
-    assert "0 would be created, 3 already exist" in output
-    assert ServiceType.objects.count() == 3
+    assert "0 would be created, 7 already exist" in output
+    assert ServiceType.objects.count() == 7
 
 
 # ============================================================
@@ -190,7 +366,7 @@ def test_list_json_is_machine_readable_and_carries_ids():
 
     payload = json.loads(run("list_services", "--json"))
 
-    assert len(payload) == 3
+    assert len(payload) == 7
     assert {p["id"] for p in payload} == {s["id"] for s in SEED_SERVICES}
     for item in payload:
         assert set(item) == {"id", "name", "description", "is_active"}
@@ -207,8 +383,8 @@ def test_list_hides_inactive_services_by_default_but_all_shows_them():
     default = json.loads(run("list_services", "--json"))
     every = json.loads(run("list_services", "--json", "--all"))
 
-    assert len(default) == 2
-    assert len(every) == 3
+    assert len(default) == 6
+    assert len(every) == 7
     assert dead.name not in {d["name"] for d in default}
 
 

@@ -573,11 +573,33 @@ python manage.py list_services --json   # paste-ready JSON for the client
 `seed_services` is **idempotent** and uses **fixed ids that are identical in
 every environment**, so a client icon map keyed on id can be written once:
 
+**Baseline services** — priced per room plus a base fee:
+
 | Service | `service_type_id` |
 | --- | --- |
 | Regular Cleaning | `a1b2c3d4-0001-4000-8000-000000000001` |
 | Deep Cleaning | `a1b2c3d4-0002-4000-8000-000000000002` |
 | End of Lease Cleaning | `a1b2c3d4-0003-4000-8000-000000000003` |
+
+**Add-ons** — a flat fee, not per room:
+
+| Add-on | `service_type_id` |
+| --- | --- |
+| Inside Oven Clean | `a1b2c3d4-0101-4000-8000-000000000101` |
+| Interior Windows | `a1b2c3d4-0102-4000-8000-000000000102` |
+| Carpet Steam Clean | `a1b2c3d4-0103-4000-8000-000000000103` |
+| Balcony Clean | `a1b2c3d4-0104-4000-8000-000000000104` |
+
+> **There is no "add-on" concept in the backend.** An add-on is an ordinary
+> `ServiceType` whose `room_price` is `0`, so the pricing formula
+> `(room_price × room_count) + base_price` collapses to the flat `base_price`.
+> Send it in `service_selections` like any other service, with
+> `"room_count": 0`. Because `room_price` is zero, a wrong `room_count` cannot
+> distort the price.
+>
+> They appear in `GET /api/services` mixed in with the baseline services — the
+> API does not group them. Showing them in a separate "Add-ons" section is a
+> client decision, made by matching the four ids above.
 
 Re-running it never duplicates a service and **never overwrites an admin's
 edits** — prices and names stay under admin control via

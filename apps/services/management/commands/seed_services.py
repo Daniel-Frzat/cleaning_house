@@ -1,10 +1,13 @@
 """
-أمر إداري: يبذر الخدمات الثلاث الأساسية إن لم تكن موجودة.
+أمر إداري: يبذر الخدمات الأساسية والإضافات إن لم تكن موجودة.
 
 📌 سبب الوجود: الكتالوج يبدأ فارغًا، فـGET /api/services يعيد [] ولا يجد
-   تطبيق الموبايل ما يعرضه. هذا الأمر ينشئ الخدمات الثلاث المتوقَّعة
-   بمعرّفات ثابتة، فتصير الـids نفسها في كل بيئة (تطوير/staging/إنتاج)
-   وتستطيع الواجهة تثبيت خريطة الأيقونات مرة واحدة.
+   تطبيق الموبايل ما يعرضه. هذا الأمر ينشئ الخدمات المتوقَّعة بمعرّفات
+   ثابتة، فتصير الـids نفسها في كل بيئة (تطوير/staging/إنتاج) وتستطيع
+   الواجهة تثبيت خريطة الأيقونات مرة واحدة.
+
+📌 سبعة صفوف: ثلاث خدمات أساسية (بسعر غرفة + رسم أساسي)، وأربع إضافات
+   (رسم ثابت وحده). الباكند لا يميّز بينها — كلها ServiceType.
 
 ⚠️ الأسعار قيم ابتدائية قابلة للتعديل من الإدارة في أي وقت
    (PATCH /api/admin/services/{id}) — لا تُعتبر قرار تسعير.
@@ -52,11 +55,60 @@ SEED_SERVICES = [
         "room_price": Decimal("70.00"),
         "base_price": Decimal("180.00"),
     },
+    # ------------------------------------------------------------
+    # الإضافات (add-ons)
+    # ------------------------------------------------------------
+    # 📌 لا يوجد مفهوم "إضافة" في النطاق: كل ما يُحجز هو ServiceType.
+    #    الإضافة إذن خدمة كاملة برسم ثابت — room_price=0 و base_price هو
+    #    الرسم. المعادلة (room_price × room_count) + base_price تعطي الرسم
+    #    الثابت مهما كان room_count، فخطأ في الواجهة لا يشوّه السعر.
+    #
+    # ⚠️ تُرسَل مع room_count=0 (مسموح صراحةً — "الرسم الأساسي وحده").
+    #
+    # ⚠️ لا شيء في الباكند يميّزها عن الخدمات الأساسية: تظهر في
+    #    GET /api/services مع البقية، والتمييز البصري (قسم "Add-ons"
+    #    منفصل) قرار واجهة يُبنى على معرّفاتها الثابتة أدناه.
+    {
+        "id": "a1b2c3d4-0101-4000-8000-000000000101",
+        "name": "Inside Oven Clean",
+        "description": "Degrease and detail the oven interior, racks and door "
+                       "glass. Flat fee, not per room.",
+        "room_price": Decimal("0.00"),
+        "base_price": Decimal("45.00"),
+    },
+    {
+        "id": "a1b2c3d4-0102-4000-8000-000000000102",
+        "name": "Interior Windows",
+        "description": "Interior window panes, sills and tracks throughout the "
+                       "property. Flat fee, not per room.",
+        "room_price": Decimal("0.00"),
+        "base_price": Decimal("55.00"),
+    },
+    {
+        "id": "a1b2c3d4-0103-4000-8000-000000000103",
+        "name": "Carpet Steam Clean",
+        "description": "Hot-water extraction for carpeted areas. Flat fee, "
+                       "not per room.",
+        "room_price": Decimal("0.00"),
+        "base_price": Decimal("90.00"),
+    },
+    {
+        "id": "a1b2c3d4-0104-4000-8000-000000000104",
+        "name": "Balcony Clean",
+        "description": "Sweep, mop and wipe down balcony surfaces and railings. "
+                       "Flat fee, not per room.",
+        "room_price": Decimal("0.00"),
+        "base_price": Decimal("35.00"),
+    },
 ]
+
+# معرّفات الإضافات وحدها — تُصدَّر للاختبارات وللواجهة. ليست تصنيفًا
+# يعرفه الباكند، بل قائمة مرجعية لمن يريد عرضها في قسم منفصل.
+ADDON_IDS = frozenset(s["id"] for s in SEED_SERVICES if s["room_price"] == 0)
 
 
 class Command(BaseCommand):
-    help = "Create the three baseline service types with stable ids (idempotent)."
+    help = "Create the baseline service types with stable ids (idempotent)."
 
     def add_arguments(self, parser):
         parser.add_argument(
