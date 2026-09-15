@@ -179,9 +179,16 @@ contractor** and sends them an offer. Eligible means all of:
 - an **approved** business registration **and** a valid, unexpired insurance document
 - has not already been offered this booking
 - has coordinates on file, so distance can be measured
+- **is not the booking's own customer** — one account can hold both sides, and a
+  user is never offered their own booking
 
 Candidates are ranked by straight-line (haversine) distance. The customer does
 not choose the contractor and the contractor does not browse for work.
+
+> Self-assignment is blocked in two independent places: the candidate query
+> excludes the owner, and accepting *or* declining an offer on your own booking
+> returns `403 self_assignment_forbidden`. Declining is blocked too — allowing
+> it would let the booking's owner drive the dispatch cascade.
 
 **3 · The contractor has 60 minutes.**
 
@@ -815,6 +822,7 @@ Captured by actually triggering each path. `detail` text is the real message.
 | --- | --- | --- |
 | `403` | `invalid_contractor_role` | caller is not a contractor |
 | `403` | `offer_forbidden` | `This offer is not addressed to you.` |
+| `403` | `self_assignment_forbidden` | `You cannot accept an offer on your own booking.` — also on decline |
 | `404` | `offer_not_found` | `Offer not found.` |
 | `409` | `offer_not_actionable` | `Offer is accepted or expired and cannot be accepted.` |
 

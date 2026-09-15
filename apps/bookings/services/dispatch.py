@@ -45,20 +45,31 @@ def find_candidates(booking):
     """
     يعيد [(contractor_profile, distance_km)] مرتّبة تصاعديًا بالمسافة.
 
-    المرشَّح يجب أن يستوفي الأربعة معًا:
+    المرشَّح يجب أن يستوفي الخمسة معًا:
       1) availability_status == AVAILABLE
       2) is_contractor_eligible(profile) — تحقّق ABN وتأمين ساري (§6)
       3) لم يُعرض عليه هذا الحجز من قبل
       4) مسافته قابلة للقياس (إحداثيات معلومة للطرفين)
+      5) ليس صاحب الحجز نفسه
+
+    🔒 الشرط الخامس: الحساب الواحد قد يكون عميلًا ومقاولًا معًا، فلا يجوز
+       أن يُسنَد إليه حجزه هو. الاستبعاد على مستوى الاستعلام لا بعده:
+       ما لا يدخل قائمة المرشحين لا يمكن أن يُعرض عليه بأي مسار.
 
     ⚠️ الأهلية تُحسب لحظيًا لكل مرشَّح — ليست حقلًا مخزَّنًا، ولا يمكن
        ترشيحها داخل استعلام قاعدة البيانات.
     """
     excluded_ids = _already_offered_contractor_ids(booking)
 
-    queryset = ContractorProfile.objects.filter(
-        availability_status=AvailabilityStatus.AVAILABLE
-    ).exclude(id__in=excluded_ids)
+    queryset = (
+        ContractorProfile.objects.filter(
+            availability_status=AvailabilityStatus.AVAILABLE
+        )
+        .exclude(id__in=excluded_ids)
+        # 🔒 لا إسناد ذاتي — يُقارن بالمستخدم لا بملف المقاول، لأن
+        #    الربط بينهما واحد-لواحد والعميل يُعرَّف بحسابه.
+        .exclude(user_id=booking.customer_id)
+    )
 
     candidates = []
     for profile in queryset:

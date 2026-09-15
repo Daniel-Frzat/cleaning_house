@@ -51,6 +51,10 @@ def _handle_offer_errors(exc):
         return _error(403, exc.code, str(exc))
     if isinstance(exc, svc.OfferPermissionError):
         return _error(403, exc.code, str(exc))
+    if isinstance(exc, svc.SelfAssignmentError):
+        # 403 لا 409: المنع دائم لهذا المستخدم على هذا الحجز، ولا تغيّره
+        # إعادة المحاولة ولا تبدّل حالة المورد.
+        return _error(403, exc.code, str(exc))
     if isinstance(exc, svc.OfferNotFoundError):
         return _error(404, exc.code, "Offer not found.")
     if isinstance(exc, svc.OfferNotActionableError):
@@ -91,7 +95,7 @@ def _handle_offer_errors(exc):
     openapi_extra={
         "responses": {
             403: {
-                "description": "The caller is not a `CONTRACTOR`, or the offer is addressed to someone else."
+                "description": "The caller is not a `CONTRACTOR`, the offer is addressed to someone else, or the caller is the booking's own customer (a user cannot take their own booking)."
             },
             404: {"description": "No offer with this id."},
             409: {"description": "The offer was already answered or has expired."},
@@ -109,6 +113,7 @@ def accept_offer(request, offer_id: str):
     except (
         svc.InvalidContractorRoleError,
         svc.OfferPermissionError,
+        svc.SelfAssignmentError,
         svc.OfferNotFoundError,
         svc.OfferNotActionableError,
     ) as exc:
@@ -145,7 +150,7 @@ def accept_offer(request, offer_id: str):
     openapi_extra={
         "responses": {
             403: {
-                "description": "The caller is not a `CONTRACTOR`, or the offer is addressed to someone else."
+                "description": "The caller is not a `CONTRACTOR`, the offer is addressed to someone else, or the caller is the booking's own customer (a user cannot take their own booking)."
             },
             404: {"description": "No offer with this id."},
             409: {"description": "The offer was already answered or has expired."},
@@ -166,6 +171,7 @@ def decline_offer(request, offer_id: str):
     except (
         svc.InvalidContractorRoleError,
         svc.OfferPermissionError,
+        svc.SelfAssignmentError,
         svc.OfferNotFoundError,
         svc.OfferNotActionableError,
     ) as exc:

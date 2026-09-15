@@ -58,6 +58,19 @@ class OfferNotActionableError(OfferError):
     code = "offer_not_actionable"
 
 
+class SelfAssignmentError(OfferError):
+    """
+    المقاول هو صاحب الحجز نفسه.
+
+    🔒 الحساب الواحد قد يحمل الصفتين، فلا يجوز أن ينفّذ المستخدم حجزه.
+       الإسناد مُستبعَد أصلًا في محرّك الترشيح (services/dispatch.py)، وهذا
+       الفحص طبقة ثانية: عرض قديم أُنشئ قبل القاعدة، أو صف أُدخل يدويًا،
+       لا يجوز أن يمرّ من هنا.
+    """
+
+    code = "self_assignment_forbidden"
+
+
 def assert_is_contractor(user):
     """الرد على العروض صلاحية CONTRACTOR حصرًا."""
     if user is None or not user.is_authenticated:
@@ -93,6 +106,28 @@ def get_offer_for_contractor(user, offer_id):
     return offer
 
 
+def assert_not_own_booking(user, offer, *, action):
+    """
+    🔒 لا يردّ المستخدم على عرض يخص حجزه هو — قبولًا كان أو رفضًا.
+
+    الرفض ممنوع أيضًا لا احتياطًا فقط: قبوله كان سيتيح لصاحب الحجز تحريك
+    تتابع الإسناد إلى المقاول التالي من موقع لا يحق له أصلًا.
+
+    طبقة ثانية فوق استبعاد محرّك الترشيح (services/dispatch.py): عرض
+    أُنشئ قبل تطبيق القاعدة، أو صف أُدخل يدويًا، لا يجوز أن يمرّ.
+    """
+    if offer.booking.customer_id == user.id:
+        logger.warning(
+            "Self-assignment blocked (action=%s, user_id=%s, booking_id=%s, "
+            "offer_id=%s)",
+            action,
+            user.id,
+            offer.booking_id,
+            offer.id,
+        )
+        raise SelfAssignmentError(f"You cannot {action} an offer on your own booking.")
+
+
 def _selections_for_pricing(booking):
     """أسطر خدمات الحجز بالشكل الذي يتوقعه محرّك التسعير."""
     return [
@@ -116,6 +151,8 @@ def accept_offer(user, offer_id):
         )
 
     booking = offer.booking
+
+    assert_not_own_booking(user, offer, action="accept")
 
     # المسافة من العرض نفسه — لا إعادة حساب (راجع docstring الملف)
     distance_km = offer.distance_km
@@ -219,6 +256,8 @@ def decline_offer(user, offer_id):
         raise OfferNotActionableError(
             f"Offer is {offer.status.lower()} or expired and cannot be declined."
         )
+
+    assert_not_own_booking(user, offer, action="decline")
 
     offer.status = DispatchOfferStatus.DECLINED
     offer.responded_at = timezone.now()
