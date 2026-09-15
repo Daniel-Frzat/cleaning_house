@@ -133,9 +133,16 @@ def test_availability_cannot_be_set_at_creation(client, contractor_a):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("role", [ConfirmedRole.CUSTOMER, ConfirmedRole.ADMIN])
-def test_non_contractor_cannot_create_profile(client, db, role):
-    user = make_user("+61400004100", role=role)
+def test_admin_cannot_create_a_contractor_profile(client, db):
+    """
+    ⚠️ ADMIN حصري: الإدارة لا تعمل كمقاول.
+
+    عُدِّل عمدًا: كان هذا الاختبار يشمل CUSTOMER أيضًا (حين كان الملف
+    مقصورًا على دور CONTRACTOR). صار الزبون يستطيع الانضمام كعامل من
+    حسابه — راجع tests/test_accounts_dual_role.py — فبقي المنع على
+    الإدارة وحدها.
+    """
+    user = make_user("+61400004100", role=ConfirmedRole.ADMIN)
 
     r = post(client, "/api/contractor/profile", VALID_PROFILE, **auth(user))
 
@@ -147,14 +154,14 @@ def test_non_contractor_cannot_create_profile(client, db, role):
 @pytest.mark.django_db
 def test_role_enforced_in_service_layer_not_only_api(db):
     """
-    الإنفاذ يعيش في طبقة الخدمة: استدعاؤها مباشرة بدور خاطئ يُرفض أيضًا.
+    الإنفاذ يعيش في طبقة الخدمة: استدعاؤها مباشرة بدور ممنوع يُرفض أيضًا.
     """
     from apps.contractors.services import profile as svc
 
-    customer = make_user("+61400004101", role=ConfirmedRole.CUSTOMER)
+    admin = make_user("+61400004101", role=ConfirmedRole.ADMIN)
 
     with pytest.raises(svc.InvalidContractorRoleError):
-        svc.create_profile(customer, business_name="X")
+        svc.create_profile(admin, business_name="X")
 
     assert ContractorProfile.objects.count() == 0
 

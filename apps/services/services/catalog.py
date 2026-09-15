@@ -62,7 +62,7 @@ def assert_is_admin(user):
     """
     if user is None or not user.is_authenticated:
         raise CatalogPermissionError("Authentication required.")
-    if user.role != ConfirmedRole.ADMIN:
+    if not user.has_admin_access():
         logger.warning(
             "Catalog access denied (user_id=%s, role=%s)", user.id, user.role
         )

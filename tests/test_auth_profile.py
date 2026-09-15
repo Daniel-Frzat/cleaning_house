@@ -76,13 +76,17 @@ def test_me_returns_empty_name_and_null_email_when_unset(client, customer):
 
 
 @pytest.mark.django_db
-def test_me_exposes_exactly_six_fields(client, customer):
+def test_me_exposes_exactly_the_expected_fields(client, customer):
     """🔒 لا تسريب حقول امتياز أو حساسة."""
     body = client.get("/api/auth/me", **auth(customer)).json()
 
-    assert set(body) == {"id", "phone", "role", "status", "full_name", "email"}
+    assert set(body) == {
+        "id", "phone", "role", "status", "full_name", "email",
+        "roles", "contractor_status", "available_modes",
+    }
     for forbidden in ("password", "is_staff", "is_superuser", "last_login",
-                      "groups", "user_permissions", "date_joined"):
+                      "groups", "user_permissions", "date_joined",
+                      "is_contractor"):
         assert forbidden not in body
 
 

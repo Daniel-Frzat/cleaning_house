@@ -280,12 +280,15 @@ Authorization: Bearer <JWT access token>
 ```jsonc
 // 200 OK — a fresh account that has not set a name or email yet
 {
-  "id": "37083f83-79d1-4a73-8070-cdf9452a69fc",
-  "phone": "+61400000001",
+  "id": "3d64a5f3-da80-449b-953f-43d4031b1dfd",
   "role": "CUSTOMER",
+  "phone": "+61400111001",
   "status": "ACTIVE",
   "full_name": "",
-  "email": null
+  "email": null,
+  "roles": ["CUSTOMER"],
+  "contractor_status": "NONE",
+  "available_modes": ["CUSTOMER"]
 }
 ```
 
@@ -297,7 +300,161 @@ claim indefinitely.
 `full_name` defaults to an empty string and `email` to `null` — neither is
 collected during login, so both are unset until the user fills them in.
 
-### 3.6 Updating your own profile
+### 3.6 One account, two modes
+
+A single account can be **both a customer and a contractor**. Same phone number,
+same `user_id`, same login — the user books cleans as a customer and, once
+approved, takes work as a contractor. Nothing is duplicated and nothing is lost.
+
+`GET /api/auth/me` and the login response both carry three fields that describe
+this:
+
+| Field | Meaning |
+| --- | --- |
+| `roles` | the account's actual permissions — what the server will allow |
+| `contractor_status` | how far along the contractor application is |
+| `available_modes` | which UI modes the app may offer a switch between |
+
+> **`role` (singular) is legacy.** It is the primary role and is kept for
+> backwards compatibility. A dual-role account reports `"role": "CUSTOMER"`
+> while `roles` contains both. **Branch your UI on `roles`, never on `role`.**
+
+#### `contractor_status` values
+
+| Value | Meaning | What the app should show |
+| --- | --- | --- |
+| `NONE` | never applied | a "Work with Cleano" call to action |
+| `PENDING` | applied; documents still under review | "your application is being reviewed" |
+| `ACTION_REQUIRED` | a document was rejected, or the insurance expired | what to re-submit |
+| `APPROVED` | fully verified; can receive offers | the contractor UI |
+| `SUSPENDED` | the account itself is no longer active | a blocked state |
+
+All three fields are **derived live** on every request — from the account and its
+two verification documents. Nothing is stored, so an insurance policy that
+expires overnight changes `contractor_status` by itself, with no background job.
+
+#### The four states, as returned
+
+```jsonc
+// 1 — customer only, has never applied
+{
+  "id": "3d64a5f3-da80-449b-953f-43d4031b1dfd",
+  "role": "CUSTOMER",
+  "phone": "+61400111001",
+  "status": "ACTIVE",
+  "full_name": "Grace Hopper",
+  "email": "grace@example.com",
+  "roles": ["CUSTOMER"],
+  "contractor_status": "NONE",
+  "available_modes": ["CUSTOMER"]
+}
+```
+
+```jsonc
+// 2 — applied, under review. Note roles already contains CONTRACTOR:
+//     the contractor UI is reachable so the user can watch their
+//     application, but no work will be dispatched to them yet.
+{
+  "id": "e86e41f8-bf71-4044-bf10-261560c63e36",
+  "role": "CUSTOMER",
+  "phone": "+61400111002",
+  "status": "ACTIVE",
+  "full_name": "Sam Lee",
+  "email": null,
+  "roles": ["CUSTOMER", "CONTRACTOR"],
+  "contractor_status": "PENDING",
+  "available_modes": ["CUSTOMER", "CONTRACTOR"]
+}
+```
+
+```jsonc
+// 3 — approved: both modes, eligible for dispatch
+{
+  "id": "e86e41f8-bf71-4044-bf10-261560c63e36",
+  "role": "CUSTOMER",
+  "phone": "+61400111002",
+  "status": "ACTIVE",
+  "full_name": "Sam Lee",
+  "email": null,
+  "roles": ["CUSTOMER", "CONTRACTOR"],
+  "contractor_status": "APPROVED",
+  "available_modes": ["CUSTOMER", "CONTRACTOR"]
+}
+```
+
+```jsonc
+// 4 — a document was rejected: the user must act
+{
+  "id": "644b62a6-05bb-464b-a8dc-8227d7e78d9b",
+  "role": "CUSTOMER",
+  "phone": "+61400111003",
+  "status": "ACTIVE",
+  "full_name": "",
+  "email": null,
+  "roles": ["CUSTOMER", "CONTRACTOR"],
+  "contractor_status": "ACTION_REQUIRED",
+  "available_modes": ["CUSTOMER", "CONTRACTOR"]
+}
+```
+
+```jsonc
+// ADMIN is exclusive — never combined with customer or contractor
+{
+  "id": "51b424f9-8adf-4a1b-a174-c01a8e558dcc",
+  "role": "ADMIN",
+  "phone": "+61400111004",
+  "status": "ACTIVE",
+  "full_name": "",
+  "email": null,
+  "roles": ["ADMIN"],
+  "contractor_status": "NONE",
+  "available_modes": []
+}
+```
+
+#### Applying — "Work with Cleano"
+
+There is **no dedicated join endpoint**. A customer becomes a contractor by
+creating a contractor profile on their existing account:
+
+| Step | Call |
+| --- | --- |
+| 1 · create the profile | `POST /api/contractor/profile` |
+| 2 · submit the ABN | `POST /api/contractor/business-registration` |
+| 3 · submit insurance | `POST /api/contractor/insurance` |
+| 4 · track the application | `GET /api/auth/me` → `contractor_status`, and `GET` on both submission endpoints for per-document detail and `rejection_reason` |
+| 5 · go online once approved | `PATCH /api/contractor/profile/availability` |
+
+Step 1 grants the contractor permission immediately — that is what puts
+`CONTRACTOR` into `roles` and makes the contractor UI reachable. It does **not**
+approve them: dispatch still requires an approved ABN *and* valid insurance.
+
+A second profile on the same account returns `409 contractor_profile_exists`.
+An `ADMIN` attempting to apply gets `403 invalid_contractor_role`.
+
+#### Switching modes
+
+**There is no endpoint for the switch, and none is needed.** The mode is a
+client-side display concern:
+
+- Switching changes which UI you render. It does **not** re-authenticate, does
+  not need a new OTP, and does not change any permission.
+- Persist the last-used mode locally, and on launch check it is still present in
+  `available_modes` — a contractor whose account was suspended will no longer
+  have `CONTRACTOR` there.
+- The server never stores a mode and never trusts one. Every endpoint checks the
+  caller's real permissions, their approval state and their ownership of the data
+  — independently, on every request.
+
+> **Permission and approval are separate things.** Holding `CONTRACTOR` in
+> `roles` lets a user open the contractor screens. Actually being dispatched work
+> additionally requires `contractor_status: "APPROVED"`. A `PENDING` contractor
+> who flips the switch simply sees an application-status screen.
+>
+> A user is also **never offered their own booking**, even when both sides of the
+> account are fully approved.
+
+### 3.7 Updating your own profile
 
 **Who may call:** any authenticated user, on their **own** account only — the
 account comes from the token and no user id is accepted.
@@ -316,11 +473,14 @@ Content-Type: application/json
 // 200 OK — the full user object
 {
   "id": "fa73dcb9-f9b1-43e3-be93-82f31cdf66f3",
-  "phone": "+61400990001",
   "role": "CUSTOMER",
+  "phone": "+61400990001",
   "status": "ACTIVE",
   "full_name": "Grace Hopper",
-  "email": "grace@example.com"
+  "email": "grace@example.com",
+  "roles": ["CUSTOMER"],
+  "contractor_status": "NONE",
+  "available_modes": ["CUSTOMER"]
 }
 ```
 
@@ -600,7 +760,7 @@ All four are covered with full examples in
 | `POST` | `/api/auth/otp/verify` | public | Verify the OTP, receive JWTs |
 | `POST` | `/api/auth/social/{provider}` | public | Log in with Apple or Google |
 | `GET` | `/api/auth/me` | any role | Current user's identity and role |
-| `PATCH` | `/api/auth/me` | any role | Update own `full_name` / `email` — see [§3.6](#36-updating-your-own-profile) |
+| `PATCH` | `/api/auth/me` | any role | Update own `full_name` / `email` — see [§3.6](#37-updating-your-own-profile) |
 
 Error codes: `400` (invalid/expired code, unsupported provider), `401` (bad
 provider token), `403` (account not active), `429` (cooldown or too many

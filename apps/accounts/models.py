@@ -112,6 +112,23 @@ class User(AbstractBaseUser, PermissionsMixin):
         choices=ConfirmedRole.choices,
         default=ConfirmedRole.CUSTOMER,
     )
+
+    # ------------------------------------------------------------
+    # صلاحية العامل — منفصلة عن role
+    # ------------------------------------------------------------
+    # 📌 الحساب الواحد قد يكون زبونًا وعاملًا معًا ("Work with Cleano").
+    #    role يبقى الدور الأساسي، وهذا العلم صلاحية إضافية تُمنح فوقه.
+    #
+    # ⚠️ لماذا علم منفصل لا قائمة أدوار؟ لأن الجمع الممكن واحد فقط
+    #    (زبون + عامل). قائمة عامة كانت ستسمح ضمنيًا بـADMIN+CUSTOMER،
+    #    وهو تصعيد صلاحيات لم يُطلب ولا يجوز فتحه بالصدفة.
+    #
+    # 🔒 منح هذا العلم لا يكفي لقبول العمل: الأهلية (ABN + تأمين معتمدان)
+    #    تبقى شرطًا مستقلًا يُحسب لحظيًا — راجع is_contractor_eligible.
+    is_contractor = models.BooleanField(
+        default=False,
+        help_text="May also work as a contractor, in addition to their role.",
+    )
     status = models.CharField(
         max_length=16,
         choices=UserStatus.choices,
@@ -155,6 +172,48 @@ class User(AbstractBaseUser, PermissionsMixin):
         # يمنع تخزين "" في حقل unique قد يتكرر عبر عدة حسابات.
         if not self.email:
             self.email = None
+
+    # ------------------------------------------------------------
+    # الصلاحيات — المصدر الوحيد لكل فحوص الوصول
+    # ------------------------------------------------------------
+    # ⚠️ كل الدومينات تسأل هذه الدوال ولا تقارن role مباشرةً. إضافة
+    #    صلاحية جديدة مستقبلًا تُعدَّل هنا وحدها.
+    #
+    # 🔒 ADMIN حصري عمدًا: لا يُجمع مع زبون ولا عامل. الجمع الوحيد
+    #    المسموح هو زبون + عامل.
+
+    def has_customer_access(self):
+        """الزبون هو من دوره CUSTOMER — والعامل غالبًا كذلك."""
+        return self.role == ConfirmedRole.CUSTOMER
+
+    def has_contractor_access(self):
+        """
+        صلاحية العمل: دور CONTRACTOR الأصلي، أو زبون فُعِّلت له الصفة.
+
+        📌 صلاحية لا أهلية: هذه تفتح مسارات المقاول (الملف، الوثائق،
+           الردّ على العروض)، بينما قبول عمل فعلي يتطلب اعتمادًا إداريًا
+           للوثيقتين — شرط منفصل تمامًا.
+        """
+        return self.role == ConfirmedRole.CONTRACTOR or self.is_contractor
+
+    def has_admin_access(self):
+        return self.role == ConfirmedRole.ADMIN
+
+    def active_roles(self):
+        """
+        الصلاحيات الفعلية للحساب — لعرضها على الفرونت.
+
+        ADMIN يُعاد وحده: لا يحمل صلاحيات زبون ولا عامل.
+        """
+        if self.has_admin_access():
+            return [ConfirmedRole.ADMIN]
+
+        roles = []
+        if self.has_customer_access():
+            roles.append(ConfirmedRole.CUSTOMER)
+        if self.has_contractor_access():
+            roles.append(ConfirmedRole.CONTRACTOR)
+        return roles
 
     def get_full_name(self):
         return self.full_name

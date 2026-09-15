@@ -89,7 +89,7 @@ def assert_is_customer(user):
     """إنشاء الحجوزات وقراءتها صلاحية CUSTOMER حصرًا."""
     if user is None or not user.is_authenticated:
         raise BookingPermissionError("Authentication required.")
-    if user.role != ConfirmedRole.CUSTOMER:
+    if not user.has_customer_access():
         raise InvalidCustomerRoleError("Only customers can manage bookings.")
 
 

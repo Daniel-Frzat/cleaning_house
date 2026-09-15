@@ -108,5 +108,5 @@ def retrieve_payout(request, booking_id: str):
     except (svc.PayoutPermissionError, svc.PayoutNotFoundError):
         return _not_found()
 
-    is_admin = request.user.role == ConfirmedRole.ADMIN
+    is_admin = request.user.has_admin_access()
     return 200, _serialize(payout, as_admin=is_admin)

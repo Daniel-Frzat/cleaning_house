@@ -85,7 +85,7 @@ def assert_is_contractor(user):
     """
     if user is None or not user.is_authenticated:
         raise ContractorProfilePermissionError("Authentication required.")
-    if user.role != ConfirmedRole.CONTRACTOR:
+    if not user.has_contractor_access():
         raise InvalidContractorRoleError("Only contractors can have a contractor profile.")
 
 
@@ -93,7 +93,7 @@ def assert_is_admin(user):
     """مسارات الإدارة — ADMIN حصرًا."""
     if user is None or not user.is_authenticated:
         raise ContractorProfilePermissionError("Authentication required.")
-    if user.role != ConfirmedRole.ADMIN:
+    if not user.has_admin_access():
         logger.warning(
             "Contractor admin access denied (user_id=%s, role=%s)", user.id, user.role
         )
@@ -125,12 +125,25 @@ def assert_owns(user, profile):
 @transaction.atomic
 def create_profile(user, **fields):
     """
-    ينشئ ملف المقاول للمستخدم المُمرَّر (وله فقط).
+    ينشئ ملف المقاول للمستخدم المُمرَّر (وله فقط) — "Work with Cleano".
+
+    📌 هذه نقطة الانضمام: زبون قائم ينشئ ملف عامل من حسابه نفسه، فيُمنح
+       صلاحية العامل (is_contractor) ضمن المعاملة ذاتها. لا حساب جديد،
+       ولا فقدان لحجوزاته ولا عقاراته — نفس user_id ونفس الرقم.
+
+    🔒 منح الصلاحية ليس اعتمادًا: الملف يبدأ UNAVAILABLE بلا وثائق
+       معتمدة، فلا يصله أي عرض حتى تُراجَع وثيقتاه إداريًا.
+
+    ⚠️ ADMIN مستثنى: الإدارة لا تعمل كمقاول (الدور حصري بقرار معماري).
 
     ⚠️ availability_status لا تُقبل هنا: الملف يبدأ UNAVAILABLE دائمًا،
        والإتاحة فعل صريح لاحق عبر update_availability.
     """
-    assert_is_contractor(user)
+    if user is None or not user.is_authenticated:
+        raise ContractorProfilePermissionError("Authentication required.")
+
+    if user.has_admin_access():
+        raise InvalidContractorRoleError("Admins cannot work as contractors.")
 
     if ContractorProfile.objects.filter(user=user).exists():
         raise ProfileAlreadyExistsError("This user already has a contractor profile.")
@@ -149,8 +162,18 @@ def create_profile(user, **fields):
     profile.full_clean()
     profile.save()
 
+    # 📌 منح صلاحية العامل مع إنشاء الملف — في المعاملة نفسها، فلا يبقى
+    #    ملف بلا صلاحية ولا صلاحية بلا ملف.
+    # ⚠️ role لا يُمس: الحساب يبقى CUSTOMER ويحتفظ بكل وصوله كزبون.
+    if not user.is_contractor:
+        user.is_contractor = True
+        user.save(update_fields=["is_contractor", "updated_at"])
+
     logger.info(
-        "Contractor profile created (profile_id=%s, user_id=%s)", profile.id, user.id
+        "Contractor profile created (profile_id=%s, user_id=%s, role=%s)",
+        profile.id,
+        user.id,
+        user.role,
     )
     return profile
 

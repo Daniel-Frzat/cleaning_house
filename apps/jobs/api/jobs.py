@@ -136,7 +136,7 @@ def upload_photo(
         return _error(400, exc.code, str(exc))
 
     signed_url = photos_svc.build_signed_url(photo.storage_key)
-    is_admin = request.user.role == ConfirmedRole.ADMIN
+    is_admin = request.user.has_admin_access()
 
     return 201, _serialize_photo(photo, signed_url, include_storage_key=is_admin)
 
@@ -181,7 +181,7 @@ def retrieve_job(request, booking_id: str):
         return _not_found()
 
     photos_with_urls = photos_svc.list_photos_with_urls(job)
-    is_admin = request.user.role == ConfirmedRole.ADMIN
+    is_admin = request.user.has_admin_access()
 
     return 200, _serialize_job(
         job, photos_with_urls, include_storage_key=is_admin
@@ -237,7 +237,7 @@ def mark_done(request, job_id: str):
         return _error(400, exc.code, str(exc))
 
     photos_with_urls = photos_svc.list_photos_with_urls(job)
-    is_admin = request.user.role == ConfirmedRole.ADMIN
+    is_admin = request.user.has_admin_access()
 
     return 200, _serialize_job(job, photos_with_urls, include_storage_key=is_admin)
 

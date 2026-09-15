@@ -174,7 +174,7 @@ def get_payment_for_booking(user, booking):
     if user is None or not user.is_authenticated:
         raise PaymentPermissionError("Authentication required.")
 
-    is_admin = user.role == ConfirmedRole.ADMIN
+    is_admin = user.has_admin_access()
     is_owner = booking.customer_id == user.id
 
     if not (is_admin or is_owner):

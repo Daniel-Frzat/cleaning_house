@@ -22,8 +22,15 @@ from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 
 from adapters.social_auth import SocialAuthError
+from apps.contractors.services.verification import get_contractor_status
 
 from ..models import SocialProvider
+from ..roles import ConfirmedRole
+
+# أسماء أوضاع العرض — ليست أدوارًا ولا تُخزَّن. الفرونت يحفظ اختياره
+# محليًا ويتحقق عند الدخول أن الوضع ما زال ضمن available_modes.
+MODE_CUSTOMER = "CUSTOMER"
+MODE_CONTRACTOR = "CONTRACTOR"
 from ..services import identity as identity_service
 from ..services import otp as otp_service
 from ..services import social as social_service
@@ -56,7 +63,23 @@ def _serialize_user(user):
 
     🔒 قائمة حقول بيضاء صريحة: ما لا يُبنى هنا لا يظهر في أي رد. لا
        is_staff ولا is_superuser ولا password ولا last_login.
+
+    📌 roles و contractor_status و available_modes كلها **مشتقّة لحظيًا**
+       من الحساب ووثائقه — لا حقل مخزَّن يمثّلها، فلا تتقادم.
     """
+    roles = user.active_roles()
+    contractor_status = get_contractor_status(user)
+
+    # الأوضاع المتاحة: الوضع يُشتق من الصلاحية لا العكس.
+    # ⚠️ وضع العامل يُتاح بمجرد وجود الصلاحية — حتى قبل الاعتماد — حتى
+    #    يرى المستخدم شاشة "طلبك قيد المراجعة" بدل أن تختفي عنه كليًا.
+    #    الاعتماد شرط قبول العمل لا شرط رؤية الواجهة.
+    available_modes = []
+    if ConfirmedRole.CUSTOMER in roles:
+        available_modes.append(MODE_CUSTOMER)
+    if ConfirmedRole.CONTRACTOR in roles:
+        available_modes.append(MODE_CONTRACTOR)
+
     return {
         "id": user.id,
         "phone": user.phone,
@@ -64,6 +87,9 @@ def _serialize_user(user):
         "status": user.status,
         "full_name": user.full_name,
         "email": user.email,
+        "roles": list(roles),
+        "contractor_status": contractor_status,
+        "available_modes": available_modes,
     }
 
 

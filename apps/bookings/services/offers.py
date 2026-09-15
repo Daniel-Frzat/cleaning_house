@@ -75,7 +75,7 @@ def assert_is_contractor(user):
     """الرد على العروض صلاحية CONTRACTOR حصرًا."""
     if user is None or not user.is_authenticated:
         raise OfferPermissionError("Authentication required.")
-    if user.role != ConfirmedRole.CONTRACTOR:
+    if not user.has_contractor_access():
         raise InvalidContractorRoleError("Only contractors can respond to offers.")
 
 

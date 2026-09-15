@@ -107,5 +107,5 @@ def retrieve_payment(request, booking_id: str):
     except (svc.PaymentPermissionError, svc.PaymentNotFoundError):
         return _not_found()
 
-    is_admin = request.user.role == ConfirmedRole.ADMIN
+    is_admin = request.user.has_admin_access()
     return 200, _serialize(payment, as_admin=is_admin)

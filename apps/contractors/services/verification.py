@@ -15,7 +15,7 @@ Contractor Verification Service — Contractors Domain (Change Set §6، Infra �
 
 import logging
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from apps.accounts.roles import ConfirmedRole
@@ -272,3 +272,69 @@ def is_contractor_eligible(contractor_profile) -> bool:
         return False
 
     return True
+
+
+# ============================================================
+# حالة العامل للعرض — مشتقّة، غير مخزَّنة
+# ============================================================
+class ContractorStatus(models.TextChoices):
+    """
+    حالة انضمام الحساب كعامل — للفرونت.
+
+    📌 مشتقّة بالكامل من الملف ووثيقتيه: لا حقل مخزَّن يمثّلها، تمامًا
+       كـis_contractor_eligible. تخزينها كان سيصير كذبة صامتة يوم تنتهي
+       صلاحية التأمين.
+
+    NONE       : لم يقدّم كعامل — لا ملف أصلًا.
+    PENDING    : لديه ملف، ووثائقه لم تكتمل مراجعتها بعد.
+    ACTION_REQUIRED : رُفضت إحدى وثيقتيه، أو انتهت صلاحية تأمينه —
+                 يحتاج إعادة تقديم.
+    APPROVED   : مؤهَّل فعلًا؛ يستطيع استقبال العروض.
+    SUSPENDED  : كان عاملًا، لكن حسابه لم يعد نشطًا (status != ACTIVE).
+    """
+
+    NONE = "NONE", "Not applied"
+    PENDING = "PENDING", "Under review"
+    ACTION_REQUIRED = "ACTION_REQUIRED", "Action required"
+    APPROVED = "APPROVED", "Approved"
+    SUSPENDED = "SUSPENDED", "Suspended"
+
+
+def get_contractor_status(user) -> str:
+    """
+    يعيد حالة العامل لهذا الحساب — مشتقّة لحظيًا.
+
+    ⚠️ ترتيب الفحص مقصود: الإيقاف أولًا (يتجاوز كل ما عداه)، ثم غياب
+       الملف، ثم الأهلية، ثم التمييز بين "قيد المراجعة" و"يحتاج إجراء".
+    """
+    from apps.accounts.models import UserStatus
+
+    profile = getattr(user, "contractor_profile", None)
+
+    if profile is None:
+        # لا ملف: لم يقدّم بعد. والإيقاف بلا ملف لا معنى له.
+        return ContractorStatus.NONE
+
+    # 🔒 حساب موقوف/معطّل لا يعمل مهما كانت وثائقه
+    if not user.is_active or user.status != UserStatus.ACTIVE:
+        return ContractorStatus.SUSPENDED
+
+    if is_contractor_eligible(profile):
+        return ContractorStatus.APPROVED
+
+    registration = latest_business_registration(profile)
+    insurance = latest_insurance_document(profile)
+
+    # رفض صريح لأي وثيقة، أو تأمين منتهٍ → المستخدم يحتاج إجراءً
+    if (registration is not None
+            and registration.status == VerificationStatus.REJECTED):
+        return ContractorStatus.ACTION_REQUIRED
+    if insurance is not None:
+        if insurance.status == VerificationStatus.REJECTED:
+            return ContractorStatus.ACTION_REQUIRED
+        if (insurance.status == VerificationStatus.VERIFIED
+                and insurance.is_expired):
+            return ContractorStatus.ACTION_REQUIRED
+
+    # ملف بلا وثائق بعد، أو وثائق ما زالت PENDING
+    return ContractorStatus.PENDING

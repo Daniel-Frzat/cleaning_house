@@ -136,12 +136,19 @@ Public endpoints (no token): `POST /api/auth/otp/request`,
 
 ## 3. Roles and who can do what
 
-Every user has **exactly one** role. Accounts are always created as `CUSTOMER`;
-the API cannot change a role — that is done in the Django admin site.
+Accounts are always created as `CUSTOMER`. A single account can hold **both**
+the customer and contractor permissions — one login, one `user_id`, one phone
+number, both sides of the marketplace. `ADMIN` is **exclusive**: it is never
+combined with either.
+
+Read permissions from `roles` (an array) on `GET /api/auth/me`. The legacy
+singular `role` remains for backwards compatibility and reports only the primary
+role, so a dual-role account shows `"role": "CUSTOMER"` while `roles` holds both.
 
 | | CUSTOMER | CONTRACTOR | ADMIN |
 | --- | --- | --- | --- |
 | Reads and edits **own** name / email | ✅ | ✅ | ✅ |
+| May also hold the other permission | ✅ + contractor | ✅ + customer | ❌ exclusive |
 | Owns properties, creates bookings | ✅ | — | — |
 | Confirms job completion | ✅ **only for own booking** | — | — |
 | Contractor profile + availability | — | ✅ own only | — |
@@ -259,7 +266,8 @@ Field types are Django's; the JSON type is what you actually receive.
 | `phone` | string(32) | **unique — the login identifier** |
 | `email` | string(254) | nullable, unique when present |
 | `full_name` | string(255) | may be empty |
-| `role` | enum | `CUSTOMER` · `CONTRACTOR` · `ADMIN` — default `CUSTOMER` |
+| `role` | enum | `CUSTOMER` · `CONTRACTOR` · `ADMIN` — default `CUSTOMER`; the **primary** role |
+| `is_contractor` | bool | may **also** work as a contractor. Never exposed by the API — read `roles` instead |
 | `status` | enum | `ACTIVE` · `INACTIVE` · `SUSPENDED` — default `ACTIVE` |
 | `is_active` | bool | technical login gate, **separate from `status`** |
 | `is_staff` | bool | Django-admin access only |
@@ -267,8 +275,14 @@ Field types are Django's; the JSON type is what you actually receive.
 
 > `status` is the business state; `is_active` is the technical one. They are
 > deliberately independent. The API exposes `id`, `phone`, `role`, `status`,
-> `full_name` and `email` — and nothing else. `is_staff`, `is_superuser`,
-> `password`, `last_login` and the permission relations are never returned.
+> `full_name`, `email`, `roles`, `contractor_status` and `available_modes` — and
+> nothing else. `is_staff`, `is_superuser`, `password`, `last_login`,
+> `is_contractor` and the permission relations are never returned.
+>
+> **Permissions are read from the database on every request**, not from the JWT.
+> The token carries a `role` claim for information only. Suspending an account or
+> revoking its contractor permission therefore takes effect **immediately**, on
+> tokens that were already issued — no logout, no token revocation needed.
 >
 > `full_name` and `email` are the only two a user can change themselves, via
 > `PATCH /api/auth/me`. `phone` is the login identifier and would need OTP
@@ -534,7 +548,7 @@ Both login flows **create the account implicitly** on first success, always as
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/auth/me` | **authoritative** id/phone/role/status + name/email |
+| `GET` | `/api/auth/me` | **authoritative** identity + `roles`, `contractor_status`, `available_modes` |
 | `PATCH` | `/api/auth/me` | update **own** `full_name` and `email` only |
 | `GET` | `/api/services` | active services — **no prices** |
 | `GET` | `/api/services/{id}` | one active service — **no prices** |
@@ -907,6 +921,16 @@ Two contractors racing to accept the same booking is the canonical case: one get
 
 ### 9.3 Things that will bite you
 
+**Branch the UI on `roles`, not `role`.** One account can be both a customer and
+a contractor. The singular `role` is legacy and reports only the primary role, so
+a dual-role user looks like a plain `CUSTOMER` through it. Build the mode switch
+from `available_modes`, store the last-used mode locally, and re-check on launch
+that it is still listed — a suspended contractor loses it. Switching modes needs
+no API call, no new OTP and no re-login; it grants nothing, and every endpoint
+re-checks the real permissions server-side. See
+[§3.6 of the integration guide](API_INTEGRATION_GUIDE.md) for the four
+`contractor_status` states and the join flow.
+
 **Services must come from the API, never from a client enum.** Booking takes a
 `service_type_id` UUID and nothing else — a hard-coded enum has no id to send
 when the user books. Keep your fixed icons and local "what's included" copy, but
@@ -1049,6 +1073,7 @@ and jobs with `status=COMPLETED` and no related `payout`.
    because bookings reference them (`PROTECT`).
 8. **Eligibility is computed live**, never stored, and nothing re-checks expiry.
 9. **A contractor is offered a booking at most once** — DB-enforced.
+10. **One account can be both customer and contractor**, and is never offered its own booking. Holding the contractor permission is not the same as being approved for work — see `contractor_status`.
 10. **60 minutes** to respond; silence is treated as a decline.
 11. **No eligible contractor is not an error** — the booking waits in `PENDING`.
 12. **Dispatch is straight-line distance**, not driving distance.
@@ -1072,6 +1097,8 @@ and jobs with `status=COMPLETED` and no related `payout`.
 | `abn` | exactly 11 digits |
 | `availability_status` | `AVAILABLE` `UNAVAILABLE` |
 | Verification `status` | `PENDING` `VERIFIED` `REJECTED` |
+| `contractor_status` *(derived)* | `NONE` `PENDING` `ACTION_REQUIRED` `APPROVED` `SUSPENDED` |
+| `available_modes` *(derived)* | any of `CUSTOMER` `CONTRACTOR` |
 | `Booking.status` | `PENDING` `CONFIRMED` `CANCELLED` *(unreachable)* |
 | `DispatchOffer.status` | `PENDING` `ACCEPTED` `DECLINED` `EXPIRED` |
 | `Job.status` | `IN_PROGRESS` `AWAITING_CUSTOMER_CONFIRMATION` `COMPLETED` |

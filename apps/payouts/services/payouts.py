@@ -214,7 +214,7 @@ def assert_can_view_payout(user, payout):
     if user is None or not user.is_authenticated:
         raise PayoutPermissionError("Authentication required.")
 
-    is_admin = user.role == ConfirmedRole.ADMIN
+    is_admin = user.has_admin_access()
     is_payee = payout.contractor_id == user.id
 
     if not (is_admin or is_payee):

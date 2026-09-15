@@ -54,7 +54,7 @@ def _require_customer(request):
     تعيد None عند السماح، أو استجابة 403 جاهزة عند الرفض.
     """
     user = request.user
-    if user.role != ConfirmedRole.CUSTOMER:
+    if not user.has_customer_access():
         return _error(
             403, "invalid_owner_role", "Only customers can manage properties."
         )

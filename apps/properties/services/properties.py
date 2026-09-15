@@ -54,7 +54,7 @@ def assert_can_own_properties(user):
     """
     if user is None or not user.is_authenticated:
         raise PropertyPermissionError("Authentication required.")
-    if user.role != ConfirmedRole.CUSTOMER:
+    if not user.has_customer_access():
         raise InvalidOwnerRoleError("Only customers can own properties.")
 
 

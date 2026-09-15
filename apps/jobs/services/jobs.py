@@ -126,7 +126,7 @@ def assert_can_view_job(user, job):
 
     booking = job.booking
 
-    is_admin = user.role == ConfirmedRole.ADMIN
+    is_admin = user.has_admin_access()
     is_owner = booking.customer_id == user.id
     is_assigned = _assigned_contractor_user_id(booking) == user.id
 
@@ -175,7 +175,7 @@ def get_job_for_contractor(user, job_id):
     if user is None or not user.is_authenticated:
         raise JobPermissionError("Authentication required.")
 
-    if user.role != ConfirmedRole.CONTRACTOR:
+    if not user.has_contractor_access():
         raise JobPermissionError("Only contractors can act on jobs.")
 
     job = (
@@ -219,7 +219,7 @@ def mark_job_done(job, contractor_user):
     if contractor_user is None or not contractor_user.is_authenticated:
         raise JobPermissionError("Authentication required.")
 
-    if contractor_user.role != ConfirmedRole.CONTRACTOR:
+    if not contractor_user.has_contractor_access():
         raise JobPermissionError("Only contractors can mark a job done.")
 
     if _assigned_contractor_user_id(job.booking) != contractor_user.id:
@@ -268,7 +268,7 @@ def confirm_job_completion(job, customer_user):
     if customer_user is None or not customer_user.is_authenticated:
         raise JobPermissionError("Authentication required.")
 
-    if customer_user.role != ConfirmedRole.CUSTOMER:
+    if not customer_user.has_customer_access():
         raise JobPermissionError("Only the booking's customer can confirm a job.")
 
     # 🔒 العميل صاحب الحجز بعينه — لا يكفي أن يكون دوره CUSTOMER
