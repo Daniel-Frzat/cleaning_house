@@ -140,9 +140,17 @@ def make_confirmed_booking(customer, prop, service_type, contractor_profile):
 
 @pytest.fixture
 def job(customer, prop, service_type, contractor):
-    _, profile = contractor
+    """
+    مهمة جارية (IN_PROGRESS) — الحالة التي تفترضها أغلب الاختبارات.
+
+    ⚠️ المهمة تُنشأ ASSIGNED منذ إضافة فعل البدء، فالـfixture يبدأها
+       صراحةً. الحالة الابتدائية نفسها تُختبر في
+       tests/test_jobs_start.py.
+    """
+    user, profile = contractor
     booking = make_confirmed_booking(customer, prop, service_type, profile)
-    return jobs_svc.create_job_for_booking(booking)
+    created = jobs_svc.create_job_for_booking(booking)
+    return jobs_svc.start_job(created, user)
 
 
 # ============================================================
@@ -195,7 +203,10 @@ def test_job_auto_created_when_booking_confirmed(
     created = Job.objects.get(booking=booking)
 
     assert booking.status == BookingStatus.CONFIRMED
-    assert created.status == JobStatus.IN_PROGRESS
+    # 📌 القبول يُنشئ المهمة ASSIGNED لا IN_PROGRESS: البدء فعل منفصل
+    #    للمقاول، وهو ما يميّز "قَبِل ولم يصل" من "يعمل الآن".
+    assert created.status == JobStatus.ASSIGNED
+    assert created.started_at is None
     assert created.marked_done_at is None
     assert created.confirmed_at is None
 
@@ -230,6 +241,7 @@ def test_second_job_rejected_by_service_and_db(job):
 def test_job_status_enum_has_no_cancelled(db):
     """⚠️ الإلغاء بند مفتوح (#12) — لا حالة له هنا."""
     assert set(JobStatus.values) == {
+        "ASSIGNED",
         "IN_PROGRESS",
         "AWAITING_CUSTOMER_CONFIRMATION",
         "COMPLETED",

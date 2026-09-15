@@ -584,6 +584,8 @@ def test_confirming_job_triggers_payout(
     contractor_user, profile = contractor
     booking = make_booking(customer, service_type, profile)
     job = jobs_svc.create_job_for_booking(booking)
+    # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
+    job = jobs_svc.start_job(job, contractor_user)
     photos_svc.upload_job_photo(
         contractor_user, job.id, PhotoType.BEFORE, b"b", "image/jpeg"
     )
@@ -610,6 +612,8 @@ def test_no_payout_before_confirmation(
     contractor_user, profile = contractor
     booking = make_booking(customer, service_type, profile)
     job = jobs_svc.create_job_for_booking(booking)
+    # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
+    job = jobs_svc.start_job(job, contractor_user)
     photos_svc.upload_job_photo(
         contractor_user, job.id, PhotoType.BEFORE, b"b", "image/jpeg"
     )

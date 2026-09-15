@@ -103,7 +103,9 @@ def job(customer, service_type, contractor):
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service_type, room_count=3
     )
-    return jobs_svc.create_job_for_booking(booking)
+    created = jobs_svc.create_job_for_booking(booking)
+    # ⚠️ المهمة تُنشأ ASSIGNED؛ هذه الاختبارات تفترض عملًا جاريًا
+    return jobs_svc.start_job(created, profile.user)
 
 
 def add_photo(contractor_user, job, photo_type):

@@ -5,7 +5,8 @@ Job Service — Jobs Domain (Change Set §20، §36.3)
 لا تستدعي `.objects` مباشرة.
 
 📌 دورة الحياة المكتملة (§36.3):
-   IN_PROGRESS → (المقاول يعلن الإنجاز) → AWAITING_CUSTOMER_CONFIRMATION
+   ASSIGNED → (المقاول يبدأ) → IN_PROGRESS →
+   (المقاول يعلن الإنجاز) → AWAITING_CUSTOMER_CONFIRMATION
               → (العميل يؤكّد) → COMPLETED
 
 ⚠️ لا إلغاء هنا: سياسة الإلغاء بند مفتوح (§18 — Important #12). لا تُضف
@@ -81,7 +82,7 @@ class MissingProofPhotosError(JobError):
 @transaction.atomic
 def create_job_for_booking(booking):
     """
-    ينشئ مهمة بحالة IN_PROGRESS لحجز مؤكَّد.
+    ينشئ مهمة بحالة ASSIGNED لحجز مؤكَّد.
 
     ⚠️ الحجز يجب أن يكون CONFIRMED: لا مهمة لحجز PENDING (لا مقاول
        مُسنَدًا بعد، فلا من ينفّذ).
@@ -96,7 +97,7 @@ def create_job_for_booking(booking):
     if Job.objects.filter(booking=booking).exists():
         raise JobAlreadyExistsError("This booking already has a job.")
 
-    job = Job(booking=booking, status=JobStatus.IN_PROGRESS)
+    job = Job(booking=booking, status=JobStatus.ASSIGNED)
     job.full_clean()
 
     try:
@@ -201,6 +202,44 @@ def get_job_for_contractor(user, job_id):
 def _photo_types_present(job):
     """أنواع الصور الموجودة فعلًا لهذه المهمة."""
     return set(job.photos.values_list("photo_type", flat=True))
+
+
+@transaction.atomic
+def start_job(job, contractor_user):
+    """
+    يعلن المقاول المُسنَد بدء العمل: ASSIGNED → IN_PROGRESS.
+
+    🔒 المقاول المُسنَد وحده. 🔒 من ASSIGNED وحدها.
+
+    📌 هذه هي اللحظة التي لم تكن موجودة: القبول كان ينشئ المهمة جاهزة
+       للتنفيذ فورًا، فلم يستطع العميل التمييز بين "قَبِل ولم يصل" و"يعمل
+       الآن". البدء فعل صريح يفصل بينهما.
+
+    ⚠️ لا يقبل الصور قبله: صورة "قبل" تُلتقط عند الموقع لا قبل الوصول.
+    """
+    if contractor_user is None or not contractor_user.is_authenticated:
+        raise JobPermissionError("Authentication required.")
+
+    if not contractor_user.has_contractor_access():
+        raise JobPermissionError("Only contractors can start a job.")
+
+    if _assigned_contractor_user_id(job.booking) != contractor_user.id:
+        logger.warning(
+            "Start-job denied (user_id=%s, job_id=%s)", contractor_user.id, job.id
+        )
+        raise JobPermissionError("This job is not assigned to you.")
+
+    if job.status != JobStatus.ASSIGNED:
+        raise InvalidJobStatusError(
+            f"Job is {job.status} and cannot be started."
+        )
+
+    job.status = JobStatus.IN_PROGRESS
+    job.started_at = timezone.now()
+    job.save(update_fields=["status", "started_at", "updated_at"])
+
+    logger.info("Job started (job_id=%s, by=%s)", job.id, contractor_user.id)
+    return job
 
 
 @transaction.atomic

@@ -2,6 +2,7 @@
 Jobs API — Jobs Domain (Change Set §36.3؛ Infra §7)
 
 نقاط النهاية (محمية بـJWT):
+    POST /api/contractor/jobs/{job_id}/start      إعلان بدء العمل (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/photos     رفع صورة (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/mark-done  إعلان الإنجاز (المقاول المُسنَد)
     GET  /api/bookings/{id}/job                   عرض المهمة (عميل/إدارة/مقاول)
@@ -62,6 +63,7 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key):
         "id": job.id,
         "booking_id": job.booking_id,
         "status": job.status,
+        "started_at": job.started_at,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,
         "photos": [
@@ -191,6 +193,54 @@ def retrieve_job(request, booking_id: str):
 # ------------------------------------------------------------
 # POST /contractor/jobs/{job_id}/mark-done
 # ------------------------------------------------------------
+@contractor_router.post(
+    "/jobs/{job_id}/start",
+    response={200: JobOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    summary="Start a job (assigned contractor only)",
+    description=(
+        "**Who may call:** the `CONTRACTOR` assigned to this job, and no one "
+        "else. No request body.\n\n"
+        "**Preconditions:** the job must be `ASSIGNED` — that is, the offer was "
+        "accepted but work has not begun.\n\n"
+        "Moves the job to `IN_PROGRESS` and records `started_at`. This is the "
+        "contractor's \"I have arrived / starting now\" action, and it is what "
+        "lets a customer tell *accepted but not here yet* from *working right "
+        "now* — the two were a single instant before this endpoint existed.\n\n"
+        "**Side effects:** photo upload becomes available. A job that is only "
+        "`ASSIGNED` refuses photos with `409`, because a BEFORE photo taken "
+        "before arriving does not describe the property."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not the contractor assigned to this job."},
+            404: {"description": "No job with this id."},
+            409: {"description": "The job is not `ASSIGNED` — it has already started, or is further along."},
+        }
+    },
+)
+def start_job(request, job_id: str):
+    """
+    📌 ASSIGNED → IN_PROGRESS. الفعل الصريح الذي يفصل القبول عن البدء.
+    """
+    try:
+        job = jobs_svc.get_job_for_transition(job_id)
+        job = jobs_svc.start_job(job, request.user)
+    except jobs_svc.JobNotFoundError:
+        return _error(404, "job_not_found", "Job not found.")
+    except jobs_svc.JobPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    except jobs_svc.InvalidJobStatusError as exc:
+        # 409: تعارض مع حالة المورد الحالية
+        return _error(409, exc.code, str(exc))
+    except jobs_svc.JobError as exc:
+        return _error(400, exc.code, str(exc))
+
+    photos_with_urls = photos_svc.list_photos_with_urls(job)
+    is_admin = request.user.has_admin_access()
+
+    return 200, _serialize_job(job, photos_with_urls, include_storage_key=is_admin)
+
+
 @contractor_router.post(
     "/jobs/{job_id}/mark-done",
     response={200: JobOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},

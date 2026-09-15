@@ -33,6 +33,8 @@ class JobOut(Schema):
     id: uuid.UUID
     booking_id: uuid.UUID
     status: str
+    # يُملأ حين يعلن المقاول بدء العمل (ASSIGNED → IN_PROGRESS)
+    started_at: Optional[datetime] = None
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     photos: list[JobPhotoOut]

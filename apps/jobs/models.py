@@ -10,8 +10,8 @@ Job Execution Models — Jobs Domain (Change Set §20، §36.3؛ Infra §7)
      يُفسَّر ولا يُحلَّل هنا (Infra §7). لا S3 ولا boto3 ولا كتابة قرص.
 
 📌 دورة الحياة (§36.3):
-   IN_PROGRESS → AWAITING_CUSTOMER_CONFIRMATION → COMPLETED
-   المقاول يعلن الإنجاز، والعميل هو من يؤكّده.
+   ASSIGNED → IN_PROGRESS → AWAITING_CUSTOMER_CONFIRMATION → COMPLETED
+   المقاول يبدأ ثم يعلن الإنجاز، والعميل هو من يؤكّده.
 """
 
 import uuid
@@ -23,13 +23,19 @@ class JobStatus(models.TextChoices):
     """
     حالة تنفيذ المهمة (§36.3).
 
-    ⚠️ ثلاث حالات فقط — لا CANCELLED ولا غيرها. راجع docstring الملف.
+    ⚠️ أربع حالات — لا CANCELLED ولا غيرها. راجع docstring الملف.
 
-    IN_PROGRESS                    : المهمة جارية بعد تأكيد الحجز.
+    ASSIGNED                       : قَبِل المقاول، ولم يبدأ التنفيذ بعد.
+    IN_PROGRESS                    : المقاول أعلن بدء العمل.
     AWAITING_CUSTOMER_CONFIRMATION : المقاول أعلن الإنجاز، بانتظار العميل.
     COMPLETED                      : العميل أكّد الإنجاز.
+
+    📌 ASSIGNED أُضيفت لأن القبول والبدء كانا لحظة واحدة، فلم يكن للعميل
+       أي طريقة ليعرف أن مقاولًا قَبِل لكنه لم يصل بعد. الفصل يعطي أيضًا
+       تطبيق المقاول لحظة "أنا في الطريق / أبدأ الآن" التي لم تكن موجودة.
     """
 
+    ASSIGNED = "ASSIGNED", "Assigned"
     IN_PROGRESS = "IN_PROGRESS", "In progress"
     AWAITING_CUSTOMER_CONFIRMATION = (
         "AWAITING_CUSTOMER_CONFIRMATION",
@@ -65,8 +71,11 @@ class Job(models.Model):
     status = models.CharField(
         max_length=32,
         choices=JobStatus.choices,
-        default=JobStatus.IN_PROGRESS,
+        default=JobStatus.ASSIGNED,
     )
+
+    # يُملأ حين يعلن المقاول بدء العمل (ASSIGNED → IN_PROGRESS)
+    started_at = models.DateTimeField(null=True, blank=True)
 
     # يُملأ حين يعلن المقاول الإنجاز
     marked_done_at = models.DateTimeField(null=True, blank=True)
@@ -96,6 +105,9 @@ class Job(models.Model):
         الرفع مسموح أثناء التنفيذ وحده: بعد إعلان الإنجاز أو اكتماله
         تصبح الأدلة مجمَّدة، وإضافة صورة بعدها تغيّر سجلًا استُند إليه
         في التأكيد.
+
+        ⚠️ ASSIGNED لا تقبل صورًا: المقاول لم يصل بعد، وصورة "قبل" تُلتقط
+           قبل الوصول لا تصف الموقع. البدء فعل صريح يسبق أي دليل.
         """
         return self.status == JobStatus.IN_PROGRESS
 
