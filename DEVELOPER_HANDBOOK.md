@@ -899,8 +899,9 @@ Two contractors racing to accept the same booking is the canonical case: one get
 | Bootstrap | `GET /api/auth/me` — branch the whole UI on `role` |
 | Profile / "Welcome back, {name}" | `GET /api/auth/me` → `full_name` |
 | Edit personal details | `PATCH /api/auth/me` — `full_name` and `email` only |
+| "Work with Cleano" entry point | `POST /api/contractor/profile` — see [§9.2](#92-contractor-journey--endpoints) |
 | My properties | `GET /api/properties` |
-| Add property | `POST /api/properties` (property + address in **one** call) |
+| Add property | `POST /api/properties` (property + address in **one** call) — **send the device's GPS** |
 | Pick a service | `GET /api/services` — use `id` as `service_type_id` |
 | Pick add-ons | same call — the flat-fee services, sent with `"room_count": 0` |
 | Create booking | `POST /api/bookings` — **show no price on this screen** |
@@ -913,15 +914,37 @@ Two contractors racing to accept the same booking is the canonical case: one get
 
 | Screen | Call |
 | --- | --- |
-| Create profile | `POST /api/contractor/profile` — **must include coordinates** |
-| Go online/offline | `PATCH /api/contractor/profile/availability` |
+| "Work with Cleano" — join | `POST /api/contractor/profile` — **must include GPS coordinates** |
+| Application status | `GET /api/auth/me` → `contractor_status` |
 | Submit ABN | `POST /api/contractor/business-registration` |
 | Submit insurance | `POST /api/contractor/insurance` |
-| Verification status | `GET` on both of the above — arrays, newest first |
+| Per-document detail + rejection reason | `GET` on both of the above — arrays, newest first |
+| Go online/offline *(once approved)* | `PATCH /api/contractor/profile/availability` |
 | Respond to an offer | `POST /api/contractor/offers/{id}/accept` or `/decline` |
 | Upload photos | `POST /api/contractor/jobs/{id}/photos?photo_type=BEFORE\|AFTER` *(multipart)* |
 | Finish | `POST /api/contractor/jobs/{id}/mark-done` |
 | Earnings | `GET /api/bookings/{id}/payout` |
+
+There is **no separate contractor account and no dedicated join endpoint**. An
+existing customer becomes a contractor by creating a contractor profile on the
+account they already have — same login, same `user_id`, and every booking and
+property they owned stays theirs.
+
+Creating the profile grants the contractor permission immediately, which is what
+puts `CONTRACTOR` into `roles` and makes these screens reachable. It does **not**
+approve them: dispatch additionally requires an approved ABN *and* valid
+insurance. Use `contractor_status` to decide what to render:
+
+| `contractor_status` | Show |
+| --- | --- |
+| `NONE` | the "Work with Cleano" call to action |
+| `PENDING` | "your application is under review" |
+| `ACTION_REQUIRED` | what to re-submit — read `rejection_reason` from the document endpoints |
+| `APPROVED` | the working contractor UI |
+| `SUSPENDED` | a blocked state; the account itself is inactive |
+
+A second profile on the same account returns `409 contractor_profile_exists`; an
+`ADMIN` attempting to apply gets `403 invalid_contractor_role`.
 
 ### 9.3 Things that will bite you
 
@@ -941,6 +964,14 @@ when the user books. Keep your fixed icons and local "what's included" copy, but
 **key them on `id`**, populate the list from `GET /api/services`, and fall back
 to a generic icon for anything unrecognised. Full reasoning and the fixed ids are
 in §7.2.
+
+**A missing GPS reading fails silently.** Both `POST /api/properties` and
+`POST /api/contractor/profile` accept `latitude`/`longitude` and both treat them
+as optional — but the matching engine ranks by distance, so either side without
+a location drops out of every search. The booking still returns `201` and then
+**never receives an offer, with no error anywhere**. Capture the device's GPS and
+treat both fields as required; a property saved without them can be repaired with
+`PATCH /api/properties/{id}`.
 
 **Polling is the only option.** No push channel, no websocket, no
 offer-list endpoint. A customer learns of acceptance by polling the booking until
@@ -1033,7 +1064,12 @@ queues, not one merged list. Approve/reject with the two `PATCH` routes.
 
 > **Rejecting requires a `rejection_reason`.** Omitting it returns `400`
 > `rejection_reason_required`. Make the reason field mandatory in the UI when
-> "Reject" is selected.
+> "Reject" is selected — the applicant reads that text in the app.
+
+This queue is now also the gate for **existing customers joining as
+contractors**: they appear here like any other applicant, and approving both of
+their documents is what flips their `contractor_status` to `APPROVED` and makes
+them eligible for dispatch. Nothing else in the API grants that.
 
 **Service catalog manager** — full CRUD. Two things to surface clearly:
 
@@ -1080,7 +1116,9 @@ and jobs with `status=COMPLETED` and no related `payout`.
 10. **One account can be both customer and contractor**, and is never offered its own booking. Holding the contractor permission is not the same as being approved for work — see `contractor_status`.
 10. **60 minutes** to respond; silence is treated as a decline.
 11. **No eligible contractor is not an error** — the booking waits in `PENDING`.
-12. **Dispatch is straight-line distance**, not driving distance.
+12. **Dispatch is straight-line distance**, not driving distance, and needs
+    coordinates on **both** sides — either one missing means no offer, silently.
+
 13. **Business hours 07:00–19:00**, bounds inclusive, in the **property's**
     timezone — one UTC instant can be inside hours in Perth and outside in Sydney.
 14. **A booking has a start time only** — no duration, no end time, no recurrence.
