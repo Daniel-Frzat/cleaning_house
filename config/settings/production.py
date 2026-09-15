@@ -1,24 +1,16 @@
 """Production environment settings."""
 
-from decouple import config
-
 from .base import *  # noqa
+from .database import build_databases
 
 DEBUG = False
 
 # ------------------------------------------------------------
 # Database — PostgreSQL (Production Server) — Change Set قسم 4B
 # ------------------------------------------------------------
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": config("DB_NAME"),
-        "USER": config("DB_USER"),
-        "PASSWORD": config("DB_PASSWORD"),
-        "HOST": config("DB_HOST", default="localhost"),
-        "PORT": config("DB_PORT", default="5432"),
-    }
-}
+# يقرأ DATABASE_URL إن وُجدت (ما تحقنه Railway/Heroku عند ربط قاعدة
+# بيانات)، وإلا يرجع إلى متغيرات DB_* المنفصلة. راجع database.py.
+DATABASES = build_databases()
 
 # ------------------------------------------------------------
 # Security hardening إضافية للإنتاج

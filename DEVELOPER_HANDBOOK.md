@@ -1092,9 +1092,10 @@ instead of silently running on the wrong settings.
 | `DJANGO_ENV` | **all** | `dev` · `staging` · `production`. No default. |
 | `SECRET_KEY` | **all** | long random value |
 | `JWT_SIGNING_KEY` | **all** | a **different** random value |
-| `DB_NAME` | staging, production | |
-| `DB_USER` | staging, production | |
-| `DB_PASSWORD` | staging, production | |
+| `DATABASE_URL` | staging, production | **or** the five `DB_*` below — see §13.2 |
+| `DB_NAME` | staging, production | not needed if `DATABASE_URL` is set |
+| `DB_USER` | staging, production | not needed if `DATABASE_URL` is set |
+| `DB_PASSWORD` | staging, production | not needed if `DATABASE_URL` is set |
 | `DB_HOST` | optional | defaults to `localhost` |
 | `DB_PORT` | optional | defaults to `5432` |
 | `ALLOWED_HOSTS` | production | comma-separated; the default is empty, which rejects every request |
@@ -1109,32 +1110,56 @@ python -c "from django.core.management.utils import get_random_secret_key as k; 
 > settings would run on **SQLite inside the container** — data would look fine
 > and then vanish on the next redeploy.
 
-### 13.2 ⚠️ This project does not read `DATABASE_URL`
+### 13.2 Two ways to point at the database
 
-Railway, Heroku and similar platforms inject a single `DATABASE_URL`, plus
-`PG*`-prefixed variables. **This project reads neither.** It reads `DB_NAME`,
-`DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_PORT` separately, so attaching a
-Postgres service is not enough — the names do not line up and `DB_NAME` arrives
-empty:
+`DATABASE_URL` is read first; the discrete `DB_*` variables are the fallback.
+Either works, and a `DATABASE_URL` that is empty or whitespace is treated as
+absent rather than as broken configuration.
+
+**Preferred — `DATABASE_URL`.** Railway, Heroku and similar platforms inject
+this automatically when a database is attached, so usually nothing else is
+needed:
 
 ```
-django.core.exceptions.ImproperlyConfigured: settings.DATABASES is improperly
-configured. Please supply the NAME or OPTIONS['service'] value.
+DATABASE_URL = postgres://USER:PASSWORD@HOST:PORT/NAME
 ```
 
-On Railway, map them explicitly in the service's **Variables** tab using
-references to the Postgres service:
+Scheme must be `postgres`, `postgresql` or `pgsql`; the port defaults to `5432`
+if omitted; and percent-encoded characters in the username or password are
+decoded, so a password containing `@` or `:` works.
 
-| Variable | Value |
-| --- | --- |
-| `DB_NAME` | `${{Postgres.PGDATABASE}}` |
-| `DB_USER` | `${{Postgres.PGUSER}}` |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` |
-| `DB_HOST` | `${{Postgres.PGHOST}}` |
-| `DB_PORT` | `${{Postgres.PGPORT}}` |
+**Fallback — discrete variables**, exactly as before (`DB_NAME`, `DB_USER`,
+`DB_PASSWORD`, `DB_HOST`, `DB_PORT`). Existing deployments keep working
+unchanged.
 
-Replace `Postgres` with your database service's actual name. **Add a PostgreSQL
-service first if there isn't one** — otherwise there is no database at all.
+> ### ⚠️ Railway `${{Service.VAR}}` references can resolve to empty strings
+>
+> On this project they silently did — with both `Postgres` and `postgres`
+> casing. The variable exists, but its value is blank, and Django then fails
+> in a way that does not mention the variable at all:
+>
+> ```
+> # empty DB_NAME
+> ImproperlyConfigured: settings.DATABASES is improperly configured.
+> Please supply the NAME or OPTIONS['service'] value.
+>
+> # empty DB_PASSWORD
+> psycopg.OperationalError: connection failed: fe_sendauth: no password supplied
+> ```
+>
+> Each empty variable produces a *different* error, so it looks like several
+> unrelated problems. **If a value looks unset, do not debug the reference
+> syntax — read the literal value off the database service's own Variables tab
+> and paste it in.** Or set `DATABASE_URL` and skip the five references
+> entirely.
+>
+> Diagnose with `env | grep -E "^DB_"`, and never mask the output while
+> checking whether a value is empty. For a password, check the length without
+> printing it:
+> `python -c "import os; print(len(os.environ.get('DB_PASSWORD','')))"`.
+
+**Add a PostgreSQL service first if there isn't one** — otherwise there is no
+database at all, and neither method has anything to point at.
 
 ### 13.3 First-run checklist, in order
 
@@ -1180,9 +1205,13 @@ need `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` pointing at Redis.
 | Symptom | Cause |
 | --- | --- |
 | `Unknown command: 'seed_services'` | the container is running an older deploy — redeploy the current commit |
-| `ImproperlyConfigured: settings.DATABASES …` | `DB_*` variables unset or empty — see §13.2 |
+| `ImproperlyConfigured: settings.DATABASES …` | `DB_NAME` unset **or empty** — see §13.2 |
+| `fe_sendauth: no password supplied` | `DB_PASSWORD` empty. The host resolved and the server answered, so only the credential is missing |
+| `relation "…" does not exist` | `migrate` has not been run on this database |
+| `GET /api/services` returns `[]` | `seed_services` has not been run — see §7.2 |
 
-Neither is an application defect; both are configuration.
+None is an application defect; all are configuration or a missing first-run
+step.
 
 ---
 
