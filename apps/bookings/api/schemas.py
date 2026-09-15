@@ -90,6 +90,16 @@ class BookingOut(Schema):
     scheduled_at_local: Optional[datetime] = None
     # اسم IANA المستخدم في التحويل أعلاه (للعرض)
     customer_timezone: str = ""
+    # 📌 تقدّم البحث عن مقاول — عرض فقط لا قرار:
+    #    SEARCHING: عرض نشط أو تتابع جارٍ.
+    #    NO_CONTRACTOR: استُنفد المرشَّحون في آخر محاولة.
+    #    ASSIGNED: قُبل العرض.
+    # ⚠️ لا يغني عن status ولا يناقضه: الحجز يبقى PENDING في الحالتين
+    #    الأوليين. الواجهة تميّز "ما زلنا نبحث" عن "لا يوجد عامل" بهذا
+    #    الحقل وحده (القرار المفتوح #16 لم يُحسم هنا).
+    dispatch_status: str = ""
+    # آخر محاولة ترشيح — مرجع "نبحث منذ ..." في الواجهة
+    last_dispatch_attempt_at: Optional[datetime] = None
     service_selections: list[ServiceSelectionOut]
     created_at: datetime
     updated_at: datetime

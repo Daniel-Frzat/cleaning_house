@@ -212,7 +212,7 @@ not choose the contractor and the contractor does not browse for work.
 2. Booking → `CONFIRMED`, contractor assigned.
 3. **The price becomes visible to the customer** — the first moment it is.
 4. The customer is **charged directly** (no escrow, no separate capture).
-5. The job is created as `IN_PROGRESS`.
+5. The job is created as `ASSIGNED` — committed, but not yet started.
 
 The price is never recalculated afterwards, even if an admin edits catalog prices.
 
@@ -220,6 +220,11 @@ The price is never recalculated afterwards, even if an admin edits catalog price
 > `(room_price × room_count) + base_price`, summed across services, plus
 > `distance_km × price_per_km` added **once** for the whole booking. The distance
 > is the one frozen on the accepted offer, not re-measured.
+
+**4b · The contractor starts the job on arrival.**
+`POST /api/contractor/jobs/{id}/start` → `IN_PROGRESS`, stamping `started_at`.
+Until then the customer sees a cleaner who is booked but has not arrived. Photos
+are refused before this call.
 
 **5 · The contractor works and documents it.**
 Uploads at least one `BEFORE` and one `AFTER` photo, then marks the job done.
@@ -245,7 +250,8 @@ Customer                 API                          Contractor
    |                      |                                |    (or stays PENDING)
    |                      |<-- accept ---------------------|
    |<-- price revealed ---| price frozen · CONFIRMED       |
-   |                      | charged · job IN_PROGRESS      |
+   |                      | charged · job ASSIGNED         |
+   |                      |<-- start ----------------------| IN_PROGRESS · started_at
    |                      |<-- BEFORE + AFTER photos ------|
    |                      |<-- mark-done ------------------| AWAITING_CUSTOMER_CONFIRMATION
    |-- confirm ---------->| COMPLETED                      |
@@ -399,6 +405,8 @@ file upload**) and `expiry_date`.
 | `customer_timezone` | string(64) | IANA name from the property's state — **display only** |
 | `computed_price` | decimal(10,2) | **null until acceptance**, then frozen forever |
 | `assigned_contractor` | FK → ContractorProfile | `SET_NULL`, null until acceptance |
+| `dispatch_status` | enum | `SEARCHING` · `NO_CONTRACTOR` · `ASSIGNED` — **display only** |
+| `last_dispatch_attempt_at` | datetime | most recent dispatch attempt, successful or not |
 
 **`BookingServiceSelection`** — the lines of a booking
 
@@ -427,7 +435,8 @@ file upload**) and `expiry_date`.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `status` | enum | `IN_PROGRESS` · `AWAITING_CUSTOMER_CONFIRMATION` · `COMPLETED` |
+| `status` | enum | `ASSIGNED` · `IN_PROGRESS` · `AWAITING_CUSTOMER_CONFIRMATION` · `COMPLETED` |
+| `started_at` | datetime | null until the contractor starts; stamped once |
 | `marked_done_at` | datetime | set by the contractor |
 | `confirmed_at` | datetime | set by the customer |
 
@@ -489,6 +498,28 @@ against double-charging and double-paying.
 > sets it. Do not ship a cancel button. Also note `PENDING` is **not** guaranteed
 > to progress — with no eligible contractor it stays there indefinitely.
 
+#### `dispatch_status` — the search, not the booking
+
+`status` describes the booking; `dispatch_status` describes **the search for a
+contractor**. Two bookings can both be `PENDING` and mean very different things
+to the customer, which is exactly what this field resolves.
+
+| Value | Meaning | Typical `status` | UI |
+| --- | --- | --- | --- |
+| `SEARCHING` | an offer is out, or the cascade is still running | `PENDING` | "Finding you a cleaner…" |
+| `NO_CONTRACTOR` | the last attempt exhausted every eligible candidate | `PENDING` | "No cleaner available right now." |
+| `ASSIGNED` | a contractor accepted; the search is over | `CONFIRMED` | show the confirmed booking |
+
+Pair it with `last_dispatch_attempt_at` for "searching since…" — `created_at` is
+the wrong reference once the cascade has moved on.
+
+> **`NO_CONTRACTOR` is a display field, not a verdict.** It never changes
+> `status`, never cancels the booking, and never schedules a retry. It reports
+> the outcome of the *last* attempt only: run another attempt with a contractor
+> now available and the same booking returns to `SEARCHING`. Nothing in the API
+> triggers that automatically — what happens to a booking nobody accepts is still
+> an open product decision. Do not build auto-cancel or auto-retry on this field.
+
 ### DispatchOffer
 
 | State | Entered when | Next |
@@ -512,9 +543,15 @@ distinguish "refused" from "ignored" for future contractor reporting.
 
 | State | Entered when | Next |
 | --- | --- | --- |
-| `IN_PROGRESS` | booking confirmed — **photos accepted only here** | `AWAITING_CUSTOMER_CONFIRMATION` |
+| `ASSIGNED` | booking confirmed — contractor committed, not started; **photos refused** | `IN_PROGRESS` |
+| `IN_PROGRESS` | contractor calls `/start` on arrival — **photos accepted only here** | `AWAITING_CUSTOMER_CONFIRMATION` |
 | `AWAITING_CUSTOMER_CONFIRMATION` | contractor marks done (needs BEFORE **and** AFTER) | `COMPLETED` |
 | `COMPLETED` | **customer** confirms — releases payout | *(terminal)* |
+
+`ASSIGNED` vs `IN_PROGRESS` is the difference between "a cleaner is on the way"
+and "a cleaner is here". `started_at` is `null` in the first and set in the
+second. Neither state can be skipped: photos and mark-done both refuse an
+`ASSIGNED` job, and starting twice returns `409`.
 
 ### Payment and Payout
 
@@ -533,7 +570,7 @@ Identical shape for both:
 
 ## 7. API surface by role
 
-44 endpoints. Full request/response examples live in
+45 endpoints. Full request/response examples live in
 [`API_INTEGRATION_GUIDE.md`](API_INTEGRATION_GUIDE.md); this is the map.
 
 ### 7.1 Public (no token)
@@ -880,7 +917,8 @@ that permits it**. Retrying identically will not help — refresh and update the
 | --- | --- |
 | Offer already answered, or past its 60 minutes | offer accept/decline |
 | Contractor profile already exists | `POST /api/contractor/profile` |
-| Photo uploaded after mark-done | photo upload |
+| Photo uploaded before start, or after mark-done | photo upload |
+| Start on a job that is not `ASSIGNED` (already started) | job start |
 | Mark-done on a job not `IN_PROGRESS` | mark-done |
 | Confirm before mark-done, or twice | job confirm |
 
@@ -921,6 +959,7 @@ Two contractors racing to accept the same booking is the canonical case: one get
 | Per-document detail + rejection reason | `GET` on both of the above — arrays, newest first |
 | Go online/offline *(once approved)* | `PATCH /api/contractor/profile/availability` |
 | Respond to an offer | `POST /api/contractor/offers/{id}/accept` or `/decline` |
+| Start the job on arrival | `POST /api/contractor/jobs/{id}/start` |
 | Upload photos | `POST /api/contractor/jobs/{id}/photos?photo_type=BEFORE\|AFTER` *(multipart)* |
 | Finish | `POST /api/contractor/jobs/{id}/mark-done` |
 | Earnings | `GET /api/bookings/{id}/payout` |
@@ -990,6 +1029,11 @@ verification lists.
 named `file`.
 
 **Money is strings.** `"215.37"` — never parse as float.
+
+**Do not read `status` alone on a pending booking.** `PENDING` covers both "we
+are still looking" and "nobody is available"; `dispatch_status` is what separates
+them. Likewise on the job side, `ASSIGNED` and `IN_PROGRESS` are different
+screens — a cleaner on the way is not a cleaner at work.
 
 **Show visit times from `scheduled_at_local`.** The server already converted it
 using the property's timezone; `customer_timezone` tells you which. Do not
@@ -1143,7 +1187,8 @@ and jobs with `status=COMPLETED` and no related `payout`.
 | `available_modes` *(derived)* | any of `CUSTOMER` `CONTRACTOR` |
 | `Booking.status` | `PENDING` `CONFIRMED` `CANCELLED` *(unreachable)* |
 | `DispatchOffer.status` | `PENDING` `ACCEPTED` `DECLINED` `EXPIRED` |
-| `Job.status` | `IN_PROGRESS` `AWAITING_CUSTOMER_CONFIRMATION` `COMPLETED` |
+| `Booking.dispatch_status` | `SEARCHING` `NO_CONTRACTOR` `ASSIGNED` |
+| `Job.status` | `ASSIGNED` `IN_PROGRESS` `AWAITING_CUSTOMER_CONFIRMATION` `COMPLETED` |
 | `photo_type` | `BEFORE` `AFTER` |
 | `Payment.method` | `CARD` `APPLE_PAY` `GOOGLE_PAY` |
 | `Payment.status` / `Payout.status` | `PENDING` `SUCCEEDED` `FAILED` |

@@ -39,6 +39,27 @@ class BookingStatus(models.TextChoices):
     CANCELLED = "CANCELLED", "Cancelled"
 
 
+class DispatchStatus(models.TextChoices):
+    """
+    تقدّم البحث عن مقاول — مقروء للعميل.
+
+    📌 سبب الوجود: الحجز يبقى PENDING سواء كان البحث جاريًا أو انتهى بلا
+       مرشَّح، فلم يكن العميل يستطيع التمييز بين "ما زلنا نبحث" و"لا يوجد
+       عامل متاح". الحالتان كانتا متطابقتين تمامًا في الرد.
+
+    ⚠️ حقل عرض لا قرار: لا يغيّر status ولا يُلغي حجزًا ولا يُطلق إعادة
+       محاولة. القرار المفتوح #16 يبقى مفتوحًا كما هو.
+
+    SEARCHING          : عرض نشط لدى مقاول، أو بحث لم يبدأ بعد.
+    NO_CONTRACTOR      : جُرِّب كل مرشَّح مؤهَّل ولم يبقَ أحد.
+    ASSIGNED           : قَبِل مقاول — البحث انتهى.
+    """
+
+    SEARCHING = "SEARCHING", "Searching"
+    NO_CONTRACTOR = "NO_CONTRACTOR", "No contractor available"
+    ASSIGNED = "ASSIGNED", "Assigned"
+
+
 class Booking(models.Model):
     """
     حجز يقدّمه عميل على أحد عقاراته.
@@ -95,6 +116,25 @@ class Booking(models.Model):
         default="",
         help_text="IANA timezone derived from the property address; display only.",
     )
+
+    # ------------------------------------------------------------
+    # تقدّم البحث عن مقاول — للعرض وحده
+    # ------------------------------------------------------------
+    # 📌 يفصل "ما زلنا نبحث" عن "لا يوجد عامل": الحالتان كانتا كلتاهما
+    #    status=PENDING بلا أي فارق مرئي.
+    #
+    # ⚠️ لا يحلّ محل status ولا يتحكم بأي منطق: محرّك الإسناد يكتبه،
+    #    ولا يقرأه أحد سوى طبقة العرض.
+    dispatch_status = models.CharField(
+        max_length=16,
+        choices=DispatchStatus.choices,
+        default=DispatchStatus.SEARCHING,
+        help_text="Progress of the contractor search; display only.",
+    )
+
+    # آخر مرة حاول فيها محرّك الإسناد إيجاد مقاول — يسمح للعميل بعرض
+    # "نبحث منذ ..." بلا تخمين.
+    last_dispatch_attempt_at = models.DateTimeField(null=True, blank=True)
 
     # 📌 لقطة السعر المجمَّدة (§36.2). null حتى يقبل مقاولٌ العرض.
     # ⚠️ لا يُعاد حسابه بعد ضبطه — تغيّر أسعار الكتالوج لاحقًا لا يمسّه.

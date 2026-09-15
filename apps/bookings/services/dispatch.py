@@ -21,7 +21,12 @@ from django.utils import timezone
 from apps.contractors.models import AvailabilityStatus, ContractorProfile
 from apps.contractors.services.verification import is_contractor_eligible
 
-from ..models import DispatchOffer, DispatchOfferStatus, OFFER_TTL_MINUTES
+from ..models import (
+    DispatchOffer,
+    DispatchOfferStatus,
+    DispatchStatus,
+    OFFER_TTL_MINUTES,
+)
 from .distance import distance_between
 
 logger = logging.getLogger(__name__)
@@ -102,13 +107,28 @@ def assign_next_contractor(booking):
     """
     candidates = find_candidates(booking)
 
+    # 📌 كل محاولة تُسجَّل، نجحت أو لا — الواجهة تعرض "نبحث منذ ..." بلا تخمين.
+    booking.last_dispatch_attempt_at = timezone.now()
+
     if not candidates:
+        # 📌 استُنفد المرشَّحون: هذا ما يميّز "لا يوجد عامل" عن "ما زلنا نبحث".
+        # ⚠️ الحجز يبقى PENDING كما هو — الحقل للعرض ولا يُلغي شيئًا
+        #    (القرار المفتوح #16 لم يُحسم هنا).
+        booking.dispatch_status = DispatchStatus.NO_CONTRACTOR
+        booking.save(update_fields=[
+            "dispatch_status", "last_dispatch_attempt_at", "updated_at",
+        ])
         logger.info(
             "No eligible contractor for booking (booking_id=%s) — staying PENDING "
             "with no active offer (open decision #16)",
             booking.id,
         )
         return None
+
+    booking.dispatch_status = DispatchStatus.SEARCHING
+    booking.save(update_fields=[
+        "dispatch_status", "last_dispatch_attempt_at", "updated_at",
+    ])
 
     profile, distance = candidates[0]
 

@@ -86,6 +86,10 @@ def _serialize(booking):
             booking.scheduled_at, booking.customer_timezone
         ),
         "customer_timezone": booking.customer_timezone,
+        # 📌 تقدّم البحث يُعاد كما هو دون شرط الحالة: هو حقل عرض لا
+        #    يكشف سعرًا ولا هوية مقاول، بخلاف الحقلين أعلاه.
+        "dispatch_status": booking.dispatch_status,
+        "last_dispatch_attempt_at": booking.last_dispatch_attempt_at,
         "service_selections": [
             {
                 "id": sel.id,

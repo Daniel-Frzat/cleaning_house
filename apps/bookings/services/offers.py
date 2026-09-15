@@ -20,7 +20,12 @@ from django.utils import timezone
 from apps.accounts.roles import ConfirmedRole
 from apps.services.services.pricing import calculate_price
 
-from ..models import BookingStatus, DispatchOffer, DispatchOfferStatus
+from ..models import (
+    BookingStatus,
+    DispatchOffer,
+    DispatchOfferStatus,
+    DispatchStatus,
+)
 from .dispatch import assign_next_contractor
 
 logger = logging.getLogger(__name__)
@@ -173,11 +178,14 @@ def accept_offer(user, offer_id):
     booking.computed_price = price
     booking.assigned_contractor = offer.contractor
     booking.status = BookingStatus.CONFIRMED
+    # 📌 البحث انتهى — الواجهة لم تعد تعرض "نبحث لك عن عامل".
+    booking.dispatch_status = DispatchStatus.ASSIGNED
     booking.save(
         update_fields=[
             "computed_price",
             "assigned_contractor",
             "status",
+            "dispatch_status",
             "updated_at",
         ]
     )

@@ -562,7 +562,7 @@ This is the pivotal moment of the whole system. When a contractor accepts:
 - **the price becomes visible to the customer** — this is the first moment it is;
 - the customer is **charged directly** (there is no escrow and no separate
   capture step);
-- the job is created and starts `IN_PROGRESS`.
+- the job is created in the `ASSIGNED` state — committed, but not yet started.
 
 The frozen price is never recalculated. If an administrator changes the catalog
 prices afterwards, this booking is unaffected.
@@ -571,6 +571,11 @@ The price formula is: for each selected service, `(room_price × room_count) +
 base_price`; summed across services; plus `distance_km × price_per_km` added
 **once** for the whole booking. The distance used is the one recorded on the
 accepted offer, not a freshly measured one.
+
+**4b. The contractor starts the job on arrival.**
+`POST /api/contractor/jobs/{id}/start` moves it from `ASSIGNED` to
+`IN_PROGRESS` and stamps `started_at`. Until then the customer can see that a
+cleaner is booked but has not arrived. Photos are refused before this call.
 
 **5. The contractor performs the job and documents it.**
 They upload photos — at least one `BEFORE` and one `AFTER` — and then mark the
@@ -610,10 +615,12 @@ sequenceDiagram
         Note over API: If nobody is left, the booking<br/>stays PENDING with no active offer
     else Contractor accepts
         K->>API: POST /api/contractor/offers/{id}/accept
-        Note over API: Price calculated and FROZEN<br/>Booking → CONFIRMED<br/>Customer charged directly<br/>Job created (IN_PROGRESS)
+        Note over API: Price calculated and FROZEN<br/>Booking → CONFIRMED<br/>Customer charged directly<br/>Job created (ASSIGNED)
         API-->>C: Price is now visible
     end
 
+    K->>API: POST /api/contractor/jobs/{id}/start
+    Note over API: Job → IN_PROGRESS<br/>started_at stamped
     K->>API: POST /api/contractor/jobs/{id}/photos (BEFORE)
     K->>API: POST /api/contractor/jobs/{id}/photos (AFTER)
     K->>API: POST /api/contractor/jobs/{id}/mark-done
@@ -636,8 +643,9 @@ Customer                 API                          Contractor
    |                      |                                |     (or stays PENDING)
    |                      |<-- accept ---------------------|
    |                      | price frozen, CONFIRMED,       |
-   |<-- price revealed ---| charged, job IN_PROGRESS       |
+   |<-- price revealed ---| charged, job ASSIGNED          |
    |                      |                                |
+   |                      |<-- start ----------------------| IN_PROGRESS, started_at
    |                      |<-- BEFORE + AFTER photos ------|
    |                      |<-- mark-done ------------------| AWAITING_CUSTOMER_CONFIRMATION
    |-- confirm ---------->| COMPLETED                      |
@@ -661,7 +669,32 @@ Customer                 API                          Contractor
 > decision. Do not build a customer-facing cancel button against this API yet.
 >
 > Note also that a booking stays `PENDING` forever if no contractor is ever
-> found — `PENDING` is not guaranteed to progress.
+> found — `PENDING` is not guaranteed to progress. Use `dispatch_status` (below)
+> to tell an unserviced booking from one that is still being worked on; `status`
+> alone cannot distinguish them.
+
+#### `dispatch_status` — how the contractor search is going
+
+`status` describes the booking; `dispatch_status` describes the **search for a
+contractor**. Two bookings can both be `PENDING` while meaning very different
+things to the customer, so this field exists to tell them apart.
+
+| `dispatch_status` | Meaning | Typical `status` | Suggested UI |
+| --- | --- | --- | --- |
+| `SEARCHING` | An offer is out, or the cascade is still moving through candidates. | `PENDING` | "Finding you a cleaner…" |
+| `NO_CONTRACTOR` | The last dispatch attempt exhausted every eligible candidate. | `PENDING` | "No cleaner is available right now." |
+| `ASSIGNED` | A contractor accepted. The search is over. | `CONFIRMED` | Show the confirmed booking. |
+
+`last_dispatch_attempt_at` is the timestamp of the most recent attempt, successful
+or not. Use it for "searching since…" rather than `created_at`.
+
+> **`NO_CONTRACTOR` is a display field, not a verdict.** It does not cancel the
+> booking, does not change `status`, and does not schedule a retry. It reports the
+> outcome of the *last* attempt: if a contractor later becomes available and a new
+> attempt runs, the same booking goes back to `SEARCHING`. Nothing in the current
+> API triggers that attempt automatically — what should happen to a booking nobody
+> accepts is still an open product decision. Do not build an auto-cancel or an
+> auto-retry against this field.
 
 ### 5.2 DispatchOffer
 
@@ -688,9 +721,18 @@ stored status to `EXPIRED`. Do not rely on the stored `status` alone — compare
 
 | State | Entered when | Left when | Next possible |
 | --- | --- | --- | --- |
-| `IN_PROGRESS` | The job is created, immediately after the booking is confirmed. Photos may be uploaded **only in this state**. | The contractor marks it done. | `AWAITING_CUSTOMER_CONFIRMATION` |
+| `ASSIGNED` | The job is created, immediately after the booking is confirmed. The contractor has committed but has not started. Photos are **refused** in this state. | The assigned contractor starts the job. | `IN_PROGRESS` |
+| `IN_PROGRESS` | The assigned contractor calls `POST /api/contractor/jobs/{id}/start`. `started_at` is stamped. Photos may be uploaded **only in this state**. | The contractor marks it done. | `AWAITING_CUSTOMER_CONFIRMATION` |
 | `AWAITING_CUSTOMER_CONFIRMATION` | The assigned contractor marks the job done — requires ≥1 `BEFORE` **and** ≥1 `AFTER` photo. Photo evidence is now frozen. | The booking's own customer confirms. **No timeout.** | `COMPLETED` |
 | `COMPLETED` | The customer confirms. Releases the contractor payout. | — | *(terminal)* |
+
+`ASSIGNED` and `IN_PROGRESS` are distinct on purpose: "a cleaner is booked and on
+the way" is not the same thing as "a cleaner is here and working". Use
+`started_at` — `null` until the job starts — to drive that distinction in the UI
+rather than inferring it from `created_at`.
+
+There is no way to skip `ASSIGNED`: marking a job done, or uploading a photo,
+before it has been started is rejected. Starting a job twice returns `409`.
 
 There is **no `CANCELLED` job state** and no administrative override: a job that
 the customer never confirms remains in `AWAITING_CUSTOMER_CONFIRMATION`
@@ -730,7 +772,7 @@ A failed payout leaves the job `COMPLETED` and the booking `CONFIRMED`.
 
 ## 6. Endpoint reference
 
-44 endpoints across 8 domains. Unless a row says otherwise, every endpoint
+45 endpoints across 8 domains. Unless a row says otherwise, every endpoint
 requires `Authorization: Bearer <JWT access token>`.
 
 ### 6.1 System
@@ -1485,6 +1527,8 @@ Content-Type: application/json
   "scheduled_at": "2026-09-19T23:00:00Z",
   "scheduled_at_local": "2026-09-20T09:00:00+10:00",
   "customer_timezone": "Australia/Sydney",
+  "dispatch_status": "SEARCHING",
+  "last_dispatch_attempt_at": "2026-09-15T12:53:46.552Z",
   "service_selections": [
     {
       "id": "4eea7c75-0bcd-48cd-8980-f49dba384c57",
@@ -1559,6 +1603,8 @@ assigned contractor:
   "scheduled_at": "2026-09-18T23:00:00Z",
   "scheduled_at_local": "2026-09-19T09:00:00+10:00",
   "customer_timezone": "Australia/Sydney",
+  "dispatch_status": "ASSIGNED",
+  "last_dispatch_attempt_at": "2026-09-13T10:15:18.410Z",
   "service_selections": [
     {
       "id": "7ccdbf8a-64fc-45d0-a99e-e131e8229bcf",
@@ -1651,22 +1697,50 @@ details about the next contractor are exposed.
 `ADMIN`.
 
 ```jsonc
-// 200 OK — freshly created job
+// 200 OK — freshly created job, before the contractor has started
 {
-  "id": "2636168a-d4fb-4171-a917-c9393e55523b",
-  "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2",
-  "status": "IN_PROGRESS",
+  "id": "2758f57f-09c4-4fca-ae54-013fc3134aa7",
+  "booking_id": "e09f7575-6da3-4679-bd5d-eb82e03af2ef",
+  "status": "ASSIGNED",
+  "started_at": null,
   "marked_done_at": null,
   "confirmed_at": null,
   "photos": [],
-  "created_at": "2026-09-13T10:15:18.443Z"
+  "created_at": "2026-09-15T12:53:46.577Z"
 }
 ```
 
-A job exists only after the booking is confirmed.
+A job exists only after the booking is confirmed, and it is created `ASSIGNED` —
+**not** `IN_PROGRESS`. Poll or re-read this endpoint to tell "a cleaner is
+booked" (`ASSIGNED`, `started_at` is `null`) from "a cleaner is here and
+working" (`IN_PROGRESS`, `started_at` set).
 
 **Errors:** `404` — the **only** error this endpoint returns. No such booking, no
 job yet, and not being entitled to see it are deliberately indistinguishable.
+
+#### `POST /api/contractor/jobs/{job_id}/start`
+
+**Who may call:** the assigned contractor only. No request body. Call it on
+arrival at the property, before taking the `BEFORE` photo.
+
+```jsonc
+// 200 OK
+{
+  "id": "2758f57f-09c4-4fca-ae54-013fc3134aa7",
+  "booking_id": "e09f7575-6da3-4679-bd5d-eb82e03af2ef",
+  "status": "IN_PROGRESS",
+  "started_at": "2026-09-15T12:53:46.598Z",
+  "marked_done_at": null,
+  "confirmed_at": null,
+  "photos": [],
+  "created_at": "2026-09-15T12:53:46.577Z"
+}
+```
+
+`started_at` is stamped at the moment of this call and never changes afterwards.
+
+**Errors:** `403` not the assigned contractor · `404` no such job · `409` the job
+is not `ASSIGNED` (already started, or already past it).
 
 #### `POST /api/contractor/jobs/{job_id}/photos`
 
@@ -1701,7 +1775,8 @@ file=<binary image data>
 > *(The `fake-storage.local` host above is the development fake. With a real
 > provider configured this will be that provider's signed URL.)*
 
-Photos are accepted **only while the job is `IN_PROGRESS`**.
+Photos are accepted **only while the job is `IN_PROGRESS`** — an `ASSIGNED` job
+that has not been started yet rejects them with `409`.
 
 **Errors:** `400` bad `photo_type` or empty file · `403` not the assigned
 contractor · `404` no such job · `409` the job no longer accepts photos.
@@ -1719,6 +1794,7 @@ uploaded**, otherwise `400`.
   "id": "2636168a-d4fb-4171-a917-c9393e55523b",
   "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2",
   "status": "AWAITING_CUSTOMER_CONFIRMATION",
+  "started_at": "2026-09-13T10:15:18.451Z",
   "marked_done_at": "2026-09-13T10:15:18.484Z",
   "confirmed_at": null,
   "photos": [
@@ -1757,6 +1833,7 @@ administrator, not the contractor. No request body.
   "id": "2636168a-d4fb-4171-a917-c9393e55523b",
   "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2",
   "status": "COMPLETED",
+  "started_at": "2026-09-13T10:15:18.451Z",
   "marked_done_at": "2026-09-13T10:15:18.484Z",
   "confirmed_at": "2026-09-13T10:15:18.488Z",
   "photos": [ "...as above..." ],
@@ -2114,7 +2191,7 @@ Notable consequences:
 ## 9. Notes for Postman / Insomnia users
 
 The API publishes a complete OpenAPI 3.1 document that any OpenAPI-aware tool can
-import as a ready-made collection of all 44 endpoints:
+import as a ready-made collection of all 45 endpoints:
 
 ```
 https://cleaninghouse-production.up.railway.app/api/openapi.json
