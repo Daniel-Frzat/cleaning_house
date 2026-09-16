@@ -22,6 +22,8 @@ from typing import Optional
 from ninja import Schema
 from pydantic import Field
 
+from ..models import ACCESS_NOTES_MAX_LENGTH
+
 
 class ServiceSelectionIn(Schema):
     """سطر خدمة عند الإنشاء."""
@@ -49,6 +51,10 @@ class BookingIn(Schema):
     # القائمة الفارغة تُرفض في طبقة الخدمة برسالة مفهومة (400)
     service_selections: list[ServiceSelectionIn]
     scheduled_at: datetime
+    # 📌 اختياري ويكتبه العميل بنفسه: "المفتاح تحت السجادة"، "الكلب في
+    #    الحديقة". أغلب الحجوزات تتركه فارغًا.
+    # 🔒 لا يُعاد إلا للمقاول المُسنَد — راجع BookingOut أدناه.
+    access_notes: str = Field("", max_length=ACCESS_NOTES_MAX_LENGTH)
 
 
 class ServiceSelectionOut(Schema):
@@ -100,6 +106,11 @@ class BookingOut(Schema):
     dispatch_status: str = ""
     # آخر محاولة ترشيح — مرجع "نبحث منذ ..." في الواجهة
     last_dispatch_attempt_at: Optional[datetime] = None
+    # 🔒 ملاحظات وصول العميل — null لكل من ليس المقاول المُسنَد.
+    #    الحجب في طبقة التسلسل لا هنا: الـschema يسمح بالقيمة، والمُسلسِل
+    #    هو من يقرّر كشفها (نفس نمط computed_price أعلاه).
+    # ⚠️ قد تحوي مكان مفتاح المنزل — لا تُكشف لمقاول لم يقبل بعد.
+    access_notes: Optional[str] = None
     service_selections: list[ServiceSelectionOut]
     created_at: datetime
     updated_at: datetime

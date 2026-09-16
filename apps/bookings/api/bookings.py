@@ -90,6 +90,11 @@ def _serialize(booking):
         #    يكشف سعرًا ولا هوية مقاول، بخلاف الحقلين أعلاه.
         "dispatch_status": booking.dispatch_status,
         "last_dispatch_attempt_at": booking.last_dispatch_attempt_at,
+        # 📌 يُعاد للعميل لأنه كاتبه: يحتاج أن يراجعه ويصحّحه.
+        # 🔒 هذه الـendpoints للعميل حصرًا (assert_is_customer في طبقة
+        #    الخدمة)، فلا يصل المقاول إلى هنا أصلًا — وصوله إليه عبر
+        #    GET /api/bookings/{id}/job بعد الإسناد وحده.
+        "access_notes": booking.access_notes,
         "service_selections": [
             {
                 "id": sel.id,
@@ -163,6 +168,8 @@ def create_booking(request, payload: BookingIn):
             property_id=payload.property_id,
             service_selections=selections,
             scheduled_at=payload.scheduled_at,
+            # 📌 من العميل مباشرةً — لا يُشتق ولا يُورَّث من حجز سابق
+            access_notes=payload.access_notes,
         )
     except scheduling_svc.SchedulingError as exc:
         # 400: موعد ماضٍ أو خارج ساعات العمل — نفس رتبة بقية قواعد العمل

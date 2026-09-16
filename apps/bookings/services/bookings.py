@@ -181,7 +181,9 @@ def _resolve_selections(service_selections):
 # العمليات
 # ------------------------------------------------------------
 @transaction.atomic
-def create_booking(user, property_id, service_selections, scheduled_at=None):
+def create_booking(
+    user, property_id, service_selections, scheduled_at=None, access_notes=""
+):
     """
     ينشئ حجزًا بحالة PENDING مع أسطر خدماته.
 
@@ -199,6 +201,10 @@ def create_booking(user, property_id, service_selections, scheduled_at=None):
        (الاختبارات، الأوامر الإدارية) قادرة على إنشاء حجز بلا موعد، تمامًا
        كالصفوف السابقة للحقل — ولا يفتح ثغرة في المسار العام.
     ⚠️ لا فحص لتوفّر أي مقاول هنا: الإسناد يقع بعد الحجز لا قبله (§36.1).
+
+    📌 access_notes يكتبه العميل بنفسه ويصل كما هو: لا يُشتق من العنوان،
+       ولا يُورَّث من حجز سابق، ولا يُولَّد من أي مصدر آخر. تركه فارغًا
+       هو الحالة الطبيعية — أغلب الزيارات لا تحتاج تعليمات.
     """
     assert_is_customer(user)
 
@@ -224,7 +230,10 @@ def create_booking(user, property_id, service_selections, scheduled_at=None):
         status=BookingStatus.PENDING,
         scheduled_at=scheduled_utc,
         customer_timezone=customer_timezone,
+        # نصّ العميل كما كتبه — التشذيب فقط، بلا أي تفسير
+        access_notes=(access_notes or "").strip(),
     )
+    # full_clean يفرض حدّ الطول (ACCESS_NOTES_MAX_LENGTH) ويرفع 422
     booking.full_clean()
     booking.save()
 

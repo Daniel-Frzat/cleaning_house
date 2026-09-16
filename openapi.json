@@ -4266,6 +4266,17 @@
             ],
             "title": "Last Dispatch Attempt At"
           },
+          "access_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
           "service_selections": {
             "items": {
               "$ref": "#/components/schemas/ServiceSelectionOut"
@@ -4345,6 +4356,12 @@
           "scheduled_at": {
             "format": "date-time",
             "title": "Scheduled At",
+            "type": "string"
+          },
+          "access_notes": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Access Notes",
             "type": "string"
           }
         },
@@ -4644,6 +4661,17 @@
               }
             ],
             "title": "Started At"
+          },
+          "access_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
           },
           "marked_done_at": {
             "anyOf": [

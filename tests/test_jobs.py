@@ -681,4 +681,17 @@ def test_api_layer_does_not_reimplement_permission_logic():
     src = inspect.getsource(api_mod)
 
     assert "customer_id ==" not in src
-    assert "assigned_contractor" not in src
+
+    # ⚠️ استدعاء دالة الخدمة مسموح — إعادة بناء منطقها ممنوع.
+    #    الفرق: jobs_svc.is_assigned_contractor(...) تفويض، بينما
+    #    booking.assigned_contractor... مقارنة ملكية في الطبقة الخطأ.
+    for line in src.splitlines():
+        if "assigned_contractor" not in line:
+            continue
+        assert "jobs_svc.is_assigned_contractor(" in line, (
+            f"API layer reimplements ownership logic: {line.strip()}"
+        )
+
+    # ولا يقرأ الملف حقل الملكية من الكائن مباشرةً بأي شكل
+    assert ".assigned_contractor" not in src
+    assert "assigned_contractor_id" not in src

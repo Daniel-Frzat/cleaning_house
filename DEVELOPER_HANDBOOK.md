@@ -441,6 +441,7 @@ file upload**) and `expiry_date`.
 | `assigned_contractor` | FK → ContractorProfile | `SET_NULL`, null until acceptance |
 | `dispatch_status` | enum | `SEARCHING` · `NO_CONTRACTOR` · `ASSIGNED` — **display only** |
 | `last_dispatch_attempt_at` | datetime | most recent dispatch attempt, successful or not |
+| `access_notes` | text(500) | customer's own arrival instructions — **assigned contractor only** |
 
 **`BookingServiceSelection`** — the lines of a booking
 
@@ -471,6 +472,7 @@ file upload**) and `expiry_date`.
 | --- | --- | --- |
 | `status` | enum | `ASSIGNED` · `IN_PROGRESS` · `AWAITING_CUSTOMER_CONFIRMATION` · `COMPLETED` |
 | `started_at` | datetime | null until the contractor starts; stamped once |
+| *(`access_notes`)* | text | mirrored from the booking, **only** for the assigned contractor |
 | `marked_done_at` | datetime | set by the contractor |
 | `confirmed_at` | datetime | set by the customer |
 
@@ -531,6 +533,27 @@ against double-charging and double-paying.
 > **No cancellation endpoint exists.** `CANCELLED` is in the model but nothing
 > sets it. Do not ship a cancel button. Also note `PENDING` is **not** guaranteed
 > to progress — with no eligible contractor it stays there indefinitely.
+
+#### `access_notes` — written by the customer, read by one contractor
+
+Free text (max 500 chars) the customer types for **this visit**: "key is under
+the pot", "dog in the back yard", "buzzer is broken, knock". Optional; most
+bookings leave it empty. Nothing generates or infers it — it is not derived from
+the address, and it is **not** inherited by the customer's next booking.
+
+🔒 **Visibility is the whole design.** It may say where the house key is, so:
+
+| Who | Sees it? | Where |
+| --- | :---: | --- |
+| The customer who wrote it | ✅ | their own `GET /api/bookings/{id}` |
+| The **assigned** contractor | ✅ | `GET /api/bookings/{id}/job`, and job actions |
+| A contractor merely *offered* the booking | ❌ | never — the offer carries nothing |
+| `ADMIN` | ❌ | `null`, even though admins can read the job |
+
+An admin being excluded is deliberate: running the platform does not require
+knowing where a customer keeps their key. The reveal is decided by
+`jobs.services.is_assigned_contractor()` — the same ownership check the access
+rules use, so the two cannot drift apart.
 
 #### `dispatch_status` — the search, not the booking
 

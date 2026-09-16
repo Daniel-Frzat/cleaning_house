@@ -115,6 +115,21 @@ def _assigned_contractor_user_id(booking):
     return profile.user_id if profile is not None else None
 
 
+def is_assigned_contractor(user, job):
+    """
+    🔒 هل هذا المستخدم هو المقاول المُسنَد لهذه المهمة تحديدًا؟
+
+    تُستعمل لقرار الكشف لا المنع: ملاحظات وصول العميل تُعاد لهذا المقاول
+    وحده. مصدر الحقيقة واحد مع assert_can_view_job أدناه، فلا يتفرّع
+    منطق الملكية في طبقة الـAPI.
+
+    ⚠️ الإدارة ليست المقاول المُسنَد: has_admin_access لا يمنح هذا الحق.
+    """
+    if user is None or not user.is_authenticated:
+        return False
+    return _assigned_contractor_user_id(job.booking) == user.id
+
+
 def assert_can_view_job(user, job):
     """
     🔒 من يرى المهمة: العميل المالك، أو الإدارة، أو المقاول المُسنَد.

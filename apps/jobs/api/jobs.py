@@ -58,12 +58,22 @@ def _serialize_photo(photo, signed_url, *, include_storage_key):
     }
 
 
-def _serialize_job(job, photos_with_urls, *, include_storage_key):
+def _serialize_job(job, photos_with_urls, *, include_storage_key,
+                   include_access_notes=False):
+    """
+    🔒 include_access_notes: ملاحظات وصول العميل لا تُكشف إلا للمقاول
+       المُسنَد. العميل يعرف ما كتبه بنفسه، والإدارة لا تحتاجه، والمقاول
+       الذي لم يقبل بعد لا يصل إلى هذا الـendpoint أصلًا.
+
+       الافتراضي False: أي مسار جديد يُضاف لاحقًا يبدأ محجوبًا ما لم
+       يطلب الكشف صراحةً.
+    """
     return {
         "id": job.id,
         "booking_id": job.booking_id,
         "status": job.status,
         "started_at": job.started_at,
+        "access_notes": job.booking.access_notes if include_access_notes else None,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,
         "photos": [
@@ -186,7 +196,11 @@ def retrieve_job(request, booking_id: str):
     is_admin = request.user.has_admin_access()
 
     return 200, _serialize_job(
-        job, photos_with_urls, include_storage_key=is_admin
+        job,
+        photos_with_urls,
+        include_storage_key=is_admin,
+        # 🔒 العميل يعرف ما كتبه، والإدارة لا تحتاجه — المقاول المُسنَد وحده
+        include_access_notes=jobs_svc.is_assigned_contractor(request.user, job),
     )
 
 
@@ -238,7 +252,11 @@ def start_job(request, job_id: str):
     photos_with_urls = photos_svc.list_photos_with_urls(job)
     is_admin = request.user.has_admin_access()
 
-    return 200, _serialize_job(job, photos_with_urls, include_storage_key=is_admin)
+    # المسار محصور بالمقاول المُسنَد (403 لغيره)، فالكشف هنا آمن
+    return 200, _serialize_job(
+        job, photos_with_urls, include_storage_key=is_admin,
+        include_access_notes=True,
+    )
 
 
 @contractor_router.post(
@@ -289,7 +307,11 @@ def mark_done(request, job_id: str):
     photos_with_urls = photos_svc.list_photos_with_urls(job)
     is_admin = request.user.has_admin_access()
 
-    return 200, _serialize_job(job, photos_with_urls, include_storage_key=is_admin)
+    # المسار محصور بالمقاول المُسنَد (403 لغيره)، فالكشف هنا آمن
+    return 200, _serialize_job(
+        job, photos_with_urls, include_storage_key=is_admin,
+        include_access_notes=True,
+    )
 
 
 # ------------------------------------------------------------

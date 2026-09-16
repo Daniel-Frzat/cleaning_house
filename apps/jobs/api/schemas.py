@@ -35,6 +35,9 @@ class JobOut(Schema):
     status: str
     # يُملأ حين يعلن المقاول بدء العمل (ASSIGNED → IN_PROGRESS)
     started_at: Optional[datetime] = None
+    # 🔒 ملاحظات وصول العميل — null لكل من ليس المقاول المُسنَد.
+    #    قد تحوي مكان مفتاح المنزل، فالحجب افتراضي في المُسلسِل.
+    access_notes: Optional[str] = None
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     photos: list[JobPhotoOut]

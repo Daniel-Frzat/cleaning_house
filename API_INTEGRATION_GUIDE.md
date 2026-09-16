@@ -1578,11 +1578,13 @@ Content-Type: application/json
       "room_count": 0
     }
   ],
-  "scheduled_at": "2026-09-20T09:00:00+10:00"
+  "scheduled_at": "2026-09-20T09:00:00+10:00",
+  "access_notes": "Key is under the pot. Dog in the back yard."
 }
 ```
 
-*(A baseline service with three rooms, plus one add-on at `room_count: 0`.)*
+*(A baseline service with three rooms, plus one add-on at `room_count: 0`.
+`access_notes` is optional — omit it entirely when the customer types nothing.)*
 
 ```jsonc
 // 201 Created
@@ -1598,6 +1600,7 @@ Content-Type: application/json
   "customer_timezone": "Australia/Sydney",
   "dispatch_status": "SEARCHING",
   "last_dispatch_attempt_at": "2026-09-15T12:53:46.552Z",
+  "access_notes": "Key is under the pot. Dog in the back yard.",
   "service_selections": [
     {
       "id": "4eea7c75-0bcd-48cd-8980-f49dba384c57",
@@ -1625,8 +1628,27 @@ visit must be in the future and fall within **07:00–19:00 local time**, bounds
 inclusive, or the request is rejected with `400`.
 
 At least one selection is required; every selected service must be active.
-`room_count` must be an integer **≥ 0** (zero means the base fee alone). There is
-no scheduling field — a booking carries no date or time.
+`room_count` must be an integer **≥ 0** (zero means the base fee alone).
+
+`access_notes` is **optional** free text (max 500 characters), typed by the
+customer for this visit — "key is under the pot", "dog in the back yard", "the
+buzzer is broken, knock". Most bookings leave it empty.
+
+> ### 🔒 Who can read `access_notes`
+>
+> It is returned to **the customer who wrote it** (on their own bookings) and to
+> **the assigned contractor** — on `GET /api/bookings/{id}/job` and the job
+> action responses, once they have accepted. Nobody else sees it: a contractor
+> who has only been *offered* the booking gets `null`, and so does an `ADMIN`.
+>
+> That restriction is the point of the field. It may contain where the house key
+> is kept, so it is never exposed to a contractor who might decline and never
+> visit the property.
+>
+> It is per-visit, not per-property: it is **not** carried over to the customer's
+> next booking, and nothing derives it from the address. If you want it
+> remembered between bookings, pre-fill the field in your own UI — the server
+> will not do it for you.
 
 > **Show no price in your UI at this stage.** `computed_price` and
 > `assigned_contractor_id` are `null` by design, and no endpoint will reveal a
@@ -1772,6 +1794,7 @@ details about the next contractor are exposed.
   "booking_id": "e09f7575-6da3-4679-bd5d-eb82e03af2ef",
   "status": "ASSIGNED",
   "started_at": null,
+  "access_notes": "Key is under the pot. Dog in the back yard.",
   "marked_done_at": null,
   "confirmed_at": null,
   "photos": [],
@@ -1799,6 +1822,7 @@ arrival at the property, before taking the `BEFORE` photo.
   "booking_id": "e09f7575-6da3-4679-bd5d-eb82e03af2ef",
   "status": "IN_PROGRESS",
   "started_at": "2026-09-15T12:53:46.598Z",
+  "access_notes": "Key is under the pot. Dog in the back yard.",
   "marked_done_at": null,
   "confirmed_at": null,
   "photos": [],

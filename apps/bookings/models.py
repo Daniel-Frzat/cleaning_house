@@ -18,6 +18,7 @@ Booking Models — Booking Domain (Change Set §36.1، §20)
 
 import uuid
 
+from django.core.validators import MaxLengthValidator
 from django.db import models
 from django.utils import timezone
 
@@ -58,6 +59,11 @@ class DispatchStatus(models.TextChoices):
     SEARCHING = "SEARCHING", "Searching"
     NO_CONTRACTOR = "NO_CONTRACTOR", "No contractor available"
     ASSIGNED = "ASSIGNED", "Assigned"
+
+
+# حدّ ملاحظات الوصول: تعليمات وصول لا رسالة. الحدّ يمنع إساءة استعمال
+# الحقل كقناة تواصل، ويبقى واسعًا لأي تعليمات معقولة.
+ACCESS_NOTES_MAX_LENGTH = 500
 
 
 class Booking(models.Model):
@@ -135,6 +141,29 @@ class Booking(models.Model):
     # آخر مرة حاول فيها محرّك الإسناد إيجاد مقاول — يسمح للعميل بعرض
     # "نبحث منذ ..." بلا تخمين.
     last_dispatch_attempt_at = models.DateTimeField(null=True, blank=True)
+
+    # ملاحظات وصول يكتبها العميل بنفسه لهذه الزيارة: "المفتاح تحت السجادة"،
+    # "الكلب في الحديقة"، "الجرس معطّل — اطرق".
+    #
+    # 🔒 لا تُكشف إلا للمقاول المُسنَد بعد القبول (api/bookings.py،
+    #    api/jobs.py). المقاول الذي يُعرض عليه الحجز ولم يقبل بعد لا يراها:
+    #    قد تحوي مكان مفتاح المنزل، وعرضها على من قد يرفض ولن يزور المنزل
+    #    أبدًا كشفٌ بلا مقابل.
+    #
+    # ⚠️ نصّ حرّ من العميل — لا يُفسَّر ولا يُبنى عليه أي منطق. ليس بديلًا
+    #    عن العنوان ولا عن الإحداثيات: الإسناد يقرأ الإحداثيات وحدها.
+    # ⚠️ MaxLengthValidator صراحةً: max_length على TextField يؤثّر في
+    #    واجهات النماذج فقط ولا يولّد أي تحقق في full_clean — الحدّ بدونه
+    #    كان سيمرّ صامتًا.
+    access_notes = models.TextField(
+        blank=True,
+        default="",
+        validators=[MaxLengthValidator(ACCESS_NOTES_MAX_LENGTH)],
+        help_text=(
+            "Customer's own arrival instructions for this visit. "
+            "Visible only to the assigned contractor."
+        ),
+    )
 
     # 📌 لقطة السعر المجمَّدة (§36.2). null حتى يقبل مقاولٌ العرض.
     # ⚠️ لا يُعاد حسابه بعد ضبطه — تغيّر أسعار الكتالوج لاحقًا لا يمسّه.
