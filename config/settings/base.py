@@ -56,6 +56,9 @@ LOCAL_APPS = [
     # Payout Domain — Payout (§36.5). دفع فوري لكل حجز، صفر عمولة،
     # لا تجميع ولا دفعات مجمَّعة (قرار محسوم).
     "apps.payouts",
+    # Support Domain — SupportRequest (قرار MVP). قناة باتجاه واحد خلف
+    # شاشتَي Contact support و Report an issue: لا ردود ولا مرفقات.
+    "apps.support",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
