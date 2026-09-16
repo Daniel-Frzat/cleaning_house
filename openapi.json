@@ -1,0 +1,4943 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cleaning House API",
+    "version": "1.0.0",
+    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nEight domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch and offers), Payments, Jobs, and Payouts.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and starts the job.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "config_urls_health_check",
+        "summary": "Service health check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "description": "Public, unauthenticated liveness probe used by the platform to decide whether the process is up. No token is required and nothing is persisted.",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/auth/otp/request": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_request_otp",
+        "summary": "Request an OTP code",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OTPRequestOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A code was requested too recently. `retry_after_seconds` says how long to wait before asking again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The code could not be sent — invalid phone number or SMS provider failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone — this endpoint is public and needs no token.\n\nSends a one-time password by SMS to the given phone number and returns how long it stays valid.\n\n**Side effects:** an OTP is generated and handed to the configured SMS provider. The response never contains the code, and it is deliberately identical whether or not an account exists for the number, so it cannot be used to discover registered users.\n\n**Note:** no SMS provider ships with this build, so delivery fails until one is configured.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OTPRequestIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/auth/otp/verify": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_verify_otp",
+        "summary": "Verify an OTP code and issue JWT",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The code is invalid, expired, or verification failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account exists but is not active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect attempts for this code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone — this endpoint is public and needs no token.\n\n**Preconditions:** a code must have been requested for this phone number via `POST /api/auth/otp/request` and must not have expired.\n\nOn success returns an `access` and a `refresh` token together with the user's id, phone, role and status.\n\n**Side effects:** the first successful verification for an unknown phone number **creates the account** with role `CUSTOMER`. The code is consumed and cannot be reused.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OTPVerifyIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/auth/social/{provider}": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_social_login",
+        "summary": "Log in with Apple or Google",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported provider, or the social login could not be completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The provider token is invalid or was rejected by the provider.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account exists but is not active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone — this endpoint is public and needs no token.\n\nExchanges a provider token for Cleaning House JWTs. `provider` is either `APPLE` or `GOOGLE` and is matched case-insensitively.\n\n**Side effects:** the first successful login for an unknown provider identity **creates the account** and links the social identity to it. The response never echoes the provider's raw profile.\n\n**Note:** no social-auth provider ships with this build, so token verification fails until one is configured.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialLoginIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "apps_accounts_api_auth_me",
+        "summary": "Current authenticated user",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user, in any role.\n\nReturns the id, phone, role and status of the token's owner. The role is also carried in the JWT claims, but this endpoint is the authoritative source: a role changed after the token was issued is reflected here first.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_accounts_api_auth_update_me",
+        "summary": "Update own name and email",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That email address is already used by another account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The submitted values failed validation, or a field that cannot be changed here was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user, on their **own** account only — the account is taken from the token and no user id is accepted.\n\nPartial update: only the fields present in the body are changed. Sending `email` as an empty string clears it.\n\n**Only `full_name` and `email` can be changed here.** `phone` is the login identifier and would need OTP verification of the new number; `role` and `status` are privilege fields managed by an administrator. Neither is accepted, and sending one is rejected rather than ignored.\n\n**Side effects:** none beyond persisting the two fields. Email is unique across accounts.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserProfilePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/properties": {
+      "post": {
+        "operationId": "apps_properties_api_properties_create_property",
+        "summary": "Create a property with its address",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The property or address failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only.\n\nCreates a property together with its address in a single transaction — there is no separate address endpoint, and a property is never stored without one.\n\nThe new property is owned by the caller and starts active.\n\n**Side effects:** none beyond persisting the property and its address.",
+        "tags": [
+          "Properties"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PropertyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_properties_api_properties_list_properties",
+        "summary": "List own properties",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PropertyOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only — the list is always scoped to the caller's own properties.\n\nReturns **active properties only**. Deactivated ones are excluded here but still exist and can still be referenced by past bookings.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Properties"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/properties/{property_id}": {
+      "get": {
+        "operationId": "apps_properties_api_properties_retrieve_property",
+        "summary": "Retrieve one own property",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "schema": {
+              "title": "Property Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such property, or it belongs to another customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n**Side effects:** none — read-only.\n\nA property that belongs to another customer returns the same `404` as one that does not exist, so the response cannot be used to discover other customers' properties.",
+        "tags": [
+          "Properties"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_properties_api_properties_update_property",
+        "summary": "Update own property and/or its address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "schema": {
+              "title": "Property Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such property, or it belongs to another customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The submitted property or address fields failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\nPartial update: only the fields present in the body are changed, and the nested `address` object follows the same rule. The property and its address are updated in one transaction.\n\n**Side effects:** editing the address changes where future bookings for this property are dispatched from. Bookings already made are not recalculated.",
+        "tags": [
+          "Properties"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PropertyPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "apps_properties_api_properties_delete_property",
+        "summary": "Deactivate own property (soft delete)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "schema": {
+              "title": "Property Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such property, or it belongs to another customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n**Soft delete:** the row is kept and `is_active` is set to `false`. Nothing is erased, because past bookings still reference this property. The deactivated property is returned in the response.\n\n**Side effects:** the property disappears from `GET /api/properties` and can no longer be used for new bookings.",
+        "tags": [
+          "Properties"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/services": {
+      "post": {
+        "operationId": "apps_services_api_catalog_create_service",
+        "summary": "Create a service type (admin only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTypeOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed, or a service with this name already exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nAdds a bookable service to the catalog with its own `base_price` and `room_price`. Service names are unique. The service starts active and is immediately bookable.\n\n**Side effects:** none beyond creating the catalog entry — existing bookings are untouched.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceTypeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_services_api_catalog_list_services",
+        "summary": "List all service types, active and inactive (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceTypeOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nReturns the whole catalog **unfiltered**, including soft-deleted services, so that an administrator can find an inactive service and re-activate it.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/services/{service_id}": {
+      "get": {
+        "operationId": "apps_services_api_catalog_retrieve_service",
+        "summary": "Retrieve one service type (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTypeOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No service type with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nReturns one service type with its prices, whether it is active or not.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_services_api_catalog_update_service",
+        "summary": "Update a service type, prices included (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTypeOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No service type with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed, or another service already uses this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nPartial update — only the fields present in the body are changed. `base_price` and `room_price` may be edited at any time.\n\n**Side effects:** the new prices apply to **future** price calculations only. Bookings whose price was already frozen at acceptance are never recalculated, so changing a price here does not alter money already owed.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceTypePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "apps_services_api_catalog_delete_service",
+        "summary": "Soft-delete a service type (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTypeOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No service type with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\n**Soft delete:** the row is kept and `is_active` is set to `false`, because existing bookings still reference the service. The deactivated service is returned in the response and can be re-activated with a `PATCH`.\n\n**Side effects:** the service can no longer be booked — a new booking that includes it is rejected with `400`. Bookings already placed are unaffected.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/pricing-config": {
+      "get": {
+        "operationId": "apps_services_api_catalog_retrieve_pricing_config",
+        "summary": "Retrieve the global price_per_km (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingConfigOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nReturns the single system-wide travel rate used in every price calculation. This is one value for the whole platform, not one per service, and the configuration row is created on first access if it does not exist yet.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_services_api_catalog_update_pricing_config",
+        "summary": "Update the global price_per_km (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingConfigOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`price_per_km` failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nSets the single system-wide travel rate (§5). There is no per-service override.\n\n**Side effects:** the new rate applies to **future** price calculations only. Bookings whose price was already frozen at acceptance are never recalculated.",
+        "tags": [
+          "Admin — Service Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingConfigPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/services": {
+      "get": {
+        "operationId": "apps_services_api_public_catalog_list_public_services",
+        "summary": "List the services available for booking",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServicePublicOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user. This is the customer-facing catalog — the one a client app reads to let someone pick what to book.\n\nReturns **only active services**. A service an administrator has deactivated never appears here, which matches booking creation rejecting it with `400`.\n\n**Pricing is deliberately absent.** `room_price` and `base_price` are internal administrative data and are not fields of this response for any role, administrators included. A customer sees one final total, and only after a contractor accepts the booking. Administrators read raw prices from `GET /api/admin/services` instead.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Services"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/services/{service_id}": {
+      "get": {
+        "operationId": "apps_services_api_public_catalog_retrieve_public_service",
+        "summary": "Retrieve one available service",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePublicOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such service, or it is no longer active — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user.\n\nReturns one active service. **Pricing is absent** for the same reason as in the list endpoint.\n\n**Side effects:** none — read-only.\n\nA deactivated service returns the same `404` as one that never existed, so the response cannot be used to discover that a service was withdrawn.",
+        "tags": [
+          "Services"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/profile": {
+      "post": {
+        "operationId": "apps_contractors_api_profile_create_profile",
+        "summary": "Create own contractor profile (contractor only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This contractor already has a profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The submitted profile fields failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only. The profile is always created for the caller — this endpoint accepts no contractor id.\n\n**Preconditions:** the caller must not already have a profile; each contractor has exactly one.\n\nThe profile carries the business name and the address the contractor works from, including the coordinates used to measure distance when dispatching bookings.\n\n**Side effects:** the profile always starts `UNAVAILABLE`, so no booking is dispatched to it until availability is switched on via `PATCH /api/contractor/profile/availability`. Availability is ignored if supplied here.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractorProfileIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_contractors_api_profile_retrieve_profile",
+        "summary": "Retrieve own contractor profile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only. Returns the caller's own profile — there is no id in the path, so one contractor can never read another's profile. Reading a specific profile by id is available to administrators via `GET /api/admin/contractors/{profile_id}`.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_contractors_api_profile_update_profile",
+        "summary": "Update own contractor profile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The submitted profile fields failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, on their own profile.\n\nPartial update — only the fields present in the body are changed. **Availability cannot be changed here**; it has its own endpoint, `PATCH /api/contractor/profile/availability`.\n\n**Side effects:** changing the address or coordinates changes the distance used when dispatching future bookings, and therefore which bookings this contractor is offered. Offers already made keep the distance recorded on them.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractorProfilePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/profile/availability": {
+      "patch": {
+        "operationId": "apps_contractors_api_profile_update_availability",
+        "summary": "Toggle own availability (contractor only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`availability_status` is not a valid value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, on their own profile. Administrators deliberately cannot flip this on a contractor's behalf.\n\nA deliberately lightweight endpoint carrying a single field, kept separate from the general profile update because it is called often and must not touch the rest of the profile.\n\n**Side effects:** only an `AVAILABLE` contractor receives dispatch offers. Switching to `UNAVAILABLE` stops new offers but does **not** withdraw offers already sent or jobs already assigned.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AvailabilityPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/business-registration": {
+      "post": {
+        "operationId": "apps_contractors_api_profile_submit_business_registration",
+        "summary": "Submit own business registration (contractor only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessRegistrationOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The ABN or business name failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, for themselves — the submission is tied to the caller's profile and no contractor id is accepted.\n\n**Preconditions:** the caller must already have a contractor profile.\n\nSubmits an ABN and business name for **manual administrative review**. The ABN is only checked for shape (11 digits); no government registry or third-party verification service is contacted.\n\n**Side effects:** the submission is created as `PENDING` — there is no self-approval. It becomes approved only when an administrator reviews it via `PATCH /api/admin/business-registration/{registration_id}`.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessRegistrationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_contractors_api_profile_list_business_registrations",
+        "summary": "List own business registration submissions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BusinessRegistrationOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only — returns the caller's own submissions and no one else's.\n\nSeveral submissions are legitimate, because a contractor may re-submit after a rejection. All of them are returned, newest first, each with its status and, where rejected, the reason.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/insurance": {
+      "post": {
+        "operationId": "apps_contractors_api_profile_submit_insurance",
+        "summary": "Submit own insurance document (contractor only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsuranceDocumentOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The document reference or expiry date failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, for themselves.\n\n**Preconditions:** the caller must already have a contractor profile.\n\n`document_reference` is a **text reference plus an expiry date, not a file upload** — no document bytes are stored by this endpoint. Review is manual; no insurer or third-party service is contacted.\n\n**Side effects:** the submission is created as `PENDING` and is approved only by an administrator via `PATCH /api/admin/insurance/{document_id}`.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InsuranceDocumentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_contractors_api_profile_list_insurance",
+        "summary": "List own insurance submissions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InsuranceDocumentOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The caller has no contractor profile yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only — returns the caller's own submissions and no one else's.\n\nSeveral submissions are legitimate, because insurance is renewed and may be re-submitted after a rejection. All of them are returned, newest first.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/contractors": {
+      "get": {
+        "operationId": "apps_contractors_api_admin_contractors_list_contractors",
+        "summary": "List all contractor profiles (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ContractorProfileOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nReturns every contractor profile, available and unavailable alike — filtering by availability belongs to dispatch, not to an administrative listing.\n\n**Side effects:** none — read-only. Administrators cannot edit a contractor's profile or availability through this API at all.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/contractors/{profile_id}": {
+      "get": {
+        "operationId": "apps_contractors_api_admin_contractors_retrieve_contractor",
+        "summary": "Retrieve any contractor profile (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No contractor profile with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only. This is the only way to read a contractor profile by id; contractors themselves use the self-service `GET /api/contractor/profile`.\n\n**Side effects:** none — read-only.\n\nA non-administrator receives `403` rather than `404` here: unlike the customer-owned resources, the existence of a contractor record is not something this endpoint needs to conceal.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/verifications/pending": {
+      "get": {
+        "operationId": "apps_contractors_api_admin_contractors_list_pending_verifications",
+        "summary": "List all pending verifications (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingVerificationsOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nThe review queue: every business registration and insurance document still awaiting a decision, across all contractors. The two kinds are returned in **separate lists** (`business_registrations` and `insurance_documents`) because they are different entities with different fields.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/business-registration/{registration_id}": {
+      "patch": {
+        "operationId": "apps_contractors_api_admin_contractors_review_business_registration",
+        "summary": "Approve or reject a business registration (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "registration_id",
+            "schema": {
+              "title": "Registration Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessRegistrationOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A rejection was submitted without a `rejection_reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No business registration with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`status` is not a valid review decision, or validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no government registry or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400` so that a contractor is never rejected silently.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the submission. Approval contributes to the contractor's eligibility, which is computed from the current state of their approved registration and insurance rather than stored as a flag.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/insurance/{document_id}": {
+      "patch": {
+        "operationId": "apps_contractors_api_admin_contractors_review_insurance_document",
+        "summary": "Approve or reject an insurance document (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsuranceDocumentOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A rejection was submitted without a `rejection_reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not an `ADMIN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No insurance document with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`status` is not a valid review decision, or validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no insurer or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400`.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the document. Approval contributes to the contractor's eligibility. Note that nothing re-checks the expiry date afterwards — there is no scheduled re-verification.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings": {
+      "post": {
+        "operationId": "apps_bookings_api_bookings_create_booking",
+        "summary": "Create a booking with its service selections (customer only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No services were selected, a selected service is unknown or inactive, a `room_count` is invalid, or `scheduled_at` is in the past or outside business hours (07:00-19:00 local time).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`, or the property belongs to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No property with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The booking failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and `scheduled_at` must be in the future and within business hours (07:00-19:00) in the property's local timezone.\n\n`scheduled_at` is required (ISO 8601). Sent without an offset it is read in the timezone derived from the property's state; sent with an explicit offset it is honoured as given. Either way it is stored in UTC and returned as both `scheduled_at` (UTC) and `scheduled_at_local`, so the client never has to convert.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
+        "tags": [
+          "Bookings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_bookings_api_bookings_list_bookings",
+        "summary": "List own bookings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BookingOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only — the list is always scoped to the caller's own bookings, newest first.\n\nEach booking carries its visit time as both `scheduled_at` (UTC) and `scheduled_at_local`, alongside the `customer_timezone` used for the conversion.\n\n`computed_price` and `assigned_contractor_id` are populated only for bookings that have reached `CONFIRMED`; on every other booking they are `null`.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Bookings"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}": {
+      "get": {
+        "operationId": "apps_bookings_api_bookings_retrieve_booking",
+        "summary": "Retrieve one own booking",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, or it belongs to another customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\nThe visit time is returned as both `scheduled_at` (UTC) and `scheduled_at_local`, alongside the `customer_timezone` used for the conversion.\n\n**Price visibility:** `computed_price` and `assigned_contractor_id` are returned only once the booking is `CONFIRMED` — that is, after a contractor has accepted the offer. While the booking is `PENDING` both are `null`, and no other endpoint reveals the price earlier.\n\n**Side effects:** none — read-only.\n\nA booking that belongs to another customer returns the same `404` as one that does not exist.",
+        "tags": [
+          "Bookings"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/offers/{offer_id}/accept": {
+      "post": {
+        "operationId": "apps_bookings_api_offers_accept_offer",
+        "summary": "Accept a dispatch offer (contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "offer_id",
+            "schema": {
+              "title": "Offer Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferResponseOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`, the offer is addressed to someone else, or the caller is the booking's own customer (a user cannot take their own booking).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No offer with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The offer was already answered or has expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The offer could not be accepted — validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Another contractor's offer returns `403`.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired.\n\n**This is the pivotal moment of the booking lifecycle.** On success:\n\n1. The price is calculated and **frozen** onto the booking. It is never recalculated afterwards, even if catalog prices change.\n2. The booking moves to `CONFIRMED`, the contractor is assigned, and the price becomes visible to the customer — this is the first moment it is.\n3. The customer is charged directly (there is no escrow).\n4. The job is created and starts `IN_PROGRESS`.\n\nThe distance used for pricing is the one recorded on **this offer**, not a freshly measured one, so moving the contractor's profile between offer and acceptance does not change the price.\n\nSteps 3 and 4 run after the confirmation is committed and are isolated from it: if the charge or the job creation fails, the booking stays validly confirmed and the failure is recorded rather than returned as an error here.\n\n`next_offer` is always `null` in this response — the cascade stops at acceptance.",
+        "tags": [
+          "Contractor Offers"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/offers/{offer_id}/decline": {
+      "post": {
+        "operationId": "apps_bookings_api_offers_decline_offer",
+        "summary": "Decline a dispatch offer (contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "offer_id",
+            "schema": {
+              "title": "Offer Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferResponseOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CONTRACTOR`, the offer is addressed to someone else, or the caller is the booking's own customer (a user cannot take their own booking).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No offer with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The offer was already answered or has expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The offer could not be declined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired.\n\n**Side effects:** declining immediately cascades the booking to the next nearest available contractor, exactly as an expiry would. The new offer's id is returned in `next_offer`, with no details about the contractor behind it.\n\nIf no further contractor is eligible, `next_offer` is `null` and the booking stays `PENDING` with no active offer. That is a normal outcome, not an error; nothing cancels the booking automatically.\n\nNo price is calculated or revealed by declining.",
+        "tags": [
+          "Contractor Offers"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/payment": {
+      "get": {
+        "operationId": "apps_payments_api_payments_retrieve_payment",
+        "summary": "Retrieve the payment for a booking (owner customer or admin)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PaymentOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PaymentAdminOut"
+                    }
+                  ],
+                  "title": "Response"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, no payment for it, or the caller is not entitled to see it — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the booking's own customer, or an `ADMIN`.\n\n**Preconditions:** a payment record exists only once a contractor has accepted the offer — the customer is charged directly at confirmation. There is no escrow and no separate capture step, so there is no endpoint to start or retry a payment; this one is read-only.\n\nA `FAILED` payment means the charge did not go through while the booking remains confirmed.\n\n**Side effects:** none — read-only.\n\nAdministrators additionally receive `provider_reference`; for the customer that field is absent from the response body altogether, not merely blank.",
+        "tags": [
+          "Payments"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/job": {
+      "get": {
+        "operationId": "apps_jobs_api_jobs_retrieve_job",
+        "summary": "Retrieve the job for a booking (owner customer, admin, or assigned contractor)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, no job for it yet, or the caller is not entitled to see it — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the booking's own customer, the contractor assigned to it, or an `ADMIN`.\n\n**Preconditions:** a job exists only after a contractor has accepted the offer and the booking has been confirmed.\n\nReturns the job's status, its timestamps, and its photos with viewing URLs. The raw `storage_key` of each photo is returned to administrators only and is `null` for everyone else.\n\n**Side effects:** none — read-only.\n\nEvery failure returns the same `404`: no such booking, no job yet, and not being entitled to see it are indistinguishable in the response.",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/job/confirm": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_confirm_job",
+        "summary": "Confirm job completion (the booking's own customer only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not the booking's own customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, or no job for it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job has not been marked done yet, or is already completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the booking's **own customer**, exclusively. Not an administrator, not another customer, and not the contractor — there is no administrative override, and no timeout that confirms on the customer's behalf.\n\n**Preconditions:** the contractor must have marked the job done, so the job is `AWAITING_CUSTOMER_CONFIRMATION`.\n\n**Side effects:** the job becomes `COMPLETED`, and the contractor's payout for this booking is released immediately afterwards. The payout runs after the confirmation is committed and is isolated from it: if the payout provider fails, the job stays validly completed and the payout is recorded as failed rather than returned as an error here.\n\nPhoto `storage_key`s are never included in this response.",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/jobs/{job_id}/photos": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_upload_photo",
+        "summary": "Upload a before/after photo (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "photo_type",
+            "schema": {
+              "title": "Photo Type",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPhotoOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`photo_type` is not `BEFORE`/`AFTER`, or the uploaded file is empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not the contractor assigned to this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is no longer accepting photos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`, and the file must not be empty.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** no storage provider ships with this build, so uploads fail until one is configured.",
+        "tags": [
+          "Contractor Jobs"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "FileParams",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/jobs/{job_id}/start": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_start_job",
+        "summary": "Start a job (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not the contractor assigned to this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is not `ASSIGNED` — it has already started, or is further along.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else. No request body.\n\n**Preconditions:** the job must be `ASSIGNED` — that is, the offer was accepted but work has not begun.\n\nMoves the job to `IN_PROGRESS` and records `started_at`. This is the contractor's \"I have arrived / starting now\" action, and it is what lets a customer tell *accepted but not here yet* from *working right now* — the two were a single instant before this endpoint existed.\n\n**Side effects:** photo upload becomes available. A job that is only `ASSIGNED` refuses photos with `409`, because a BEFORE photo taken before arriving does not describe the property.",
+        "tags": [
+          "Contractor Jobs"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/jobs/{job_id}/mark-done": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_mark_done",
+        "summary": "Mark a job done (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The required `BEFORE` and `AFTER` photos are not both present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not the contractor assigned to this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No job with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is not in a state that can be marked done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must be in progress, and **at least one `BEFORE` photo and one `AFTER` photo must already be uploaded** — without both, the request is refused with `400`.\n\n**Side effects:** the job moves to `AWAITING_CUSTOMER_CONFIRMATION` and stops accepting photos. It does **not** complete the job and does not release the payout: only the customer can complete it, via `POST /api/bookings/{booking_id}/job/confirm`. Nothing completes the job automatically if the customer never confirms.",
+        "tags": [
+          "Contractor Jobs"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/payout": {
+      "get": {
+        "operationId": "apps_payouts_api_payouts_retrieve_payout",
+        "summary": "Retrieve the contractor payout for a booking (payee contractor or admin)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PayoutOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PayoutAdminOut"
+                    }
+                  ],
+                  "title": "Response"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, no payout for it, or the caller is not entitled to see it — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the contractor being paid, or an `ADMIN`. The customer cannot see the payout.\n\n**Preconditions:** a payout record exists only once the customer has confirmed job completion. It is released immediately and **per booking** — payouts are never batched, and there is no endpoint to trigger or retry one manually; this one is read-only.\n\nThe amount is the full booking price: no commission is deducted.\n\n**Side effects:** none — read-only.\n\nAdministrators additionally receive `provider_reference`; for the contractor that field is absent from the response body altogether, not merely blank.",
+        "tags": [
+          "Payouts"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OTPRequestOut": {
+        "description": "🔒 لا يحتوي الرمز ولا أي تفصيل عن سجل التحقق.\nexpires_in_seconds مشتق من السياسة وليس من السجل نفسه.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "title": "Expires In Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "detail",
+          "expires_in_seconds"
+        ],
+        "title": "OTPRequestOut",
+        "type": "object"
+      },
+      "ErrorOut": {
+        "description": "نفس شكل الخطأ المستخدم في بقية النطاقات.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "ErrorOut",
+        "type": "object"
+      },
+      "OTPRequestIn": {
+        "properties": {
+          "phone": {
+            "maxLength": 32,
+            "minLength": 4,
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
+        ],
+        "title": "OTPRequestIn",
+        "type": "object"
+      },
+      "AuthOut": {
+        "description": "نتيجة أي مسار دخول ناجح (OTP أو Social).",
+        "properties": {
+          "tokens": {
+            "$ref": "#/components/schemas/TokenPairOut"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "tokens",
+          "user"
+        ],
+        "title": "AuthOut",
+        "type": "object"
+      },
+      "TokenPairOut": {
+        "properties": {
+          "access": {
+            "title": "Access",
+            "type": "string"
+          },
+          "refresh": {
+            "title": "Refresh",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access",
+          "refresh"
+        ],
+        "title": "TokenPairOut",
+        "type": "object"
+      },
+      "UserOut": {
+        "description": "بيانات المستخدم الحالي.\n\n📌 full_name و email مكشوفان للمالك نفسه فقط — هذا الشكل لا يُستخدم\n   إلا في /auth/me وفي رد الدخول، وكلاهما يخص صاحب التوكن.\n\n🔒 لا حقول امتياز أخرى: is_staff و is_superuser وgroups لا تُكشف\n   إطلاقًا، ولا password ولا last_login.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "full_name": {
+            "default": "",
+            "title": "Full Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "roles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "contractor_status": {
+            "default": "NONE",
+            "title": "Contractor Status",
+            "type": "string"
+          },
+          "available_modes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Modes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "phone",
+          "status"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "OTPVerifyIn": {
+        "properties": {
+          "phone": {
+            "maxLength": 32,
+            "minLength": 4,
+            "title": "Phone",
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 12,
+            "minLength": 4,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone",
+          "code"
+        ],
+        "title": "OTPVerifyIn",
+        "type": "object"
+      },
+      "SocialLoginIn": {
+        "properties": {
+          "token": {
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "SocialLoginIn",
+        "type": "object"
+      },
+      "UserProfilePatch": {
+        "description": "تعديل ذاتي للملف الشخصي.\n\n⚠️ حقلان لا ثالث لهما. phone و role و status غير موجودة عمدًا:\n   الأول معرّف الدخول (يحتاج تحقق OTP)، والباقيان حقول امتياز تُدار\n   من الإدارة — قبولهما هنا كان سيتيح تصعيد صلاحيات.\n\n📌 التعديل جزئي: الحقل غير المُرسَل لا يُمس. إرسال email فارغًا يمسح\n   البريد (يصبح NULL)، وهو سلوك مقصود لا خطأ.",
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "UserProfilePatch",
+        "type": "object"
+      },
+      "AddressOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "street_address": {
+            "title": "Street Address",
+            "type": "string"
+          },
+          "suburb": {
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "postcode": {
+            "title": "Postcode",
+            "type": "string"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "raw_input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Input"
+          }
+        },
+        "required": [
+          "id",
+          "street_address",
+          "suburb",
+          "state",
+          "postcode",
+          "country"
+        ],
+        "title": "AddressOut",
+        "type": "object"
+      },
+      "PropertyOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "property_type": {
+            "title": "Property Type",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AddressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serviceability_warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceabilityWarningOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "label",
+          "property_type",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PropertyOut",
+        "type": "object"
+      },
+      "ServiceabilityWarningOut": {
+        "description": "سبب عدم قابلية العقار للإسناد — نص جاهز للعرض ورمز ثابت للتفريع.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ServiceabilityWarningOut",
+        "type": "object"
+      },
+      "AddressIn": {
+        "description": "حقول العنوان عند الإنشاء.\n\ncountry غير موجود عمدًا — منتج بسوق واحد، والحقل غير قابل للتعديل.\n\n📌 latitude/longitude اختياريان ويُرسَلان من GPS الجهاز عند الالتقاط.\n   ⚠️ العقار بلا إحداثيات **لا يُسنَد إليه أي مقاول إطلاقًا**: محرّك\n      الإسناد يقيس المسافة، ومن لا موقع له يسقط من الترشيح صامتًا.\n      فاجعلهما إلزاميين في الواجهة ولو كانا اختياريين هنا — الاختيارية\n      للتوافق مع العقارات القائمة لا لتشجيع تركهما.",
+        "properties": {
+          "street_address": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Street Address",
+            "type": "string"
+          },
+          "suburb": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AustralianState"
+          },
+          "postcode": {
+            "pattern": "^\\d{4}$",
+            "title": "Postcode",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "raw_input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Input"
+          }
+        },
+        "required": [
+          "street_address",
+          "suburb",
+          "state",
+          "postcode"
+        ],
+        "title": "AddressIn",
+        "type": "object"
+      },
+      "AustralianState": {
+        "description": "الولايات والأقاليم الأسترالية السبعة (نسخة محلية — راجع docstring).",
+        "enum": [
+          "NSW",
+          "VIC",
+          "QLD",
+          "WA",
+          "SA",
+          "TAS",
+          "ACT",
+          "NT"
+        ],
+        "title": "AustralianState",
+        "type": "string"
+      },
+      "PropertyIn": {
+        "description": "إنشاء عقار وعنوانه في طلب واحد (nested).",
+        "properties": {
+          "label": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Label",
+            "type": "string"
+          },
+          "property_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PropertyType"
+              }
+            ],
+            "default": "HOUSE"
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressIn"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "PropertyIn",
+        "type": "object"
+      },
+      "PropertyType": {
+        "description": "أنواع العقارات السكنية في السياق الأسترالي.",
+        "enum": [
+          "HOUSE",
+          "UNIT",
+          "TOWNHOUSE",
+          "APARTMENT",
+          "OTHER"
+        ],
+        "title": "PropertyType",
+        "type": "string"
+      },
+      "AddressPatch": {
+        "description": "كل الحقول اختيارية — تعديل جزئي.\n\n📌 تحديث الإحداثيات متاح هنا: عقار أُنشئ بلا موقع (أو بموقع خاطئ)\n   يُصحَّح بـPATCH، فيصير قابلًا للإسناد.",
+        "properties": {
+          "street_address": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Address"
+          },
+          "suburb": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suburb"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AustralianState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "raw_input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Input"
+          }
+        },
+        "title": "AddressPatch",
+        "type": "object"
+      },
+      "PropertyPatch": {
+        "description": "تعديل جزئي للعقار و/أو عنوانه.\n\nowner غير موجود عمدًا — الملكية لا تُنقل عبر هذا المسار.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "property_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PropertyType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AddressPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "PropertyPatch",
+        "type": "object"
+      },
+      "ServiceTypeOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "room_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Room Price"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Base Price"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "room_price",
+          "base_price",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ServiceTypeOut",
+        "type": "object"
+      },
+      "ServiceTypeIn": {
+        "description": "إنشاء نوع خدمة.",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "room_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Room Price"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Base Price"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "room_price",
+          "base_price"
+        ],
+        "title": "ServiceTypeIn",
+        "type": "object"
+      },
+      "ServiceTypePatch": {
+        "description": "تعديل جزئي.\n\n⚠️ حقول السعر اختيارية وقابلة للتعديل في أي وقت (§36.2) — بلا أي\n   منطق إعادة حساب رجعي.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "room_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Price"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Price"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "title": "ServiceTypePatch",
+        "type": "object"
+      },
+      "PricingConfigOut": {
+        "description": "سعر الكيلومتر العام — قيمة واحدة للنظام كله.",
+        "properties": {
+          "price_per_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price Per Km"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "price_per_km",
+          "updated_at"
+        ],
+        "title": "PricingConfigOut",
+        "type": "object"
+      },
+      "PricingConfigPatch": {
+        "properties": {
+          "price_per_km": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Price Per Km"
+          }
+        },
+        "required": [
+          "price_per_km"
+        ],
+        "title": "PricingConfigPatch",
+        "type": "object"
+      },
+      "ServicePublicOut": {
+        "description": "الشكل العام لنوع الخدمة — المعرّف والاسم والوصف فقط.\n\n🔒 ثلاثة حقول لا رابع لها. أي حقل يُضاف هنا مستقبلًا يجب أن يُسأل\n   عنه: هل يراه العميل قبل معرفة سعره؟",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "ServicePublicOut",
+        "type": "object"
+      },
+      "ContractorProfileOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "business_name": {
+            "title": "Business Name",
+            "type": "string"
+          },
+          "street_address": {
+            "title": "Street Address",
+            "type": "string"
+          },
+          "suburb": {
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "postcode": {
+            "title": "Postcode",
+            "type": "string"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "availability_status": {
+            "title": "Availability Status",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "business_name",
+          "street_address",
+          "suburb",
+          "state",
+          "postcode",
+          "country",
+          "availability_status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ContractorProfileOut",
+        "type": "object"
+      },
+      "ContractorProfileIn": {
+        "description": "إنشاء ملف المقاول.\n\n⚠️ availability_status غير موجودة عمدًا: الملف يبدأ UNAVAILABLE دائمًا،\n   والإتاحة فعل صريح لاحق عبر مسارها المخصّص.\n⚠️ country غير موجود — منتج بسوق واحد، والحقل غير قابل للتعديل.",
+        "properties": {
+          "business_name": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Business Name",
+            "type": "string"
+          },
+          "street_address": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Street Address",
+            "type": "string"
+          },
+          "suburb": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AustralianState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postcode": {
+            "default": "",
+            "pattern": "^(\\d{4})?$",
+            "title": "Postcode",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "title": "ContractorProfileIn",
+        "type": "object"
+      },
+      "ContractorProfilePatch": {
+        "description": "تعديل جزئي للملف.\n\n⚠️ availability_status غير موجودة هنا — لها مسارها المخصّص وحدها،\n   لأنها تُستدعى بكثرة ويجب أن تبقى خفيفة ومنفصلة عن تعديل البيانات.",
+        "properties": {
+          "business_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Name"
+          },
+          "street_address": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Address"
+          },
+          "suburb": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suburb"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AustralianState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "pattern": "^(\\d{4})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "title": "ContractorProfilePatch",
+        "type": "object"
+      },
+      "AvailabilityPatch": {
+        "description": "جسم خفيف لمسار الجاهزية — حقل واحد لا غير.",
+        "properties": {
+          "availability_status": {
+            "$ref": "#/components/schemas/AvailabilityStatus"
+          }
+        },
+        "required": [
+          "availability_status"
+        ],
+        "title": "AvailabilityPatch",
+        "type": "object"
+      },
+      "AvailabilityStatus": {
+        "description": "جاهزية المقاول لاستقبال العمل.\n\n⚠️ الافتراضي UNAVAILABLE عمدًا: الملف المنشأ حديثًا ناقص البيانات\n   (غالبًا بلا إحداثيات)، وإتاحته تلقائيًا كانت ستُدخله في حسابات\n   Dispatch قبل أن يكون جاهزًا فعلًا. الإتاحة فعل صريح من المقاول.",
+        "enum": [
+          "AVAILABLE",
+          "UNAVAILABLE"
+        ],
+        "title": "AvailabilityStatus",
+        "type": "string"
+      },
+      "BusinessRegistrationOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "abn": {
+            "title": "Abn",
+            "type": "string"
+          },
+          "business_name": {
+            "title": "Business Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "reviewed_by_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By Id"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "contractor_id",
+          "abn",
+          "business_name",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BusinessRegistrationOut",
+        "type": "object"
+      },
+      "BusinessRegistrationIn": {
+        "description": "تقديم تسجيل نشاط.\n\n⚠️ status/reviewed_by/reviewed_at غير موجودة عمدًا: السجل يبدأ PENDING\n   دائمًا، وحقول المراجعة تُملأ من الإدارة وحدها.",
+        "properties": {
+          "abn": {
+            "pattern": "^\\d{11}$",
+            "title": "Abn",
+            "type": "string"
+          },
+          "business_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Business Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "abn",
+          "business_name"
+        ],
+        "title": "BusinessRegistrationIn",
+        "type": "object"
+      },
+      "InsuranceDocumentOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "document_reference": {
+            "title": "Document Reference",
+            "type": "string"
+          },
+          "expiry_date": {
+            "format": "date",
+            "title": "Expiry Date",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "reviewed_by_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By Id"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "contractor_id",
+          "document_reference",
+          "expiry_date",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InsuranceDocumentOut",
+        "type": "object"
+      },
+      "InsuranceDocumentIn": {
+        "description": "تقديم وثيقة تأمين.\n\n⚠️ document_reference نص (رقم بوليصة) — لا رفع ملفات (Infra §7).",
+        "properties": {
+          "document_reference": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Document Reference",
+            "type": "string"
+          },
+          "expiry_date": {
+            "format": "date",
+            "title": "Expiry Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_reference",
+          "expiry_date"
+        ],
+        "title": "InsuranceDocumentIn",
+        "type": "object"
+      },
+      "PendingVerificationsOut": {
+        "description": "ما ينتظر المراجعة — النوعان منفصلان لا مدمجان في قائمة واحدة.",
+        "properties": {
+          "business_registrations": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessRegistrationOut"
+            },
+            "title": "Business Registrations",
+            "type": "array"
+          },
+          "insurance_documents": {
+            "items": {
+              "$ref": "#/components/schemas/InsuranceDocumentOut"
+            },
+            "title": "Insurance Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "business_registrations",
+          "insurance_documents"
+        ],
+        "title": "PendingVerificationsOut",
+        "type": "object"
+      },
+      "ReviewPatch": {
+        "description": "قرار المراجعة الإدارية.\n\n⚠️ rejection_reason إلزامي عند REJECTED — يُفرض في طبقة الخدمة\n   والـModel معًا، لا في الـschema (حتى تكون الرسالة مفهومة).",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/VerificationStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReviewPatch",
+        "type": "object"
+      },
+      "VerificationStatus": {
+        "description": "حالة مراجعة مستند التحقق.\n\n⚠️ الافتراضي PENDING: لا شيء يُعدّ متحققًا قبل مراجعة إداري بشري.",
+        "enum": [
+          "PENDING",
+          "VERIFIED",
+          "REJECTED"
+        ],
+        "title": "VerificationStatus",
+        "type": "string"
+      },
+      "BookingOut": {
+        "description": "📌 توقيت كشف السعر (§36.1/§36.2):\n\n   computed_price يبقى None ما دام الحجز PENDING، ويحمل اللقطة\n   المجمَّدة فور أن يصبح CONFIRMED (أي فور قبول مقاول للعرض).\n   الطبقة المُسلسِلة هي التي تقرر ذلك بناءً على الحالة — لا يكفي\n   وجود قيمة في قاعدة البيانات لكشفها.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "computed_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Price"
+          },
+          "assigned_contractor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Contractor Id"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "scheduled_at_local": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At Local"
+          },
+          "customer_timezone": {
+            "default": "",
+            "title": "Customer Timezone",
+            "type": "string"
+          },
+          "dispatch_status": {
+            "default": "",
+            "title": "Dispatch Status",
+            "type": "string"
+          },
+          "last_dispatch_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Dispatch Attempt At"
+          },
+          "service_selections": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceSelectionOut"
+            },
+            "title": "Service Selections",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "property_id",
+          "status",
+          "service_selections",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BookingOut",
+        "type": "object"
+      },
+      "ServiceSelectionOut": {
+        "description": "سطر خدمة في الرد.\n\n⚠️ بلا أي حقل سعر (§36.2): لا تفصيل بالبنود للعميل، ولا سعر مخزَّن\n   لكل سطر.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "service_type_id": {
+            "format": "uuid",
+            "title": "Service Type Id",
+            "type": "string"
+          },
+          "service_type_name": {
+            "title": "Service Type Name",
+            "type": "string"
+          },
+          "room_count": {
+            "title": "Room Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "service_type_id",
+          "service_type_name",
+          "room_count"
+        ],
+        "title": "ServiceSelectionOut",
+        "type": "object"
+      },
+      "BookingIn": {
+        "description": "إنشاء حجز.\n\n⚠️ status غير موجود عمدًا: كل حجز جديد يبدأ PENDING.\n⚠️ computed_price و assigned_contractor غير موجودين — لا يُقبلان من\n   العميل ولا يُضبطان في هذه المرحلة.\n\n📌 scheduled_at إلزامي هنا (ISO 8601). بلا إزاحة توقيت يُفسَّر بتوقيت\n   المنطقة المحسوبة من عنوان العقار؛ وبإزاحة صريحة يُحترم كما وصل.\n   الطرفان يُخزَّنان UTC.\n⚠️ customer_timezone غير موجود: يُشتق من العنوان ولا يُقبل من العميل.",
+        "properties": {
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "service_selections": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceSelectionIn"
+            },
+            "title": "Service Selections",
+            "type": "array"
+          },
+          "scheduled_at": {
+            "format": "date-time",
+            "title": "Scheduled At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "service_selections",
+          "scheduled_at"
+        ],
+        "title": "BookingIn",
+        "type": "object"
+      },
+      "ServiceSelectionIn": {
+        "description": "سطر خدمة عند الإنشاء.",
+        "properties": {
+          "service_type_id": {
+            "format": "uuid",
+            "title": "Service Type Id",
+            "type": "string"
+          },
+          "room_count": {
+            "minimum": 0,
+            "title": "Room Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "service_type_id",
+          "room_count"
+        ],
+        "title": "ServiceSelectionIn",
+        "type": "object"
+      },
+      "OfferOut": {
+        "description": "عرض إسناد.\n\n⚠️ بلا أي حقل سعر: العرض لا يحمل سعرًا، والسعر يعيش على الحجز بعد\n   القبول وحده (§36.1). distance_km ليست سعرًا — هي الأساس المخزَّن\n   الذي سيُحسب عليه السعر إن قُبل العرض.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "offered_at": {
+            "format": "date-time",
+            "title": "Offered At",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "contractor_id",
+          "status",
+          "offered_at",
+          "expires_at"
+        ],
+        "title": "OfferOut",
+        "type": "object"
+      },
+      "OfferResponseOut": {
+        "description": "نتيجة الرد على عرض.\n\nnext_offer معرّف العرض التالي عند الرفض (أو None إن لم يوجد مرشَّح —\nالقرار المفتوح #16). لا تفاصيل عن المقاول التالي: الرافض لا يحتاجها.",
+        "properties": {
+          "offer": {
+            "$ref": "#/components/schemas/OfferOut"
+          },
+          "next_offer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offer"
+          }
+        },
+        "required": [
+          "offer"
+        ],
+        "title": "OfferResponseOut",
+        "type": "object"
+      },
+      "PaymentAdminOut": {
+        "description": "شكل الإدارة — يضيف المرجع التشخيصي وحده.\n\nالوراثة من PaymentOut تضمن ألا ينحرف الشكلان.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "amount",
+          "method",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PaymentAdminOut",
+        "type": "object"
+      },
+      "PaymentOut": {
+        "description": "الشكل العام (العميل مالك الحجز).\n\n🔒 provider_reference غير معرَّف هنا عمدًا — غائب من JSON كليًا.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "amount",
+          "method",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PaymentOut",
+        "type": "object"
+      },
+      "JobOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "marked_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked Done At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "status",
+          "photos",
+          "created_at"
+        ],
+        "title": "JobOut",
+        "type": "object"
+      },
+      "JobPhotoOut": {
+        "description": "صورة مهمة.\n\n🔒 storage_key يبقى None لغير الإدارة — الطبقة المُسلسِلة تقرّر بناءً\n   على دور الطالب، لا على وجود القيمة.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "photo_type": {
+            "title": "Photo Type",
+            "type": "string"
+          },
+          "signed_url": {
+            "title": "Signed Url",
+            "type": "string"
+          },
+          "storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Key"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "photo_type",
+          "signed_url",
+          "uploaded_at"
+        ],
+        "title": "JobPhotoOut",
+        "type": "object"
+      },
+      "PayoutAdminOut": {
+        "description": "شكل الإدارة — يضيف المرجع التشخيصي وحده.\n\nالوراثة من PayoutOut تضمن ألا ينحرف الشكلان: أي حقل عام يُضاف لاحقًا\nيظهر في الاثنين تلقائيًا، والفرق يبقى محصورًا في هذا الحقل.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "contractor_id",
+          "amount",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PayoutAdminOut",
+        "type": "object"
+      },
+      "PayoutOut": {
+        "description": "الشكل العام (المقاول المستحِق).\n\n🔒 provider_reference غير معرَّف هنا عمدًا — غائب من JSON كليًا.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "contractor_id",
+          "amount",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PayoutOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "JWTAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": [],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "OTP and social login, JWT issuance."
+    },
+    {
+      "name": "Properties",
+      "description": "Customer properties and their addresses."
+    },
+    {
+      "name": "Admin — Service Catalog",
+      "description": "Service types and the global per-km price (ADMIN only)."
+    },
+    {
+      "name": "Contractor Profile",
+      "description": "Contractor self-service: profile, availability, and verification submissions."
+    },
+    {
+      "name": "Admin — Contractors",
+      "description": "Contractor records and manual verification review (ADMIN only)."
+    },
+    {
+      "name": "Bookings",
+      "description": "Customer bookings and their service selections."
+    },
+    {
+      "name": "Contractor Offers",
+      "description": "Contractor responses to dispatch offers."
+    },
+    {
+      "name": "Payments",
+      "description": "Customer payment for a booking."
+    },
+    {
+      "name": "Jobs",
+      "description": "Job status and completion, seen from the booking."
+    },
+    {
+      "name": "Contractor Jobs",
+      "description": "Job execution by the assigned contractor: photos and mark-done."
+    },
+    {
+      "name": "Payouts",
+      "description": "Contractor payout for a completed booking."
+    },
+    {
+      "name": "System",
+      "description": "Service health."
+    }
+  ]
+}
