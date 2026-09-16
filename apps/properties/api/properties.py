@@ -22,6 +22,8 @@ Properties API — Properties & Address Domain (Phase 1)
    Bookings/QualityGuarantee.
 """
 
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from ninja import Router
@@ -198,7 +200,7 @@ def list_properties(request):
         }
     },
 )
-def retrieve_property(request, property_id: str):
+def retrieve_property(request, property_id: uuid.UUID):
     denied = _require_customer(request)
     if denied:
         return denied
@@ -236,7 +238,7 @@ def retrieve_property(request, property_id: str):
         }
     },
 )
-def update_property(request, property_id: str, payload: PropertyPatch):
+def update_property(request, property_id: uuid.UUID, payload: PropertyPatch):
     denied = _require_customer(request)
     if denied:
         return denied
@@ -293,7 +295,7 @@ def update_property(request, property_id: str, payload: PropertyPatch):
         }
     },
 )
-def delete_property(request, property_id: str):
+def delete_property(request, property_id: uuid.UUID):
     """
     إلغاء تفعيل فقط (is_active=False) — الصف يبقى في قاعدة البيانات
     لأن العقار قد يُشار إليه لاحقًا من Bookings/QualityGuarantee.

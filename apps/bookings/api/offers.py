@@ -14,6 +14,8 @@ Offer Response API — Booking Domain (Change Set §36.1، §36.6)
 📌 القبول هو لحظة كشف السعر (§36.1) — قبلها لا سعر في أي رد.
 """
 
+import uuid
+
 from django.core.exceptions import ValidationError
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
@@ -103,7 +105,7 @@ def _handle_offer_errors(exc):
         }
     },
 )
-def accept_offer(request, offer_id: str):
+def accept_offer(request, offer_id: uuid.UUID):
     """
     📌 عند النجاح: يُحسب السعر ويُثبَّت على الحجز، ويصبح CONFIRMED.
        المسافة المستخدمة هي مسافة هذا العرض المخزَّنة، لا مسافة مُعاد حسابها.
@@ -158,7 +160,7 @@ def accept_offer(request, offer_id: str):
         }
     },
 )
-def decline_offer(request, offer_id: str):
+def decline_offer(request, offer_id: uuid.UUID):
     """
     ⚠️ يُطلق التتابع فورًا. إن لم يوجد مقاول تالٍ يبقى الحجز PENDING
        بلا عرض نشط (القرار المفتوح #16) — وهذا ليس خطأ.

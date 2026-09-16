@@ -16,6 +16,8 @@ Contractor Admin API — Contractors Domain
 ⚠️ لا يوجد هنا أي منطق Dispatch/مطابقة/مسافة — هذه المرحلة تخزين وقراءة.
 """
 
+import uuid
+
 from django.core.exceptions import ValidationError
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
@@ -96,7 +98,7 @@ def list_contractors(request):
         }
     },
 )
-def retrieve_contractor(request, profile_id: str):
+def retrieve_contractor(request, profile_id: uuid.UUID):
     try:
         profile = svc.get_profile_by_id(request.user, profile_id)
     except (svc.AdminRoleRequiredError, svc.ContractorProfilePermissionError) as exc:
@@ -203,7 +205,7 @@ def list_pending_verifications(request):
         }
     },
 )
-def review_business_registration(request, registration_id: str, payload: ReviewPatch):
+def review_business_registration(request, registration_id: uuid.UUID, payload: ReviewPatch):
     """
     🔒 الرفض يتطلب سببًا — بدونه 400، لا قبول صامت.
     """
@@ -258,7 +260,7 @@ def review_business_registration(request, registration_id: str, payload: ReviewP
         }
     },
 )
-def review_insurance_document(request, document_id: str, payload: ReviewPatch):
+def review_insurance_document(request, document_id: uuid.UUID, payload: ReviewPatch):
     """🔒 نفس القاعدة: الرفض بلا سبب يعيد 400."""
     try:
         document = vsvc.review_insurance_document(

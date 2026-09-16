@@ -22,6 +22,8 @@ Public Service Catalog API — Services Domain (§36.2)
 ⚠️ لا استعلام ORM في هذا الملف — كل شيء عبر طبقة الخدمة (§43).
 """
 
+import uuid
+
 from ninja import Router
 from ninja_jwt.authentication import JWTAuth
 
@@ -94,7 +96,7 @@ def list_public_services(request):
         }
     },
 )
-def retrieve_public_service(request, service_id: str):
+def retrieve_public_service(request, service_id: uuid.UUID):
     """خدمة نشطة واحدة، أو 404 موحّد."""
     try:
         service = svc.get_active_service_type(service_id)

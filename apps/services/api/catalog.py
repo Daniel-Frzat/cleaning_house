@@ -24,6 +24,8 @@ Service Catalog Admin API — Services Domain (Change Set §36.2، §5)
 ⚠️ DELETE لا يحذف الصف فعليًا: الخدمة قد يُشار إليها لاحقًا من Bookings.
 """
 
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from ninja import Router
@@ -164,7 +166,7 @@ def list_services(request):
         }
     },
 )
-def retrieve_service(request, service_id: str):
+def retrieve_service(request, service_id: uuid.UUID):
     try:
         service = svc.get_service_type(request.user, service_id)
     except svc.CatalogPermissionError as exc:
@@ -195,7 +197,7 @@ def retrieve_service(request, service_id: str):
         }
     },
 )
-def update_service(request, service_id: str, payload: ServiceTypePatch):
+def update_service(request, service_id: uuid.UUID, payload: ServiceTypePatch):
     """
     ⚠️ الأسعار قابلة للتعديل في أي وقت. لا إعادة حساب لأي حجز سابق —
        تجميد السعر على الحجز شأن Booking Domain لاحقًا.
@@ -243,7 +245,7 @@ def update_service(request, service_id: str, payload: ServiceTypePatch):
         }
     },
 )
-def delete_service(request, service_id: str):
+def delete_service(request, service_id: uuid.UUID):
     """
     تعطيل فقط (is_active=False) — الصف يبقى في قاعدة البيانات لأن
     الخدمة قد يُشار إليها لاحقًا من Bookings.

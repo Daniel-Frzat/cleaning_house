@@ -19,6 +19,8 @@ Payments API — Payment Domain (Change Set §36.4)
    (apps/bookings/services/offers.py) ولا يُطلقه العميل يدويًا.
 """
 
+import uuid
+
 from typing import Union
 
 from ninja import Router
@@ -98,7 +100,7 @@ def _serialize(payment, *, as_admin):
         }
     },
 )
-def retrieve_payment(request, booking_id: str):
+def retrieve_payment(request, booking_id: uuid.UUID):
     """
     🔒 404 موحّد لكل حالات التعذّر — لا يكشف الرد وجود حجز لغير صاحبه.
     """

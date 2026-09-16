@@ -20,6 +20,8 @@ Payouts API — Payout Domain (Change Set §36.5)
 ⚠️ لا استعلام ORM في هذا الملف: كل شيء عبر طبقة الخدمة (راجع §43).
 """
 
+import uuid
+
 from typing import Union
 
 from ninja import Router
@@ -99,7 +101,7 @@ def _serialize(payout, *, as_admin):
         }
     },
 )
-def retrieve_payout(request, booking_id: str):
+def retrieve_payout(request, booking_id: uuid.UUID):
     """
     🔒 404 موحّد لكل حالات التعذّر — لا يكشف الرد وجود حجز لغير أصحابه.
     """
