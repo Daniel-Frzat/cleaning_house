@@ -16,7 +16,9 @@ Job Execution Models — Jobs Domain (Change Set §20، §36.3؛ Infra §7)
 
 import uuid
 
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 class JobStatus(models.TextChoices):
@@ -111,6 +113,22 @@ class Job(models.Model):
         """
         return self.status == JobStatus.IN_PROGRESS
 
+    def is_tracking_window_open(self):
+        """
+        هل نافذة تتبع الموقع مفتوحة الآن؟
+
+        ASSIGNED وحدها: المقاول قَبِل ولم يصل بعد، وهي المدة التي يعني
+        فيها سؤال "أين العامل؟" شيئًا.
+
+        🔒 مضادّ تمامًا لـaccepts_photos: التتبع قبل البدء، والصور بعده.
+           لا لحظة تقبل الاثنين — فور إعلان البدء يصبح العامل داخل
+           المنزل، ومتابعة موقعه هناك مراقبة لا خدمة.
+
+        ⚠️ الإغلاق ليس حذفًا: آخر نقطة تبقى مخزَّنة، لكنها تتوقف عن
+           الظهور للعميل وعن قبول تحديثات جديدة.
+        """
+        return self.status == JobStatus.ASSIGNED
+
 
 class JobPhoto(models.Model):
     """
@@ -153,3 +171,101 @@ class JobPhoto(models.Model):
 
     def __str__(self):
         return f"{self.photo_type} photo for job {self.job_id}"
+
+
+# ============================================================
+# موقع المقاول أثناء التوجّه (En-route tracking)
+# ============================================================
+# 📌 سبب الوجود: ContractorProfile.latitude/longitude هما **عنوان العمل
+#    الثابت** الذي يرتّب به Dispatch المرشَّحين بالمسافة. الكتابة فوقهما
+#    بموقع متحرّك تُفسد الإسناد: مقاول يقود عبر المدينة كان سيغيّر صامتًا
+#    أي الحجوزات هو أقربها إليها. فالموقع الحيّ كيان منفصل تمامًا.
+#
+# 🔒 نافذة العرض ضيّقة عمدًا: من ASSIGNED حتى IN_PROGRESS. التتبع يجيب
+#    سؤال "أين العامل؟" وهو سؤال ما قبل الوصول وحده. بعد إعلان البدء
+#    يكون العامل داخل المنزل، وتتبعه هناك مراقبة لا خدمة.
+#
+# ⚠️ آخر موقع فقط — لا مسار: صف واحد لكل مهمة يُكتب فوقه. المسار الكامل
+#    أرشيف تحركات لا حاجة له اليوم ويحمل مسؤولية خصوصية، ويحتاج سياسة
+#    حذف غير موجودة.
+
+# بعد هذه المدة تُعدّ النقطة متقادمة فتُعلَّم is_stale. 90 ثانية تحتمل
+# تحديثًا كل 30 ثانية مع تعثّر شبكة مرتين قبل أن نعلن التقادم.
+# ⚠️ عتبة عرض لا قاعدة عمل: لا تُخفي الموقع ولا توقف التتبع، بل تخبر
+#    الواجهة أن تعرض "آخر تحديث منذ ..." بدل نقطة توحي بأنها حيّة.
+LOCATION_STALE_AFTER_SECONDS = 90
+
+
+class JobLocation(models.Model):
+    """
+    آخر موقع معلوم للمقاول المُسنَد، أثناء توجّهه إلى العقار.
+
+    🔒 يكتبه المقاول المُسنَد وحده، ويقرأه العميل المالك (والإدارة).
+       يُفرض في طبقة الخدمة — قاعدة البيانات لا تستطيع ربط هذا
+       بـbooking.assigned_contractor.
+
+    ⚠️ ليس دليل حضور ولا سجل عمل: نقطة واحدة تُستبدل مع كل تحديث، فلا
+       تصلح للاستشهاد بها في نزاع. دليل الإنجاز هو صور before/after.
+    """
+
+    # 📌 OneToOne لا ForeignKey: صف واحد لكل مهمة بحكم البنية لا بحكم
+    #    انضباط التطبيق — قاعدة البيانات نفسها تمنع تراكم نقاط المسار.
+    job = models.OneToOneField(
+        Job,
+        on_delete=models.CASCADE,
+        related_name="location",
+    )
+
+    # حدود وتدقيق مطابقان لإحداثيات العقار وملف المقاول (9,6).
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+
+    # 📌 دقة القياس بالأمتار كما يبلّغها الجهاز. تُعرض للعميل كدائرة عدم
+    #    يقين حول النقطة: قراءة بدقة 500 متر ليست كذبة، لكن رسمها كنقطة
+    #    حادّة على الخريطة كذب.
+    # ⚠️ اختيارية: أجهزة ومتصفحات لا تبلّغها، ورفض التحديث لغيابها كان
+    #    سيُسقط تتبعًا صالحًا.
+    accuracy_m = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="Reported GPS accuracy radius in metres, if the device supplied it.",
+    )
+
+    # 📌 لحظة التقاط الجهاز للنقطة، كما يبلّغها هو.
+    # ⚠️ لا يُوثق به وحده: ساعة الجهاز قد تكون مضبوطة خطأً أو مزوَّرة،
+    #    فنقطة قديمة قد تبدو حديثة. يُعرض للاطلاع، وحساب التقادم
+    #    (is_stale) يقوم على received_at وحده.
+    recorded_at = models.DateTimeField(
+        help_text="When the device captured the fix (client clock — not trusted)."
+    )
+
+    # 🔒 ختم الخادم لحظة الاستلام — المرجع الوحيد في حساب التقادم.
+    #    auto_now: كل كتابة تستبدل النقطة السابقة ووقتها معًا.
+    received_at = models.DateTimeField(auto_now=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Job location"
+        verbose_name_plural = "Job locations"
+        ordering = ["-received_at"]
+
+    def __str__(self):
+        return f"Location for job {self.job_id} at {self.received_at}"
+
+    def is_stale(self, now=None):
+        """
+        هل تقادمت النقطة فلم تعد تصف مكان العامل الآن؟
+
+        📌 يُحسب على received_at لا recorded_at: ساعة الجهاز غير موثوقة،
+           وتطبيق متوقف عن الإرسال هو بالضبط ما نريد كشفه.
+
+        ⚠️ التقادم ليس خطأً: التطبيق قد يكون في الخلفية أو الشبكة ضعيفة.
+           الواجهة تعرض "آخر تحديث منذ ..." بدل نقطة توحي بأنها حيّة.
+        """
+        moment = now or timezone.now()
+        age = (moment - self.received_at).total_seconds()
+        return age > LOCATION_STALE_AFTER_SECONDS

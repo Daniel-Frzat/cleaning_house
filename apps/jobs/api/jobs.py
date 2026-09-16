@@ -5,7 +5,9 @@ Jobs API — Jobs Domain (Change Set §36.3؛ Infra §7)
     POST /api/contractor/jobs/{job_id}/start      إعلان بدء العمل (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/photos     رفع صورة (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/mark-done  إعلان الإنجاز (المقاول المُسنَد)
+    POST /api/contractor/jobs/{job_id}/location   تحديث الموقع (المقاول المُسنَد)
     GET  /api/bookings/{id}/job                   عرض المهمة (عميل/إدارة/مقاول)
+    GET  /api/bookings/{id}/tracking              تتبع المقاول (عميل/إدارة/مقاول)
     POST /api/bookings/{id}/job/confirm           تأكيد الإنجاز (عميل الحجز وحده)
 
 📌 §36.3: العميل وحده يؤكّد الإنجاز — لا بديل إداري، ولا تأكيد تلقائي
@@ -20,6 +22,10 @@ Jobs API — Jobs Domain (Change Set §36.3؛ Infra §7)
 ⚠️ لا استعلام ORM في هذا الملف: كل شيء عبر طبقة الخدمة (راجع §43).
 """
 
+import uuid
+
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from ninja import File, Router, UploadedFile
 from ninja_jwt.authentication import JWTAuth
 
@@ -27,7 +33,8 @@ from apps.accounts.roles import ConfirmedRole
 
 from ..services import jobs as jobs_svc
 from ..services import photos as photos_svc
-from .schemas import ErrorOut, JobOut, JobPhotoOut
+from ..services import tracking as tracking_svc
+from .schemas import ErrorOut, JobLocationIn, JobOut, JobPhotoOut, JobTrackingOut
 
 # ------------------------------------------------------------
 # Router للمقاول (يُركَّب على /contractor)
@@ -46,6 +53,57 @@ def _error(status, code, detail):
 
 def _not_found():
     return _error(404, "job_not_found", "No job found for this booking.")
+
+
+def _validation_error(exc):
+    """يحوّل ValidationError من الـModel إلى رد 422 مفهوم."""
+    if hasattr(exc, "message_dict"):
+        detail = "; ".join(
+            f"{field}: {' '.join(msgs)}" for field, msgs in exc.message_dict.items()
+        )
+    else:
+        detail = "; ".join(exc.messages)
+    return _error(422, "validation_error", detail)
+
+
+def _serialize_tracking(snapshot):
+    """
+    يبني لقطة التتبع من قاموس طبقة الخدمة.
+
+    ⚠️ العمر والتقادم يُحسبان هنا لا يُخزَّنان: قيمة مخزَّنة تكذب بعد
+       ثانية واحدة. المرجع received_at (ختم الخادم) لا recorded_at.
+
+    🔒 contractor_location يبقى None خارج النافذة حتى لو كانت نقطة
+       مخزَّنة — طبقة الخدمة تُسقطها أصلًا، وهذا السطر لا يفترض غير ذلك.
+    """
+    job = snapshot["job"]
+    location = snapshot["location"]
+    address = snapshot["property_address"]
+
+    contractor_location = None
+    if location is not None:
+        now = timezone.now()
+        contractor_location = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "accuracy": location.accuracy_m,
+            "recorded_at": location.recorded_at,
+            "received_at": location.received_at,
+            "age_seconds": int((now - location.received_at).total_seconds()),
+            "is_stale": location.is_stale(now),
+        }
+
+    return {
+        "booking_id": job.booking_id,
+        "job_id": job.id,
+        "job_status": job.status,
+        "tracking_active": snapshot["tracking_active"],
+        "contractor_location": contractor_location,
+        "property_location": {
+            "latitude": address.latitude if address else None,
+            "longitude": address.longitude if address else None,
+        },
+    }
 
 
 def _serialize_photo(photo, signed_url, *, include_storage_key):
@@ -118,7 +176,7 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
 )
 def upload_photo(
     request,
-    job_id: str,
+    job_id: uuid.UUID,
     photo_type: str,
     file: UploadedFile = File(...),
 ):
@@ -183,7 +241,7 @@ def upload_photo(
         }
     },
 )
-def retrieve_job(request, booking_id: str):
+def retrieve_job(request, booking_id: uuid.UUID):
     """
     🔒 404 موحّد: لا حجز، أو لا مهمة، أو ليست لك — لا تمييز بينها.
     """
@@ -232,7 +290,7 @@ def retrieve_job(request, booking_id: str):
         }
     },
 )
-def start_job(request, job_id: str):
+def start_job(request, job_id: uuid.UUID):
     """
     📌 ASSIGNED → IN_PROGRESS. الفعل الصريح الذي يفصل القبول عن البدء.
     """
@@ -284,7 +342,7 @@ def start_job(request, job_id: str):
         }
     },
 )
-def mark_done(request, job_id: str):
+def mark_done(request, job_id: uuid.UUID):
     """
     ⚠️ يتطلب صورة BEFORE وصورة AFTER على الأقل — 400 بدونهما.
     ⚠️ لا يُكمل المهمة: الإكمال فعل العميل وحده (§36.3).
@@ -343,7 +401,7 @@ def mark_done(request, job_id: str):
         }
     },
 )
-def confirm_job(request, booking_id: str):
+def confirm_job(request, booking_id: uuid.UUID):
     """
     🔒 عميل الحجز بعينه — لا الإدارة ولا عميل آخر (§36.3).
 
@@ -365,3 +423,125 @@ def confirm_job(request, booking_id: str):
     photos_with_urls = photos_svc.list_photos_with_urls(job)
 
     return 200, _serialize_job(job, photos_with_urls, include_storage_key=False)
+
+
+# ------------------------------------------------------------
+# POST /contractor/jobs/{job_id}/location
+# ------------------------------------------------------------
+@contractor_router.post(
+    "/jobs/{job_id}/location",
+    response={200: JobTrackingOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
+    summary="Report the assigned contractor's current location (assigned contractor only)",
+    description=(
+        "**Who may call:** the contractor assigned to this job — nobody else, "
+        "not even an `ADMIN`.\n\n"
+        "**Preconditions:** the job must still be `ASSIGNED`. Once the "
+        "contractor declares the start of work the tracking window closes and "
+        "further updates are rejected with `409`.\n\n"
+        "Send `recorded_at` as the moment the device captured the fix, not the "
+        "moment you send it — the two differ when the network is slow, and the "
+        "customer should see the real age of the point. The server stamps its "
+        "own receipt time and computes staleness from that, so a wrong device "
+        "clock cannot make an old fix look live. A `recorded_at` more than a "
+        "minute in the future is rejected with `400`.\n\n"
+        "`accuracy` is the reported GPS radius in metres and is optional — not "
+        "every device supplies it.\n\n"
+        "**Side effects:** replaces the previously reported point. **No path "
+        "history is kept** — there is exactly one stored location per job, "
+        "overwritten each time.\n\n"
+        "Returns the same tracking snapshot the customer sees, so the "
+        "contractor app can confirm what was recorded."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "`recorded_at` is in the future — check the device clock."},
+            403: {"description": "The caller is not the contractor assigned to this job."},
+            404: {"description": "No such job."},
+            409: {
+                "description": (
+                    "The job is no longer `ASSIGNED`, so the tracking window has "
+                    "closed."
+                )
+            },
+            422: {"description": "Coordinates out of range, or a field is missing."},
+        }
+    },
+)
+def report_job_location(request, job_id: uuid.UUID, payload: JobLocationIn):
+    """🔒 المقاول المُسنَد وحده — الكتابة فعله لا فعل الإدارة."""
+    try:
+        tracking_svc.report_location(
+            request.user,
+            job_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            recorded_at=payload.recorded_at,
+            accuracy_m=payload.accuracy,
+        )
+        snapshot = tracking_svc.get_tracking_by_job_id(request.user, job_id)
+    except tracking_svc.InvalidLocationError as exc:
+        return _error(400, exc.code, str(exc))
+    except tracking_svc.TrackingWindowClosedError as exc:
+        return _error(409, exc.code, str(exc))
+    except jobs_svc.JobPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    except jobs_svc.JobNotFoundError:
+        return _error(404, "job_not_found", "Job not found.")
+    except ValidationError as exc:
+        return _validation_error(exc)
+
+    return 200, _serialize_tracking(snapshot)
+
+
+# ------------------------------------------------------------
+# GET /bookings/{booking_id}/tracking
+# ------------------------------------------------------------
+@booking_router.get(
+    "/{booking_id}/tracking",
+    response={200: JobTrackingOut, 404: ErrorOut},
+    summary="Track the assigned contractor on the way (customer, admin or assigned contractor)",
+    description=(
+        "**Who may call:** the booking's own customer, an `ADMIN`, or the "
+        "assigned contractor — the same audience that can view the job.\n\n"
+        "Returns the contractor's last known position together with the "
+        "property's coordinates, so a map can be drawn from a single request.\n\n"
+        "**The tracking window is `ASSIGNED` only.** While `tracking_active` is "
+        "`true` the contractor is on the way. Once work starts it flips to "
+        "`false` and `contractor_location` is `null` **even though a point is "
+        "still stored** — the cleaner's position is not exposed once they are "
+        "inside the property, and never after the service ends.\n\n"
+        "`contractor_location` is also `null` while `tracking_active` is `true` "
+        "if the contractor has not reported yet, or has location sharing off. "
+        "That is a normal state, not an error — show \"on the way\" rather than "
+        "a failure.\n\n"
+        "Check `is_stale` before drawing a live marker: it means updates have "
+        "stopped arriving (backgrounded app, poor signal), so show \"last "
+        "updated N seconds ago\" instead of a point that pretends to be current. "
+        "`age_seconds` gives the exact age.\n\n"
+        "**Polling:** there is no WebSocket or SSE channel in this version — "
+        "poll this endpoint every few seconds while the map is open, and stop "
+        "polling as soon as `tracking_active` is `false`.\n\n"
+        "**No ETA and no street route.** Two coordinates are not a road path: "
+        "drawing the route and estimating arrival needs a directions provider "
+        "(Google or Mapbox), which is not wired into this backend.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+    openapi_extra={
+        "responses": {
+            404: {
+                "description": (
+                    "No such booking, no job for it, or the caller is not "
+                    "entitled to see it — deliberately indistinguishable."
+                )
+            }
+        }
+    },
+)
+def retrieve_tracking(request, booking_id: uuid.UUID):
+    """🔒 404 موحّد لكل حالات التعذّر — نفس سياسة عرض المهمة."""
+    try:
+        snapshot = tracking_svc.get_tracking_by_booking_id(request.user, booking_id)
+    except (jobs_svc.JobPermissionError, jobs_svc.JobNotFoundError):
+        return _error(404, "job_not_found", "No job found for this booking.")
+
+    return 200, _serialize_tracking(snapshot)
