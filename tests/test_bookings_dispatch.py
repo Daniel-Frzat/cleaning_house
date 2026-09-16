@@ -43,6 +43,8 @@ from apps.contractors.models import (
 from apps.properties.models import Property, PropertyAddress, PropertyType
 from apps.services.models import PricingConfig, ServiceType
 
+from tests.conftest import set_contractor_location
+
 # إحداثيات مرجعية (سيدني ومحيطها)
 SYDNEY = (Decimal("-33.868800"), Decimal("151.209300"))
 NEAR = (Decimal("-33.878800"), Decimal("151.209300"))    # ~1.1 km
@@ -99,6 +101,10 @@ def make_contractor(phone, coords=NEAR, available=True, eligible=True):
         availability_status=(
             AvailabilityStatus.AVAILABLE if available else AvailabilityStatus.UNAVAILABLE
         ),
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (coords[0] if coords else None, coords[1] if coords else None)
     )
     if eligible:
         admin = User.objects.filter(role=ConfirmedRole.ADMIN).first() or make_user(

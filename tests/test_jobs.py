@@ -12,6 +12,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.conftest import set_contractor_location
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
@@ -88,6 +90,10 @@ def make_contractor(phone):
         latitude=Decimal("-33.878800"),
         longitude=Decimal("151.209300"),
         availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (Decimal("-33.878800"), Decimal("151.209300"))
     )
     return user, profile
 

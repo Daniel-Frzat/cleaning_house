@@ -23,7 +23,7 @@ Django يُضمّن choices والـvalidators داخل ملفات migration، �
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.core.validators import RegexValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -306,3 +306,78 @@ class InsuranceDocument(ReviewableDocument):
         قراءة لحظية — لا جدولة ولا مهمة خلفية تراقب الانتهاء (Infra §5).
         """
         return self.expiry_date < timezone.localdate()
+
+
+# ============================================================
+# الموقع الحالي للمقاول (§8)
+# ============================================================
+# 📌 ثلاثة مفاهيم موقع منفصلة عمدًا، ولا يُكتب أحدها فوق الآخر:
+#
+#   ContractorProfile.latitude/longitude  عنوان العمل الثابت — بيانات ملف.
+#   ContractorCurrentLocation (هنا)       أين هو الآن — مدخل الإسناد.
+#   jobs.JobLocation                      موقعه أثناء التوجّه لمهمة بعينها.
+#
+# ⚠️ الخلط بينها كان سيُفسد الإسناد: الكتابة على عنوان العمل تغيّر صامتًا
+#    أي الحجوزات هو أقربها إليها؛ والخلط مع JobLocation يخلط "متاح في
+#    المدينة" بـ"في طريقه إلى هذا المنزل".
+
+# نافذة الصلاحية: بعدها لا يُعدّ الموقع صالحًا للإسناد.
+# ⚠️ ليست عرضًا بل أهلية: مقاول موقعه قديم لا يُعرض عليه شيء — السعر
+#    يُحسب على مسافة قد تكون خاطئة تمامًا.
+CURRENT_LOCATION_FRESHNESS_SECONDS = 300
+
+
+class ContractorCurrentLocation(models.Model):
+    """
+    آخر موقع معلوم للمقاول من هاتفه — مدخل الإسناد الفوري.
+
+    🔒 لا يُكشف لأحد: لا للعملاء ولا لمقاولين آخرين. الإسناد يقرأه داخليًا،
+       والعميل لا يرى موقع عامل إلا بعد إسناده لحجزه وعبر JobLocation.
+
+    ⚠️ صف واحد لكل مقاول يُكتب فوقه — لا أرشيف تحركات (§23).
+    """
+
+    contractor = models.OneToOneField(
+        ContractorProfile,
+        on_delete=models.CASCADE,
+        related_name="current_location",
+        primary_key=True,
+    )
+
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+
+    # دقة القياس بالأمتار كما يبلّغها الجهاز — اختيارية.
+    accuracy_meters = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+
+    # لحظة التقاط الجهاز — تُخزَّن للاطلاع ولا يُوثق بها وحدها.
+    recorded_at = models.DateTimeField(
+        help_text="Device capture time (client clock — not trusted)."
+    )
+
+    # 🔒 ختم الخادم — المرجع الوحيد في حساب الصلاحية.
+    received_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Contractor current location"
+        verbose_name_plural = "Contractor current locations"
+
+    def __str__(self):
+        return f"Location for contractor {self.contractor_id} at {self.received_at}"
+
+    def is_fresh(self, now=None):
+        """
+        هل الموقع حديث بما يكفي للإسناد؟
+
+        📌 يُحسب على received_at لا recorded_at: ساعة الجهاز غير موثوقة،
+           وتطبيق توقّف عن الإرسال هو بالضبط ما نريد كشفه.
+        """
+        moment = now or timezone.now()
+        age = (moment - self.received_at).total_seconds()
+        return age <= CURRENT_LOCATION_FRESHNESS_SECONDS

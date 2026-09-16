@@ -17,15 +17,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
-from apps.accounts.roles import ConfirmedRole
-from apps.services.services.pricing import calculate_price
 
-from ..models import (
-    BookingStatus,
-    DispatchOffer,
-    DispatchOfferStatus,
-    DispatchStatus,
-)
+from ..models import Booking, DispatchOffer, DispatchOfferStatus
 from .dispatch import assign_next_contractor
 
 logger = logging.getLogger(__name__)
@@ -133,119 +126,100 @@ def assert_not_own_booking(user, offer, *, action):
         raise SelfAssignmentError(f"You cannot {action} an offer on your own booking.")
 
 
-def _selections_for_pricing(booking):
-    """أسطر خدمات الحجز بالشكل الذي يتوقعه محرّك التسعير."""
-    return [
-        {"service_type_id": sel.service_type_id, "room_count": sel.room_count}
-        for sel in booking.service_selections.all()
-    ]
-
-
 @transaction.atomic
 def accept_offer(user, offer_id):
     """
-    يقبل العرض، فيُحسب السعر ويُثبَّت، ويُسنَد المقاول، ويصبح الحجز CONFIRMED.
+    يقبل المقاول العرض — فيُحجز الحجز له وتبدأ محاولة الشحن (§12).
 
-    📌 هذه هي لحظة كشف السعر للعميل (§36.1) — ولا لحظة قبلها.
+    ⚠️ **لا يُسنَد المقاول هنا ولا يُؤكَّد الحجز ولا تُنشأ مهمة.** القبول
+       وحده لم يعد كافيًا: الإسناد يقع بعد تأكيد نجاح الدفع وحده (§14).
+       هذا عكسٌ متعمَّد للسلوك السابق الذي كان يؤكّد ثم يشحن، فيترك
+       حالة "مؤكَّد بدفعة فاشلة" ممكنة.
+
+    📌 ما يقع هنا:
+         1) العرض → ACCEPTED_PENDING_PAYMENT (يحجز الحجز، ويوقف العرض
+            على غيره).
+         2) دفعة PROCESSING بمبلغ العرض المجمَّد.
+         3) محاولة الشحن بعد الـcommit.
+
+    🔒 القفل على الحجز (select_for_update) يمنع قبول مقاولَين معًا: الثاني
+       ينتظر ثم يجد الحجز محجوزًا فيُرفض بـ409 (§11).
     """
     offer = get_offer_for_contractor(user, offer_id)
+
+    # 🔒 القفل على صف الحجز لا على العرض: التنافس بين عرضين مختلفين على
+    #    الحجز نفسه، فالحجز هو المورد المتنازع عليه.
+    booking = Booking.objects.select_for_update().get(pk=offer.booking_id)
+
+    assert_not_own_booking(user, offer, action="accept")
+
+    # 📌 القبول المكرَّر لنفس العرض ليس خطأً: يعيد الحالة نفسها (§12).
+    if offer.status == DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT:
+        return offer
 
     if not offer.is_actionable():
         raise OfferNotActionableError(
             f"Offer is {offer.status.lower()} or expired and cannot be accepted."
         )
 
-    booking = offer.booking
+    # 🔒 حجز آخر سبقنا إليه — لا يقبله اثنان.
+    if _booking_is_reserved(booking, exclude_offer_id=offer.id):
+        raise OfferNotActionableError(
+            "This booking has already been accepted by another contractor."
+        )
 
-    assert_not_own_booking(user, offer, action="accept")
+    if offer.total_amount is None:
+        # لا ينبغي أن يحدث: العرض لا يُنشأ بلا لقطة تسعير.
+        raise OfferNotActionableError("Offer has no frozen price.")
 
-    # المسافة من العرض نفسه — لا إعادة حساب (راجع docstring الملف)
-    distance_km = offer.distance_km
-    if distance_km is None:
-        # لا ينبغي أن يحدث: العرض لا يُنشأ أصلًا بمسافة مجهولة
-        raise OfferNotActionableError("Offer has no recorded distance.")
-
-    price = calculate_price(
-        service_selections=_selections_for_pricing(booking),
-        distance_km=distance_km,
-    )
-
-    offer.status = DispatchOfferStatus.ACCEPTED
+    offer.status = DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT
     offer.responded_at = timezone.now()
     offer.save(update_fields=["status", "responded_at"])
 
-    # 📌 اللقطة تُكتب مرة واحدة هنا ولا تُعاد أبدًا (§36.2)
-    booking.computed_price = price
-    booking.assigned_contractor = offer.contractor
-    booking.status = BookingStatus.CONFIRMED
-    # 📌 البحث انتهى — الواجهة لم تعد تعرض "نبحث لك عن عامل".
-    booking.dispatch_status = DispatchStatus.ASSIGNED
-    booking.save(
-        update_fields=[
-            "computed_price",
-            "assigned_contractor",
-            "status",
-            "dispatch_status",
-            "updated_at",
-        ]
-    )
-
     logger.info(
-        "Offer accepted (offer_id=%s, booking_id=%s, contractor_id=%s, price=%s, "
-        "distance_km=%s)",
+        "Offer accepted, awaiting payment (offer_id=%s, booking_id=%s, "
+        "contractor_id=%s, total=%s)",
         offer.id,
         booking.id,
         offer.contractor_id,
-        price,
-        distance_km,
+        offer.total_amount,
     )
 
-    # 📌 لحظة التأكيد تُطلق أثرين جانبيين، كلاهما بعد تثبيت المعاملة لا
-    #    داخلها: فشل أيّهما لا يجوز أن يُلغي تأكيدًا صحيحًا.
-    #      1) الشحن المباشر (§36.4)
-    #      2) إنشاء مهمة التنفيذ بحالة IN_PROGRESS (§20، §36.3)
-    # robust=True: طبقة حماية من الإطار فوق try/except الداخلي في كل hook.
-    #   العزل الحالي يعتمد على انضباط كل دالة؛ هذا يضمنه من الإطار أيضًا،
-    #   فلو رُفع استثناء من خارج try/except بالخطأ لا يُسقط الـhook التالي.
+    # ⚠️ الشحن بعد الـcommit: نداء شبكة داخل معاملة يُبقيها مفتوحة طوال
+    #    رحلة الطلب. والحجز محجوز فعلًا بحالة العرض، فلا سباق.
     transaction.on_commit(lambda: _charge_after_commit(booking), robust=True)
-    transaction.on_commit(lambda: _start_job_after_commit(booking), robust=True)
 
     return offer
 
 
+def _booking_is_reserved(booking, exclude_offer_id=None):
+    """هل يحجز الحجزَ عرضٌ مقبول (بانتظار الدفع أو مدفوع)؟"""
+    queryset = booking.dispatch_offers.filter(
+        status__in=(
+            DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT,
+            DispatchOfferStatus.ACCEPTED,
+        )
+    )
+    if exclude_offer_id is not None:
+        queryset = queryset.exclude(pk=exclude_offer_id)
+    return queryset.exists()
+
+
 def _charge_after_commit(booking):
     """
-    يُطلق الشحن المباشر بعد تثبيت تأكيد الحجز.
+    يبدأ محاولة الشحن بعد تثبيت حجز العرض.
 
-    الاستثناءات تُبتلع وتُسجَّل: الحجز مؤكَّد فعلًا، وخطأ في طبقة الدفع
+    الاستثناءات تُبتلع وتُسجَّل: العرض محجوز فعلًا، وخطأ في طبقة الدفع
     يجب ألا يتحول إلى 500 على طلب قبول ناجح. الدفعة الفاشلة تبقى مسجَّلة
-    بحالة FAILED، والحجز كما هو.
+    بحالة FAILED، ولا يُسنَد أحد.
     """
-    from apps.payments.services.payments import charge_for_booking
+    from apps.payments.services.payments import start_charge_for_booking
 
     try:
-        charge_for_booking(booking)
+        start_charge_for_booking(booking)
     except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
         logger.exception(
-            "Automatic charge failed after booking confirmation (booking_id=%s)",
-            booking.id,
-        )
-
-
-def _start_job_after_commit(booking):
-    """
-    يُنشئ مهمة التنفيذ بعد تثبيت تأكيد الحجز (§20، §36.3).
-
-    الاستثناءات تُبتلع وتُسجَّل: الحجز مؤكَّد فعلًا، وخطأ في نطاق المهام
-    يجب ألا يتحول إلى 500 على طلب قبول ناجح.
-    """
-    from apps.jobs.services.jobs import create_job_for_booking
-
-    try:
-        create_job_for_booking(booking)
-    except Exception:  # noqa: BLE001 — نسجّل ولا نُسقط طلبًا ناجحًا
-        logger.exception(
-            "Automatic job creation failed after booking confirmation (booking_id=%s)",
+            "Automatic charge failed to start after offer acceptance (booking_id=%s)",
             booking.id,
         )
 

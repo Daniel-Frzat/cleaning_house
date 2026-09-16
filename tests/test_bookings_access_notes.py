@@ -16,6 +16,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.conftest import set_contractor_location
 from django.core.exceptions import ValidationError
 from django.test import Client
 from django.utils import timezone
@@ -123,6 +125,10 @@ def create(customer, prop, service, notes=NOTES, capture=None):
         service_selections=[{"service_type_id": service.id, "room_count": 1}],
         scheduled_at=when(),
         access_notes=notes,
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (Decimal(coords[0]), Decimal(coords[1]))
     )
     if capture is None:
         return booking_svc.create_booking(customer, **kwargs)

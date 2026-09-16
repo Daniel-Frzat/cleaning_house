@@ -12,6 +12,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.conftest import set_contractor_location
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client
@@ -437,11 +439,41 @@ def test_status_enum_has_no_escrow_states():
     """
     ⚠️ §36.4 شحن مباشر: لا HELD/AUTHORIZED/CAPTURED/RELEASED — تلك تعود
        لمفهوم الضمان المسحوب من التصميم.
-    """
-    assert set(PaymentStatus.values) == {"PENDING", "SUCCEEDED", "FAILED"}
 
-    for retired in ("HELD", "AUTHORIZED", "CAPTURED", "RELEASED", "REFUNDED"):
+    📌 اتّسعت القائمة بدورة حياة الدفع (§13): PROCESSING و REQUIRES_ACTION
+       و NOT_CHARGED و REFUNDED. لا واحدة منها حالة ضمان — كلها مراحل في
+       شحن مباشر واحد. الحارس هنا على الحالات المسحوبة لا على العدد.
+    """
+    for retired in ("HELD", "AUTHORIZED", "CAPTURED", "RELEASED"):
         assert retired not in PaymentStatus.values
+
+    assert set(PaymentStatus.values) == {
+        "NOT_CHARGED",
+        "PENDING",
+        "PROCESSING",
+        "REQUIRES_ACTION",
+        "SUCCEEDED",
+        "FAILED",
+        "REFUNDED",
+    }
+
+
+def test_refunded_status_has_no_code_path():
+    """
+    ⚠️ §13: REFUNDED معرَّفة ولا يصل إليها أي مسار — الاسترداد عملية
+       حقيقية لدى المزوّد وسياسته غير محسومة. وجودها في الـenum لا يعني
+       أن النظام يسترد.
+    """
+    import inspect
+
+    from apps.payments.services import payments as svc
+
+    src = inspect.getsource(svc)
+
+    assert "PaymentStatus.REFUNDED" not in src, (
+        "A code path now sets REFUNDED — that requires a real refund "
+        "operation and an approved refund policy (§13, §23)."
+    )
 
 
 def test_method_enum_has_exactly_three_values():
@@ -467,6 +499,10 @@ def test_accepting_offer_triggers_charge(
         latitude=Decimal("-33.878800"),
         longitude=Decimal("151.209300"),
         availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (Decimal("-33.878800"), Decimal("151.209300"))
     )
     BusinessRegistration.objects.create(
         contractor=profile, abn="12345678901", business_name="Co",

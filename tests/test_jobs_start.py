@@ -33,6 +33,8 @@ from apps.jobs.services import photos as photos_svc
 from apps.properties.models import Property, PropertyAddress, PropertyType
 from apps.services.models import ServiceType
 
+from tests.conftest import set_contractor_location
+
 
 @pytest.fixture
 def client():
@@ -57,6 +59,10 @@ def contractor(db):
         user=user, business_name="Sparkle Co",
         latitude=Decimal("-33.868800"), longitude=Decimal("151.209300"),
         availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (Decimal("-33.868800"), Decimal("151.209300"))
     )
     return user, profile
 

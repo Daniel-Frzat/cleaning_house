@@ -216,6 +216,30 @@ PAYOUTS_ALLOW_FAKE_ADAPTER = config(
 )
 
 # ------------------------------------------------------------
+# Directions Provider (§9 — route distance and ETA)
+# ------------------------------------------------------------
+# 🔴 مزوّد الاتجاهات (Google Directions / Mapbox) قرار مفتوح. haversine
+#    يعطي مسافة خط مستقيم فقط — لا مسار شوارع ولا زمن وصول.
+DIRECTIONS_PROVIDER_ADAPTER_CLASS = config(
+    "DIRECTIONS_PROVIDER_ADAPTER_CLASS",
+    default="adapters.directions.fake.FakeDirectionsAdapter",
+)
+
+# صمّام أمان: FakeDirectionsAdapter يشتق الـETA من سرعة مفترضة، فيرفض
+# العمل عند DEBUG=False إلا إذا فُعّل هذا الخيار صراحةً.
+DIRECTIONS_ALLOW_FAKE_ADAPTER = config(
+    "DIRECTIONS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
+)
+
+# ⚠️ الارتداد إلى haversine حين يتعذّر المسار (§9).
+#    القرار صريح لا صامت: العرض يخزّن distance_source، فيظهر في تدقيق
+#    الإدارة بأي أساس حُسب السعر. الافتراضي False — الإنتاج لا يرتدّ
+#    ضمنيًا إلى مسافة خط مستقيم دون سياسة معلنة.
+DISPATCH_ALLOW_HAVERSINE_FALLBACK = config(
+    "DISPATCH_ALLOW_HAVERSINE_FALLBACK", default=False, cast=bool
+)
+
+# ------------------------------------------------------------
 # OTP Policy (Identity Domain)
 # ------------------------------------------------------------
 # ⚠️ القيم أدناه "defaults آمنة بانتظار تأكيد Product Owner"

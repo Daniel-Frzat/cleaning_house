@@ -29,6 +29,8 @@ from apps.jobs.services import jobs as jobs_svc
 from apps.properties.models import Property, PropertyAddress, PropertyType
 from apps.services.models import ServiceType
 
+from tests.conftest import set_contractor_location
+
 PROPERTY_COORDS = (Decimal("-33.868800"), Decimal("151.209300"))
 CONTRACTOR_HOME = (Decimal("-33.878800"), Decimal("151.209300"))
 # نقطة "في الطريق" — مختلفة عن عنوان عمل المقاول
@@ -76,6 +78,10 @@ def make_contractor(phone):
         latitude=CONTRACTOR_HOME[0],
         longitude=CONTRACTOR_HOME[1],
         availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (CONTRACTOR_HOME[0], CONTRACTOR_HOME[1])
     )
     return user, profile
 
