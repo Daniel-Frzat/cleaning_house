@@ -16,10 +16,11 @@ Booking Models — Booking Domain (Change Set §36.1، §20)
    بشيء — الحفظ مسؤولية هذا النموذج وحده.
 """
 
+import secrets
 import uuid
 
 from django.core.validators import MaxLengthValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 
@@ -66,6 +67,47 @@ class DispatchStatus(models.TextChoices):
 ACCESS_NOTES_MAX_LENGTH = 500
 
 
+# ------------------------------------------------------------
+# الرقم المرجعي المقروء (public_reference)
+# ------------------------------------------------------------
+# 📌 سبب الوجود: الـUUID لا يُقرأ في مكالمة دعم ولا يُملى هاتفيًا. هذا
+#    الحقل واجهة الحجز أمام الإنسان وحده — والمعرّف الداخلي يبقى الـUUID،
+#    ولا يقبل أي مسار قيمةً غيره.
+#
+# 🔒 غير تسلسلي: التسلسل يكشف حجم الأعمال (الحجز CLN-000042 يخبر من رآه
+#    أنه الحجز الثاني والأربعون)، ويسمح بتخمين مراجع حجوزات أخرى.
+#
+# ⚠️ secrets لا random — نفس قرار apps/accounts/services/otp.py: المولّد
+#    الافتراضي في random ليس آمنًا تشفيريًا، وحالة مولّده قابلة للاستنتاج
+#    من مخرجات سابقة. التكلفة هنا صفر والفارق أمني.
+PUBLIC_REFERENCE_PREFIX = "CLN"
+
+# 🔒 أبجدية بلا B و I و O و S و Z: الحقل يُملى صوتيًا في الدعم، وهذه
+#    الحروف تُخلط بـ8 و1 و0 و5 و2. إسقاطها يمنع الخلط من أصله بدل
+#    معالجته لاحقًا.
+PUBLIC_REFERENCE_ALPHABET = "0123456789ACDEFGHJKLMNPQRTUVWXY"
+
+PUBLIC_REFERENCE_LENGTH = 6
+
+# عدد محاولات التوليد قبل الاستسلام عند تصادم نادر. القيد الفريد في
+# قاعدة البيانات هو الحَكَم لا الفحص المسبق — الفحص المسبق يترك نافذة
+# سباق بينه وبين الحفظ.
+PUBLIC_REFERENCE_MAX_ATTEMPTS = 5
+
+
+def generate_public_reference():
+    """
+    يولّد مرجعًا بالشكل CLN-7F3K9Q.
+
+    لا يفحص التفرد: ذلك شأن القيد الفريد وحلقة إعادة المحاولة في save().
+    """
+    suffix = "".join(
+        secrets.choice(PUBLIC_REFERENCE_ALPHABET)
+        for _ in range(PUBLIC_REFERENCE_LENGTH)
+    )
+    return f"{PUBLIC_REFERENCE_PREFIX}-{suffix}"
+
+
 class Booking(models.Model):
     """
     حجز يقدّمه عميل على أحد عقاراته.
@@ -77,6 +119,20 @@ class Booking(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # 📌 الرقم المرجعي المقروء — للعرض والدعم وحدهما. يُولَّد مرة واحدة
+    #    عند أول حفظ ولا يتغيّر بعدها.
+    # ⚠️ editable=False: لا يصل من أي نموذج ولا من لوحة الإدارة. المرجع
+    #    الذي يتغيّر بعد أن رآه العميل ليس مرجعًا.
+    # ⚠️ ليس معرّفًا: لا يقبله أي مسار في الـAPI، والبحث الداخلي يبقى
+    #    على الـUUID.
+    public_reference = models.CharField(
+        max_length=16,
+        unique=True,
+        editable=False,
+        db_index=True,
+        help_text="Human-readable booking number (e.g. CLN-7F3K9Q); display only.",
+    )
 
     customer = models.ForeignKey(
         "accounts.User",
@@ -198,7 +254,44 @@ class Booking(models.Model):
         ]
 
     def __str__(self):
-        return f"Booking {self.id} ({self.status})"
+        return f"Booking {self.public_reference or self.id} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        """
+        يضمن وجود مرجع مقروء عند أول حفظ.
+
+        ⚠️ التفرد يُفرض بالقيد في قاعدة البيانات لا بفحص مسبق: بين
+           `exists()` والحفظ نافذة سباق قد يكتب فيها طلب آخر المرجع نفسه.
+           لذا نحاول الحفظ ونلتقط IntegrityError ثم نولّد مرجعًا جديدًا.
+
+        ⚠️ المحاولة الأخيرة تُعيد رفع الخطأ: الاستسلام الصامت كان سيترك
+           حجزًا بلا مرجع. واحتمال خمسة تصادمات متتالية يقارب الصفر
+           (فضاء 31^6 ≈ 887 مليون)، فبلوغه يعني خللًا يستحق الظهور.
+
+        📌 الالتفاف بـtransaction.atomic لكل محاولة إلزامي: IntegrityError
+           يُفسد المعاملة الجارية في PostgreSQL، فبدون نقطة حفظ داخلية
+           تفشل المحاولة التالية بـTransactionManagementError لا بتصادم.
+
+        ⚠️ المرجع يُولَّد مرة واحدة فقط: الصف الذي يحمل مرجعًا يُحفظ
+           كالمعتاد بلا أي تدخّل، فلا يتغيّر مرجع حجز قائم أبدًا.
+        """
+        if self.public_reference:
+            return super().save(*args, **kwargs)
+
+        last_attempt = PUBLIC_REFERENCE_MAX_ATTEMPTS - 1
+
+        for attempt in range(PUBLIC_REFERENCE_MAX_ATTEMPTS):
+            self.public_reference = generate_public_reference()
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                if attempt == last_attempt:
+                    raise
+                # 📌 المحاولة التالية إدراج لا تحديث: بعد فشل الحفظ يضبط
+                #    Django الحالة كأن الصف حُفظ، فيتحول الحفظ التالي إلى
+                #    UPDATE على صف غير موجود ويمر بلا أثر.
+                self._state.adding = True
 
     # ⚠️ دالة عادية لا @property: حقل الحجز اسمه `property` (كما تنص
     #    المواصفة)، وهو يحجب الـbuiltin داخل جسم الصنف، فيصبح المُزخرِف
