@@ -16,6 +16,7 @@ Root URL Configuration.
   - /api/bookings/{id}/job → Job status + photos (customer/admin/assigned contractor)
   - /api/contractor/jobs/{id}/photos → Before/after photo upload (assigned contractor)
   - /api/bookings/{id}/payout → Contractor payout status (payee contractor or ADMIN)
+  - /api/support-requests → Support Domain (any authenticated role, own requests)
 
 ⚠️ /api/admin/ مسار الإدارة عبر الـAPI — لا علاقة له بـ/admin/ (Django Admin).
 ⚠️ السعر يُكشف للعميل فقط بعد قبول مقاول للعرض (§36.1).
@@ -38,6 +39,7 @@ from apps.contractors.api.admin_contractors import router as admin_contractors_r
 from apps.contractors.api.profile import router as contractor_profile_router
 from apps.services.api.catalog import router as admin_catalog_router
 from apps.services.api.public_catalog import router as public_services_router
+from apps.support.api.support import router as support_router
 
 API_DESCRIPTION = """
 REST API for **Cleaning House**, an Australian cleaning marketplace that connects
@@ -84,9 +86,9 @@ owned by a specific user, a request from a non-owner returns `404` instead of
 
 ## Domains
 
-Eight domains are implemented end to end: Identity, Properties, Service
+Nine domains are implemented end to end: Identity, Properties, Service
 Catalog & Pricing, Contractors (profile and verification), Bookings (with
-auto-dispatch and offers), Payments, Jobs, and Payouts.
+auto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.
 
 ## Booking lifecycle
 
@@ -151,6 +153,13 @@ api = NinjaAPI(
                 "description": "Job execution by the assigned contractor: photos and mark-done.",
             },
             {"name": "Payouts", "description": "Contractor payout for a completed booking."},
+            {
+                "name": "Support",
+                "description": (
+                    "Support requests raised from the app. One-way in this "
+                    "version: no replies and no attachments."
+                ),
+            },
             {"name": "System", "description": "Service health."},
         ],
     },
@@ -198,6 +207,9 @@ api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)
 # دفع المقاول — قراءة فقط (المقاول المستحِق أو الإدارة). لا مسار إطلاق يدوي.
 api.add_router("/bookings", payouts_router)
+# الدعم — مسار مستقل تمامًا: متاح لأي دور مصادَق عليه، والصلاحية ملكية
+# لا دور. لا تعارض مع /bookings رغم أن الطلب قد يشير إلى حجز.
+api.add_router("/support-requests", support_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

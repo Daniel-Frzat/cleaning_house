@@ -710,6 +710,73 @@ or not. Use it for "searching since…" rather than `created_at`.
 > accepts is still an open product decision. Do not build an auto-cancel or an
 > auto-retry against this field.
 
+#### Rescheduling a booking nobody accepted
+
+A booking sitting at `NO_CONTRACTOR` is not stuck forever: the customer can move it
+to a new time with `POST /api/bookings/{id}/reschedule`, which starts a fresh
+dispatch round. This is the **only** state in which rescheduling is allowed — see
+§6.8 for the full rules and the four `409` cases.
+
+Contractors who declined or ignored the old time are eligible again for the new
+one: the booking's previous offers are cleared as part of the reschedule, because
+a different time is a genuinely different offer.
+
+#### Progress bar — the four steps the app shows
+
+The app's progress bar is derived from **two** resources: the booking and its job.
+Map them exactly as follows.
+
+| Step | Show it when | Source |
+| --- | --- | --- |
+| **Booked** | The booking exists. | `POST /api/bookings` returned `201` |
+| **Assigned** | A contractor accepted and the booking is `CONFIRMED`. | `booking.status == "CONFIRMED"` |
+| **Cleaning** | The contractor has started work. | `job.status == "IN_PROGRESS"` |
+| **Complete** | The **customer** confirmed completion. | `job.status == "COMPLETED"` |
+
+Two mistakes to avoid:
+
+* **`Complete` is not the contractor's "Mark as done".** That transition produces
+  `AWAITING_CUSTOMER_CONFIRMATION`, not `COMPLETED`. While the job sits in that
+  state the work is finished but unconfirmed, and the contractor has not been paid
+  — the payout is released by the customer's confirmation. Render it as a distinct
+  "Waiting for your confirmation" step with the confirm action, never as `Complete`.
+* **`Assigned` does not mean "paid".** See below.
+
+#### Payment states this API does *not* have
+
+Two states in earlier designs do not exist in this API and must not be shown:
+
+* **`Held until you confirm`** — there is **no escrow**. The customer is charged
+  directly the moment a contractor accepts. `Payment` has exactly three states:
+  `PENDING`, `SUCCEEDED`, `FAILED`. Nothing is ever held, authorized-then-captured,
+  or released.
+* **`GST included`** — the API returns one number, `computed_price`, and applies no
+  tax line. The pricing formula is services plus distance and nothing else. Do not
+  render a tax breakdown the backend never computed.
+
+#### `Assigned` with a failed payment
+
+Acceptance and charging are deliberately **not atomic**. The booking is confirmed
+first, and the charge is attempted immediately afterwards; if the charge fails, the
+booking **stays `CONFIRMED`** and the payment is recorded as `FAILED`. This is a
+reachable, normal state — not a bug and not a rollback.
+
+So the progress bar still advances to **Assigned**: the contractor genuinely
+accepted, the job genuinely exists, and the clean is going ahead. Show the payment
+problem as a **separate badge** driven by `payment.status`, not by rewinding the
+progress bar:
+
+```jsonc
+{
+  "status": "CONFIRMED",
+  "computed_price": "215.00",
+  "payment": { "status": "FAILED", "amount": "215.00", "method": "CARD" }
+}
+```
+
+What happens next to a failed payment — retry, grace period, cancellation — is an
+open product decision. The API does not retry on its own.
+
 ### 5.2 DispatchOffer
 
 Offers are **not directly readable through the API** — there is no
@@ -1686,6 +1753,7 @@ assigned contractor:
 // 200 OK
 {
   "id": "7c79b140-a05b-4d23-a467-034b582b04e2",
+  "public_reference": "CLN-7F3K9Q",
   "customer_id": "37083f83-79d1-4a73-8070-cdf9452a69fc",
   "property_id": "2017681b-f93f-4cdc-8fab-eb1994adbc91",
   "status": "CONFIRMED",
@@ -1696,6 +1764,11 @@ assigned contractor:
   "customer_timezone": "Australia/Sydney",
   "dispatch_status": "ASSIGNED",
   "last_dispatch_attempt_at": "2026-09-13T10:15:18.410Z",
+  "payment": {
+    "status": "SUCCEEDED",
+    "amount": "215.37",
+    "method": "CARD"
+  },
   "service_selections": [
     {
       "id": "7ccdbf8a-64fc-45d0-a99e-e131e8229bcf",
@@ -1719,6 +1792,84 @@ for travel.)*
 
 **Errors:** `403` not a `CUSTOMER` · `404` no such booking **or it belongs to
 another customer**.
+
+#### `public_reference` — the number to quote
+
+Every booking carries a short, human-readable reference such as `CLN-7F3K9Q`,
+generated once at creation and never changed afterwards. Show it wherever the
+customer might read the booking out: confirmations, receipts, and the support
+screen.
+
+It is **not an identifier**. Every route takes the UUID `id`; no endpoint accepts a
+`public_reference`, and passing one where an id is expected fails. The alphabet
+deliberately omits `B`, `I`, `O`, `S` and `Z` so the code cannot be misheard as
+`8`, `1`, `0`, `5` or `2` over the phone.
+
+#### `payment` — the payment summary
+
+Bookings that have reached `CONFIRMED` carry a compact payment summary, so the
+booking screen and the booking list render in a single request:
+
+```jsonc
+"payment": { "status": "SUCCEEDED", "amount": "215.37", "method": "CARD" }
+```
+
+* `null` while the booking is `PENDING` — no charge is attempted before a
+  contractor accepts.
+* `status` is `PENDING`, `SUCCEEDED` or `FAILED`. **A `CONFIRMED` booking with a
+  `FAILED` payment is a normal state** — see §5.1.
+* Three fields only. `provider_reference` and `failure_reason` are **absent from
+  this object for every role, administrators included**; read them from
+  `GET /api/bookings/{id}/payment` (§6.11), which remains the detail view.
+
+#### `POST /api/bookings/{booking_id}/reschedule`
+
+Moves a booking that found no cleaner to a new time and starts a fresh dispatch
+round. `CUSTOMER` only, own bookings only.
+
+```jsonc
+// Request
+{
+  "scheduled_at": "2026-09-22T09:00:00",
+  "timezone": "Australia/Sydney"   // optional
+}
+```
+
+`timezone` is optional: omit it and the booking's own `customer_timezone` is used,
+which is almost always what you want since the property has not moved.
+`scheduled_at` follows exactly the same rules as creation — future, and between
+07:00 and 19:00 local time.
+
+Returns `200` with the full updated booking (the same shape as
+`GET /api/bookings/{id}`).
+
+> **This is allowed in one state only.** All four conditions must hold: `status` is
+> `PENDING`, `dispatch_status` is `NO_CONTRACTOR`, no contractor is assigned, and
+> there is no successful payment. Anything else is `409`.
+>
+> Rescheduling or cancelling after a contractor has been assigned is **not
+> available yet** — it waits on the cancellation and refund policy.
+
+> **Side effect worth knowing:** the booking's previous dispatch offers are
+> **deleted**, not merely marked stale. A contractor is never offered the same
+> booking twice, so without clearing them every eligible contractor would still be
+> excluded and the new search would end instantly. The practical upshot is good:
+> a contractor who declined the old time can accept the new one.
+
+**Errors:** `400` `scheduled_at_in_past` / `outside_business_hours` · `403` not a
+`CUSTOMER` · `404` no such booking or it belongs to another customer · `409`
+`booking_not_reschedulable` · `422` validation failure.
+
+```jsonc
+// 409 Conflict — a contractor already accepted
+{
+  "code": "booking_not_reschedulable",
+  "detail": "Only a PENDING booking can be rescheduled (currently CONFIRMED)."
+}
+```
+
+Finding no contractor again is **not** an error: the booking returns to
+`NO_CONTRACTOR` and can be rescheduled again.
 
 ---
 
@@ -1941,6 +2092,103 @@ this call still returns `200`.
 **Errors:** `403` not the booking's own customer · `404` no such booking or job ·
 `409` the job has not been marked done yet, or is already completed.
 
+#### Live tracking — "where is my cleaner?"
+
+Two endpoints: the contractor app pushes its position, the customer app reads it.
+
+> **The window is `ASSIGNED` only.** Tracking begins the moment a contractor
+> accepts and **stops when they declare the start of work** — from then on the
+> cleaner is inside the property, and their position is neither accepted nor
+> shown. It is never shown after the service ends.
+>
+> The contractor's profile coordinates are a **different thing**: that is their
+> fixed business address, used by dispatch to rank candidates by distance. Live
+> position never overwrites it.
+
+##### `POST /api/contractor/jobs/{job_id}/location`
+
+The assigned contractor only — not the customer, and not an `ADMIN`.
+
+```jsonc
+// Request
+{
+  "latitude": "-33.870000",
+  "longitude": "151.205000",
+  "accuracy": "12.50",                      // optional, metres
+  "recorded_at": "2026-09-16T04:31:02.118Z" // when the DEVICE captured the fix
+}
+```
+
+Send `recorded_at` as the capture time, not the send time — they differ on a slow
+network, and the customer should see the true age of the point. The server stamps
+its own `received_at` and computes staleness from that, so a wrong device clock
+cannot make an old fix look live. A `recorded_at` more than a minute in the future
+is rejected with `400`.
+
+Returns `200` with the same snapshot the customer sees. **No path history is
+kept** — one stored point per job, overwritten each time.
+
+**Errors:** `400` `invalid_location` · `403` not the assigned contractor · `404`
+no such job · `409` `tracking_window_closed` · `422` coordinates out of range.
+
+##### `GET /api/bookings/{booking_id}/tracking`
+
+The booking's customer, an `ADMIN`, or the assigned contractor.
+
+```jsonc
+// 200 OK
+{
+  "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2",
+  "job_id": "9f2c1a55-2d7e-4f0b-9c3a-7e1b2d4c5a6f",
+  "job_status": "ASSIGNED",
+  "tracking_active": true,
+  "contractor_location": {
+    "latitude": "-33.870000",
+    "longitude": "151.205000",
+    "accuracy": "12.50",
+    "recorded_at": "2026-09-16T04:31:02.118Z",
+    "received_at": "2026-09-16T04:31:03.902Z",
+    "age_seconds": 4,
+    "is_stale": false
+  },
+  "property_location": { "latitude": "-33.868800", "longitude": "151.209300" }
+}
+```
+
+Both ends of the trip come back in one request, so the map needs no second call.
+
+Three states to handle:
+
+| Response | Meaning | Show |
+| --- | --- | --- |
+| `tracking_active: true`, location present | On the way | The moving marker |
+| `tracking_active: true`, `contractor_location: null` | Accepted but not reporting yet — or sharing is off | "On the way", property marker only |
+| `tracking_active: false` | Window closed (work started, or finished) | No contractor marker at all |
+
+**Check `is_stale` before drawing a live marker.** It means updates stopped
+arriving — backgrounded app, poor signal — so show "last updated N seconds ago"
+(`age_seconds`) rather than a point that pretends to be current. Draw `accuracy`
+as an uncertainty circle when present; a 500-metre fix rendered as a sharp pin is
+a lie.
+
+**Polling:** there is no WebSocket or SSE channel in this version. Poll every few
+seconds while the map is open and **stop as soon as `tracking_active` is
+`false`**.
+
+> ### ⚠️ No ETA and no street route
+>
+> This API returns **two coordinates**, not a path. Drawing the actual route and
+> estimating arrival time needs a directions provider — Google Maps Directions or
+> Mapbox Directions — which is **not wired into this backend**. Straight-line
+> distance is not travel time, and the backend will not pretend otherwise.
+>
+> If you need a route line and an ETA, the client calls the directions provider
+> itself with the two points from this endpoint, or a provider gets selected and
+> integrated server-side as a separate piece of work.
+
+**Errors:** `404` — the only error, deliberately indistinguishable (no such
+booking, no job for it, or you are not entitled to see it).
+
 ---
 
 ### 6.11 Payments
@@ -2027,6 +2275,68 @@ Payouts are released per booking and never batched. This endpoint is read-only;
 there is no manual trigger or retry.
 
 **Errors:** `404` — the only error, deliberately indistinguishable.
+
+---
+
+### 6.13 Support requests
+
+Backs the "Contact support" and "Report an issue" screens. Available to **any
+authenticated user** — customers and contractors alike; there is no role gate,
+because access here is ownership-based, not role-based.
+
+> **One-way in this version.** There are no replies, no threads and no
+> attachments: the request is recorded and answered out of band. Do not build a
+> chat UI against these endpoints.
+
+#### `POST /api/support-requests`
+
+```jsonc
+// Request
+{
+  "category": "BOOKING_ISSUE",
+  "message": "The cleaner never arrived.",
+  "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2"   // optional
+}
+```
+
+```jsonc
+// 201 Created
+{
+  "id": "e2b1d0c4-5f6a-4b8c-9d0e-1a2b3c4d5e6f",
+  "user_id": "37083f83-79d1-4a73-8070-cdf9452a69fc",
+  "booking_id": "7c79b140-a05b-4d23-a467-034b582b04e2",
+  "category": "BOOKING_ISSUE",
+  "message": "The cleaner never arrived.",
+  "status": "SUBMITTED",
+  "created_at": "2026-09-16T04:10:22.118Z",
+  "updated_at": "2026-09-16T04:10:22.118Z"
+}
+```
+
+`category` is one of `BOOKING_ISSUE`, `PAYMENT_ISSUE`, `CONTRACTOR_ISSUE`,
+`APP_ISSUE`, `OTHER`. `message` is required, up to 2000 characters.
+
+`booking_id` is **optional** — a login problem or an app crash has no booking. When
+supplied it must be a booking the caller owns; quoting the booking's
+`public_reference` in the message as well makes the support conversation easier.
+
+Every request is created as `SUBMITTED`. `status` is **not accepted** from the
+client, and there is no endpoint to change it — administrators move requests
+through `UNDER_REVIEW` and `RESOLVED` internally.
+
+**Errors:** `403` no valid token · `404` `booking_not_found` (no such booking, **or
+it belongs to someone else** — deliberately indistinguishable) · `422` unknown
+category, empty message, or message too long.
+
+#### `GET /api/support-requests`
+
+The caller's own requests, newest first, as a bare array. An `ADMIN` receives every
+request from every user. **Errors:** `403`.
+
+#### `GET /api/support-requests/{request_id}`
+
+One request, for its author or an `ADMIN`. **Errors:** `403` · `404` — a request
+belonging to another user returns the same `404` as one that does not exist.
 
 ---
 
@@ -2192,6 +2502,7 @@ Where `409` occurs:
 | Uploading a photo after the job was marked done | photo upload |
 | Marking done a job that is not `IN_PROGRESS` | mark-done |
 | Confirming a job not yet marked done, or already completed | job confirm |
+| Rescheduling a booking that is not `PENDING` + `NO_CONTRACTOR` + unassigned + unpaid | `POST /api/bookings/{id}/reschedule` |
 
 Two contractors racing to accept the same booking is the canonical case: one gets
 `200`, the other `409`. Treat it as a normal outcome and refresh, not as an
@@ -2214,6 +2525,28 @@ error to report.
 There is no `5xx` in normal operation — but see
 [§2](#2--current-production-limitations--read-this-first) for the unselected
 providers, which do fail this way.
+
+**Malformed ids give `422`, not `500`.** Every path identifier in this API is a
+UUID, and a value that is not one is rejected by schema validation before any
+lookup happens — so it returns shape B with `loc` pointing at the path parameter:
+
+```jsonc
+// 422 — GET /api/bookings/NOT-A-UUID
+{
+  "detail": [
+    {
+      "type": "uuid_parsing",
+      "loc": ["path", "booking_id"],
+      "msg": "Input should be a valid UUID, ..."
+    }
+  ]
+}
+```
+
+This is uniform across every endpoint that takes an id, for every role. Note the
+consequence for `public_reference`: passing `CLN-7F3K9Q` where a booking id is
+expected gives `422`, not `404` — it is not an identifier and the API will not
+resolve it.
 
 ### 7.5 Role-dependent fields (structural hiding)
 

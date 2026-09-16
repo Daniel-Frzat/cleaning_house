@@ -50,6 +50,16 @@ They raise `ImproperlyConfigured` the moment they are constructed.
 | 4 | **Payout** | the customer confirming a job | Job completes, but no `Payout` row is created |
 | 5 | **Photo storage** | `POST /api/contractor/jobs/{id}/photos` | Server error; nothing is stored |
 
+**A sixth gap is different in kind — nothing breaks, a feature is simply absent.**
+There is **no directions provider** (Google Maps Directions, Mapbox Directions).
+`GET /api/bookings/{id}/tracking` returns the contractor's coordinates and the
+property's coordinates — two points, not a route. Drawing the street path and
+estimating arrival time needs a routing engine, which is an open decision
+(Infra §8). The backend computes straight-line distance for dispatch ordering
+only, and straight-line distance is **not** travel time. Either the client calls
+a directions provider itself with the two points, or one gets integrated
+server-side as separate work — but no endpoint here will return an ETA.
+
 ### The consequence you must plan around
 
 Items 1 and 2 are **the only two ways to obtain a token**. There is no password
@@ -431,7 +441,8 @@ file upload**) and `expiry_date`.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `id` | UUID | |
+| `id` | UUID | the only identifier any route accepts |
+| `public_reference` | string(16), unique | `CLN-7F3K9Q` — human-readable, generated once, **never an identifier** |
 | `customer` | FK → User | `CASCADE` |
 | `property` | FK → Property | **`PROTECT`** — a booked property cannot be deleted |
 | `status` | enum | `PENDING` · `CONFIRMED` · `CANCELLED` |
@@ -442,6 +453,17 @@ file upload**) and `expiry_date`.
 | `dispatch_status` | enum | `SEARCHING` · `NO_CONTRACTOR` · `ASSIGNED` — **display only** |
 | `last_dispatch_attempt_at` | datetime | most recent dispatch attempt, successful or not |
 | `access_notes` | text(500) | customer's own arrival instructions — **assigned contractor only** |
+
+`public_reference` is generated with `secrets` (CSPRNG, never `random`) from an
+alphabet that omits `B`, `I`, `O`, `S`, `Z` so it survives being read aloud, and it
+is deliberately non-sequential — a sequential number would leak how many bookings
+the business has taken. It is `editable=False`: nothing, including the Django
+admin, can change it after creation.
+
+`GET /api/bookings` and `GET /api/bookings/{id}` also return a nested `payment`
+summary (`status`, `amount`, `method`) once the booking is `CONFIRMED`, so the app
+needs no second request per booking. It deliberately omits `provider_reference` and
+`failure_reason` for **every** role — those stay in `GET /api/bookings/{id}/payment`.
 
 **`BookingServiceSelection`** — the lines of a booking
 
@@ -487,6 +509,35 @@ file upload**) and `expiry_date`.
 
 > There is **no cancelled job state** and no admin override.
 
+**`JobLocation`** — `jobs_joblocation`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `job` | **OneToOne** → Job | `CASCADE` — one point per job, **no path history** |
+| `latitude` / `longitude` | decimal(9,6) | the contractor's live position |
+| `accuracy_m` | decimal(7,2), nullable | reported GPS radius in metres, if the device gave one |
+| `recorded_at` | datetime | when the **device** captured the fix — client clock, **not trusted** |
+| `received_at` | datetime, `auto_now` | 🔒 server stamp — the only basis for staleness |
+
+`Job.is_tracking_window_open()` is `True` for **`ASSIGNED` only**, and is the
+exact inverse of `accepts_photos()` (`IN_PROGRESS` only) — no job state permits
+both. Tracking answers "where is my cleaner?", which is a pre-arrival question;
+once work starts the cleaner is inside the property and following them there is
+surveillance, not service.
+
+> ⚠️ **This is not `ContractorProfile.latitude/longitude`.** Those are the
+> contractor's fixed **business address**, read by dispatch to rank candidates by
+> distance. Writing a moving position over them would silently change which
+> bookings that contractor is nearest to. The two are deliberately separate
+> entities.
+>
+> ⚠️ **One row, overwritten.** `update_or_create` on a one-to-one relation, so a
+> movement archive cannot accumulate — that would need a retention policy this
+> project does not have, and nothing asks for it.
+>
+> ⚠️ **Staleness is computed, never stored** (`LOCATION_STALE_AFTER_SECONDS = 90`).
+> A stored flag lies one second later.
+
 ### 5.7 `Payment` / `Payout`
 
 Both are **one-to-one with `Booking`** at the database level — a hard guarantee
@@ -518,6 +569,32 @@ against double-charging and double-paying.
 > batching states** (`BATCHED`/`SCHEDULED`) — both models were deliberately
 > ruled out.
 
+### 5.8 `SupportRequest`
+
+**`SupportRequest`** — `support_supportrequest`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID | |
+| `user` | FK → User | **`PROTECT`** — the record outlives account cleanup |
+| `booking` | FK → Booking, nullable | **`PROTECT`**; must belong to `user` (enforced in `clean()`) |
+| `category` | enum | `BOOKING_ISSUE` · `PAYMENT_ISSUE` · `CONTRACTOR_ISSUE` · `APP_ISSUE` · `OTHER` |
+| `message` | text(2000) | required |
+| `status` | enum | `SUBMITTED` · `UNDER_REVIEW` · `RESOLVED` — starts `SUBMITTED` |
+
+Access is **ownership-based, not role-based**: any authenticated user may open a
+request and read their own; an `ADMIN` reads every request. Contractors use the
+same endpoints as customers.
+
+> ⚠️ **One-way in this version.** No replies, no threads, no attachments, no
+> notifications, no SLA. Attachments in particular are out until a storage
+> provider is chosen — the current fake adapter discards file bytes, so accepting
+> uploads today would lose them silently.
+>
+> ⚠️ **No API changes `status`.** Administrators move requests through
+> `UNDER_REVIEW` / `RESOLVED` in the Django admin. `status` is not accepted from
+> clients on create.
+
 ---
 
 ## 6. State machines
@@ -533,6 +610,36 @@ against double-charging and double-paying.
 > **No cancellation endpoint exists.** `CANCELLED` is in the model but nothing
 > sets it. Do not ship a cancel button. Also note `PENDING` is **not** guaranteed
 > to progress — with no eligible contractor it stays there indefinitely.
+>
+> A booking stuck at `dispatch_status = NO_CONTRACTOR` can, however, be moved to a
+> new time with `POST /api/bookings/{id}/reschedule`, which clears its old offers
+> and restarts dispatch. That is the only state in which it is allowed; see §8.3.
+
+#### Progress bar — the mapping the app must use
+
+Derived from **two** resources, the booking and its job:
+
+| Step | Condition |
+| --- | --- |
+| **Booked** | booking exists |
+| **Assigned** | `booking.status == "CONFIRMED"` |
+| **Cleaning** | `job.status == "IN_PROGRESS"` |
+| **Complete** | `job.status == "COMPLETED"` |
+
+⚠️ **`Complete` is the customer's confirmation, not the contractor's "Mark as
+done".** Mark-as-done produces `AWAITING_CUSTOMER_CONFIRMATION`; the payout is
+released only by the customer's confirm. Render that as its own "Waiting for your
+confirmation" step.
+
+⚠️ **`Assigned` does not imply paid.** The charge runs *after* the booking is
+confirmed and does not roll it back, so `CONFIRMED` + `payment.status == "FAILED"`
+is reachable and normal. Keep the bar at **Assigned** and show the payment problem
+as a separate badge.
+
+⚠️ **`Held until you confirm` and `GST included` describe states this API never
+produces.** There is no escrow (the charge is direct, three states only:
+`PENDING` / `SUCCEEDED` / `FAILED`) and no tax line (`computed_price` is services
+plus distance, nothing else). Remove both from the design.
 
 #### `access_notes` — written by the customer, read by one contractor
 
@@ -600,8 +707,8 @@ distinguish "refused" from "ignored" for future contractor reporting.
 
 | State | Entered when | Next |
 | --- | --- | --- |
-| `ASSIGNED` | booking confirmed — contractor committed, not started; **photos refused** | `IN_PROGRESS` |
-| `IN_PROGRESS` | contractor calls `/start` on arrival — **photos accepted only here** | `AWAITING_CUSTOMER_CONFIRMATION` |
+| `ASSIGNED` | booking confirmed — contractor committed, not started; **photos refused, location tracking open** | `IN_PROGRESS` |
+| `IN_PROGRESS` | contractor calls `/start` on arrival — **photos accepted only here, tracking closed** | `AWAITING_CUSTOMER_CONFIRMATION` |
 | `AWAITING_CUSTOMER_CONFIRMATION` | contractor marks done (needs BEFORE **and** AFTER) | `COMPLETED` |
 | `COMPLETED` | **customer** confirms — releases payout | *(terminal)* |
 
@@ -609,6 +716,18 @@ distinguish "refused" from "ignored" for future contractor reporting.
 and "a cleaner is here". `started_at` is `null` in the first and set in the
 second. Neither state can be skipped: photos and mark-done both refuse an
 `ASSIGNED` job, and starting twice returns `409`.
+
+That same boundary governs live location, in mirror image:
+
+| | `ASSIGNED` | `IN_PROGRESS` | later |
+| --- | --- | --- | --- |
+| Location updates accepted | ✅ | ❌ `409` | ❌ `409` |
+| Location shown to customer | ✅ | ❌ `null` | ❌ `null` |
+| Photos accepted | ❌ `409` | ✅ | ❌ `409` |
+
+No job state permits both tracking and photos — tracking is the approach, photos
+are the work. A stored point stops being returned the instant the window closes;
+it is not deleted, but it is never shown after the service ends.
 
 ### Payment and Payout
 
@@ -824,6 +943,17 @@ field**, and for `422` the `detail` is an **array**:
 { "detail": [ { "type": "string_pattern_mismatch", "loc": ["body", "payload", "address", "postcode"], "msg": "String should match pattern '^\\d{4}$'", "ctx": { "pattern": "^\\d{4}$" } } ] }
 ```
 
+A malformed **path id** lands here too, with `loc` starting at `"path"`. Every id
+in this API is a UUID and is validated before any lookup runs, so a bad one is a
+`422` — never a `500`, and never a `404`:
+
+```json
+{ "detail": [ { "type": "uuid_parsing", "loc": ["path", "booking_id"], "msg": "Input should be a valid UUID, ..." } ] }
+```
+
+⚠️ This is why `public_reference` cannot be used as an identifier: sending
+`CLN-7F3K9Q` where a booking id belongs returns `422`, not `404`.
+
 ```json
 { "detail": "Unauthorized" }
 ```
@@ -926,7 +1056,21 @@ Captured by actually triggering each path. `detail` text is the real message.
 | `400` | `invalid_room_count` | room count negative or not an integer |
 | `400` | `scheduled_at_in_past` | `The scheduled visit must be in the future.` |
 | `400` | `outside_business_hours` | `The scheduled visit must fall between 07:00 and 19:00 local time (Australia/Sydney); got 23:00.` |
+| `409` | `booking_not_reschedulable` | `Only a PENDING booking can be rescheduled (currently CONFIRMED).` |
 | `422` | *(shape B)* | `scheduled_at` missing entirely |
+
+`booking_not_reschedulable` covers all four out-of-range cases with the same code
+and a `detail` naming the one that tripped: not `PENDING`, `dispatch_status` not
+`NO_CONTRACTOR`, a contractor already assigned, or a successful payment on record.
+
+#### Support
+
+| Status | `code` | `detail` |
+| --- | --- | --- |
+| `403` | `support_forbidden` | `Authentication required.` |
+| `404` | `support_not_found` | `Support request not found.` |
+| `404` | `booking_not_found` | `Booking not found.` — referenced booking is not the caller's |
+| `422` | *(shape B)* | unknown `category`, empty or over-long `message` |
 
 #### Dispatch offers
 
@@ -949,6 +1093,8 @@ Captured by actually triggering each path. `detail` text is the real message.
 | `400` | `missing_proof_photos` | `At least one BEFORE photo and one AFTER photo are required … (missing: AFTER, BEFORE).` |
 | `409` | `job_not_accepting_photos` | `Job is AWAITING_CUSTOMER_CONFIRMATION and no longer accepts photos.` |
 | `409` | `invalid_job_status` | `Job is IN_PROGRESS and cannot be confirmed.` |
+| `400` | `invalid_location` | `recorded_at is in the future; check the device clock.` |
+| `409` | `tracking_window_closed` | `Job is IN_PROGRESS and no longer accepts location updates.` |
 
 #### Payment and payout
 

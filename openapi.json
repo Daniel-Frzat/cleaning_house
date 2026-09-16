@@ -3,7 +3,7 @@
   "info": {
     "title": "Cleaning House API",
     "version": "1.0.0",
-    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nEight domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch and offers), Payments, Jobs, and Payouts.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and starts the job.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
+    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nNine domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and starts the job.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
   },
   "paths": {
     "/api/health": {
@@ -402,6 +402,7 @@
             "in": "path",
             "name": "property_id",
             "schema": {
+              "format": "uuid",
               "title": "Property Id",
               "type": "string"
             },
@@ -458,6 +459,7 @@
             "in": "path",
             "name": "property_id",
             "schema": {
+              "format": "uuid",
               "title": "Property Id",
               "type": "string"
             },
@@ -534,6 +536,7 @@
             "in": "path",
             "name": "property_id",
             "schema": {
+              "format": "uuid",
               "title": "Property Id",
               "type": "string"
             },
@@ -690,6 +693,7 @@
             "in": "path",
             "name": "service_id",
             "schema": {
+              "format": "uuid",
               "title": "Service Id",
               "type": "string"
             },
@@ -746,6 +750,7 @@
             "in": "path",
             "name": "service_id",
             "schema": {
+              "format": "uuid",
               "title": "Service Id",
               "type": "string"
             },
@@ -822,6 +827,7 @@
             "in": "path",
             "name": "service_id",
             "schema": {
+              "format": "uuid",
               "title": "Service Id",
               "type": "string"
             },
@@ -1006,6 +1012,7 @@
             "in": "path",
             "name": "service_id",
             "schema": {
+              "format": "uuid",
               "title": "Service Id",
               "type": "string"
             },
@@ -1580,6 +1587,7 @@
             "in": "path",
             "name": "profile_id",
             "schema": {
+              "format": "uuid",
               "title": "Profile Id",
               "type": "string"
             },
@@ -1676,6 +1684,7 @@
             "in": "path",
             "name": "registration_id",
             "schema": {
+              "format": "uuid",
               "title": "Registration Id",
               "type": "string"
             },
@@ -1764,6 +1773,7 @@
             "in": "path",
             "name": "document_id",
             "schema": {
+              "format": "uuid",
               "title": "Document Id",
               "type": "string"
             },
@@ -1970,6 +1980,7 @@
             "in": "path",
             "name": "booking_id",
             "schema": {
+              "format": "uuid",
               "title": "Booking Id",
               "type": "string"
             },
@@ -2019,6 +2030,105 @@
         ]
       }
     },
+    "/api/bookings/{booking_id}/reschedule": {
+      "post": {
+        "operationId": "apps_bookings_api_bookings_reschedule_booking",
+        "summary": "Reschedule a booking that found no cleaner (customer only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`scheduled_at` is in the past or outside business hours (07:00-19:00 local time).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not a `CUSTOMER`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, or it belongs to another customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The booking is not in a reschedulable state — it is no longer `PENDING`, a search is still running or an offer is live (`dispatch_status` is not `NO_CONTRACTOR`), a contractor is already assigned, or it has been paid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The booking failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n**Preconditions:** the booking must still be `PENDING`, its `dispatch_status` must be `NO_CONTRACTOR`, it must have no assigned contractor and no successful payment. Any other state returns `409` — rescheduling after a contractor has been assigned or the booking confirmed is not available yet, pending the cancellation and refund policy.\n\n`scheduled_at` follows the same rules as booking creation: it must be in the future and between 07:00 and 19:00 local time. `timezone` is optional — when omitted the booking's stored timezone (derived from the property address) is used, which is almost always what you want.\n\n**Side effects:** the booking's previous dispatch offers are **deleted**, `dispatch_status` returns to `SEARCHING`, and a fresh dispatch round starts after the change commits. Clearing the old offers is what makes the new round meaningful: a contractor is never offered the same booking twice, so without it every eligible contractor would still be excluded and the search would end immediately. A contractor who declined the old time is therefore eligible for the new one.\n\nFinding no contractor again is not an error: the booking simply returns to `NO_CONTRACTOR` and can be rescheduled again.",
+        "tags": [
+          "Bookings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingRescheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/offers/{offer_id}/accept": {
       "post": {
         "operationId": "apps_bookings_api_offers_accept_offer",
@@ -2028,6 +2138,7 @@
             "in": "path",
             "name": "offer_id",
             "schema": {
+              "format": "uuid",
               "title": "Offer Id",
               "type": "string"
             },
@@ -2106,6 +2217,7 @@
             "in": "path",
             "name": "offer_id",
             "schema": {
+              "format": "uuid",
               "title": "Offer Id",
               "type": "string"
             },
@@ -2184,6 +2296,7 @@
             "in": "path",
             "name": "booking_id",
             "schema": {
+              "format": "uuid",
               "title": "Booking Id",
               "type": "string"
             },
@@ -2240,6 +2353,7 @@
             "in": "path",
             "name": "booking_id",
             "schema": {
+              "format": "uuid",
               "title": "Booking Id",
               "type": "string"
             },
@@ -2288,6 +2402,7 @@
             "in": "path",
             "name": "booking_id",
             "schema": {
+              "format": "uuid",
               "title": "Booking Id",
               "type": "string"
             },
@@ -2347,6 +2462,55 @@
         ]
       }
     },
+    "/api/bookings/{booking_id}/tracking": {
+      "get": {
+        "operationId": "apps_jobs_api_jobs_retrieve_tracking",
+        "summary": "Track the assigned contractor on the way (customer, admin or assigned contractor)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobTrackingOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such booking, no job for it, or the caller is not entitled to see it — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the booking's own customer, an `ADMIN`, or the assigned contractor — the same audience that can view the job.\n\nReturns the contractor's last known position together with the property's coordinates, so a map can be drawn from a single request.\n\n**The tracking window is `ASSIGNED` only.** While `tracking_active` is `true` the contractor is on the way. Once work starts it flips to `false` and `contractor_location` is `null` **even though a point is still stored** — the cleaner's position is not exposed once they are inside the property, and never after the service ends.\n\n`contractor_location` is also `null` while `tracking_active` is `true` if the contractor has not reported yet, or has location sharing off. That is a normal state, not an error — show \"on the way\" rather than a failure.\n\nCheck `is_stale` before drawing a live marker: it means updates have stopped arriving (backgrounded app, poor signal), so show \"last updated N seconds ago\" instead of a point that pretends to be current. `age_seconds` gives the exact age.\n\n**Polling:** there is no WebSocket or SSE channel in this version — poll this endpoint every few seconds while the map is open, and stop polling as soon as `tracking_active` is `false`.\n\n**No ETA and no street route.** Two coordinates are not a road path: drawing the route and estimating arrival needs a directions provider (Google or Mapbox), which is not wired into this backend.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Jobs"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/jobs/{job_id}/photos": {
       "post": {
         "operationId": "apps_jobs_api_jobs_upload_photo",
@@ -2356,6 +2520,7 @@
             "in": "path",
             "name": "job_id",
             "schema": {
+              "format": "uuid",
               "title": "Job Id",
               "type": "string"
             },
@@ -2464,6 +2629,7 @@
             "in": "path",
             "name": "job_id",
             "schema": {
+              "format": "uuid",
               "title": "Job Id",
               "type": "string"
             },
@@ -2542,6 +2708,7 @@
             "in": "path",
             "name": "job_id",
             "schema": {
+              "format": "uuid",
               "title": "Job Id",
               "type": "string"
             },
@@ -2611,6 +2778,105 @@
         ]
       }
     },
+    "/api/contractor/jobs/{job_id}/location": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_report_job_location",
+        "summary": "Report the assigned contractor's current location (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobTrackingOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`recorded_at` is in the future — check the device clock.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not the contractor assigned to this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is no longer `ASSIGNED`, so the tracking window has closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Coordinates out of range, or a field is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the contractor assigned to this job — nobody else, not even an `ADMIN`.\n\n**Preconditions:** the job must still be `ASSIGNED`. Once the contractor declares the start of work the tracking window closes and further updates are rejected with `409`.\n\nSend `recorded_at` as the moment the device captured the fix, not the moment you send it — the two differ when the network is slow, and the customer should see the real age of the point. The server stamps its own receipt time and computes staleness from that, so a wrong device clock cannot make an old fix look live. A `recorded_at` more than a minute in the future is rejected with `400`.\n\n`accuracy` is the reported GPS radius in metres and is optional — not every device supplies it.\n\n**Side effects:** replaces the previously reported point. **No path history is kept** — there is exactly one stored location per job, overwritten each time.\n\nReturns the same tracking snapshot the customer sees, so the contractor app can confirm what was recorded.",
+        "tags": [
+          "Contractor Jobs"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLocationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/bookings/{booking_id}/payout": {
       "get": {
         "operationId": "apps_payouts_api_payouts_retrieve_payout",
@@ -2620,6 +2886,7 @@
             "in": "path",
             "name": "booking_id",
             "schema": {
+              "format": "uuid",
               "title": "Booking Id",
               "type": "string"
             },
@@ -2659,6 +2926,173 @@
         "description": "**Who may call:** the contractor being paid, or an `ADMIN`. The customer cannot see the payout.\n\n**Preconditions:** a payout record exists only once the customer has confirmed job completion. It is released immediately and **per booking** — payouts are never batched, and there is no endpoint to trigger or retry one manually; this one is read-only.\n\nThe amount is the full booking price: no commission is deducted.\n\n**Side effects:** none — read-only.\n\nAdministrators additionally receive `provider_reference`; for the contractor that field is absent from the response body altogether, not merely blank.",
         "tags": [
           "Payouts"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support-requests": {
+      "post": {
+        "operationId": "apps_support_api_support_create_support_request",
+        "summary": "Open a support request (any authenticated user)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No valid token was supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The referenced booking does not exist, or belongs to another customer — deliberately indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown `category`, empty `message`, or the message exceeds the maximum length.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user — customers, contractors and administrators alike.\n\n**Preconditions:** `category` must be one of the known categories and `message` must not be empty. `booking_id` is optional; when given it must be a booking the caller owns — a request about a login problem or an app crash needs no booking.\n\nThe request is always created as `SUBMITTED`; `status` is not accepted from the client. There are no attachments and no replies in this version — the request is a one-way channel and is answered outside the app.\n\n**Side effects:** none beyond creating the record. No notification is sent and no ticket is opened with any external system.",
+        "tags": [
+          "Support"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportRequestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_support_api_support_list_support_requests",
+        "summary": "List own support requests (all of them for an admin)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SupportRequestOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No valid token was supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any authenticated user. The list is scoped to the caller's own requests, newest first; an `ADMIN` receives every request from every user.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Support"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support-requests/{request_id}": {
+      "get": {
+        "operationId": "apps_support_api_support_retrieve_support_request",
+        "summary": "Retrieve one support request (owner or admin)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No valid token was supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such support request, or it belongs to another user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the user who opened the request, or an `ADMIN`.\n\n**Side effects:** none — read-only.\n\nA request belonging to another user returns the same `404` as one that does not exist.",
+        "tags": [
+          "Support"
         ],
         "security": [
           {
@@ -4179,6 +4613,10 @@
             "title": "Id",
             "type": "string"
           },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
           "customer_id": {
             "format": "uuid",
             "title": "Customer Id",
@@ -4277,6 +4715,16 @@
             ],
             "title": "Access Notes"
           },
+          "payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "service_selections": {
             "items": {
               "$ref": "#/components/schemas/ServiceSelectionOut"
@@ -4297,6 +4745,7 @@
         },
         "required": [
           "id",
+          "public_reference",
           "customer_id",
           "property_id",
           "status",
@@ -4305,6 +4754,38 @@
           "updated_at"
         ],
         "title": "BookingOut",
+        "type": "object"
+      },
+      "PaymentSummaryOut": {
+        "description": "ملخص الدفع داخل الحجز — للعرض وحده.\n\n📌 سبب الوجود: شاشة الحجز تعرض حالة الدفع ومبلغه، وكانت تحتاج نداءً\n   ثانيًا لكل حجز (/bookings/{id}/payment). في شاشة القائمة كان ذلك\n   نداءً لكل صف.\n\n🔒 لا provider_reference ولا failure_reason هنا — والحذف هيكلي لا\n   مشروط: الشكل الذي لا يُعرِّف الحقل لا يستطيع كشفه مهما فعل\n   المُسلسِل. (نفس درس §43 الموثّق في payments/api/schemas.py.)\n\n⚠️ ملخص لا بديل: GET /api/bookings/{id}/payment يبقى مسار التفاصيل\n   بلا تغيير، وهو وحده ما يكشف provider_reference للإدارة.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "amount",
+          "method"
+        ],
+        "title": "PaymentSummaryOut",
         "type": "object"
       },
       "ServiceSelectionOut": {
@@ -4392,6 +4873,32 @@
           "room_count"
         ],
         "title": "ServiceSelectionIn",
+        "type": "object"
+      },
+      "BookingRescheduleIn": {
+        "description": "إعادة جدولة حجز لم يجد مقاولًا.\n\n📌 timezone اختياري: حين يُترك فارغًا تُستعمل منطقة الحجز المخزَّنة\n   (المشتقة من عنوان العقار)، وهي الحالة الغالبة — فالعقار لم يتغيّر.\n   يُقبل صراحةً لمن يريد إرسال منطقة مختلفة عن المخزَّنة.\n\n⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد\n   وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.",
+        "properties": {
+          "scheduled_at": {
+            "format": "date-time",
+            "title": "Scheduled At",
+            "type": "string"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "required": [
+          "scheduled_at"
+        ],
+        "title": "BookingRescheduleIn",
         "type": "object"
       },
       "OfferOut": {
@@ -4762,6 +5269,221 @@
         "title": "JobPhotoOut",
         "type": "object"
       },
+      "ContractorLocationOut": {
+        "description": "آخر موقع معلوم للمقاول، وعمره.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "age_seconds": {
+            "title": "Age Seconds",
+            "type": "integer"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "recorded_at",
+          "received_at",
+          "age_seconds",
+          "is_stale"
+        ],
+        "title": "ContractorLocationOut",
+        "type": "object"
+      },
+      "JobTrackingOut": {
+        "description": "لقطة التتبع الكاملة لنداء واحد.\n\n📌 يجمع المهمة والعقار والموقع معًا: الواجهة ترسم الخريطة بلا نداء\n   ثانٍ لجلب إحداثيات العقار.\n\n⚠️ tracking_active=false تعني انتهاء النافذة (بدأ العمل أو تجاوزه).\n   عندها يكون contractor_location = null دائمًا، حتى لو كانت نقطة\n   مخزَّنة — لا يُعرض موقع العامل بعد انتهاء الخدمة.\n\n⚠️ contractor_location = null مع tracking_active=true حالة عادية:\n   المقاول لم يرسل بعد. اعرض \"في الطريق\" لا رسالة خطأ.\n\n⚠️ لا ETA ولا مسار شوارع: كلاهما يحتاج Directions API (Google/Mapbox)\n   — قرار مزوّد مفتوح. النقطتان هنا لا ترسمان طريقًا.",
+        "properties": {
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "job_status": {
+            "title": "Job Status",
+            "type": "string"
+          },
+          "tracking_active": {
+            "title": "Tracking Active",
+            "type": "boolean"
+          },
+          "contractor_location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractorLocationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "property_location": {
+            "$ref": "#/components/schemas/PropertyLocationOut"
+          }
+        },
+        "required": [
+          "booking_id",
+          "job_id",
+          "job_status",
+          "tracking_active",
+          "property_location"
+        ],
+        "title": "JobTrackingOut",
+        "type": "object"
+      },
+      "PropertyLocationOut": {
+        "description": "وجهة الرحلة — إحداثيات العقار.\n\n📌 تُعاد مع التتبع حتى ترسم الواجهة الطرفين من نداء واحد.\n🔒 الإحداثيات وحدها: لا عنوان ولا ملاحظات وصول — تلك لها مسارها\n   وقواعد حجبها.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "title": "PropertyLocationOut",
+        "type": "object"
+      },
+      "JobLocationIn": {
+        "description": "تحديث موقع المقاول المُسنَد.\n\n⚠️ الإحداثيتان إلزاميتان: تحديث موقع بإحداثية واحدة لا معنى له.\n\n📌 recorded_at إلزامي ويصل من الجهاز — لحظة التقاط النقطة لا لحظة\n   وصولها. الفارق مهم حين تتأخر الشبكة: نقطة عمرها دقيقتان يجب أن\n   تُعرض كذلك لا كأنها الآن.\n⚠️ لا يُوثق به وحده: الخادم يختم وقت الاستلام بنفسه، وحساب التقادم\n   يقوم على ختمه لا على ساعة الجهاز.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,5}|(?=[\\d.]{1,8}0*$)\\d{0,5}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "recorded_at"
+        ],
+        "title": "JobLocationIn",
+        "type": "object"
+      },
       "PayoutAdminOut": {
         "description": "شكل الإدارة — يضيف المرجع التشخيصي وحده.\n\nالوراثة من PayoutOut تضمن ألا ينحرف الشكلان: أي حقل عام يُضاف لاحقًا\nيظهر في الاثنين تلقائيًا، والفرق يبقى محصورًا في هذا الحقل.",
         "properties": {
@@ -4908,6 +5630,110 @@
         ],
         "title": "PayoutOut",
         "type": "object"
+      },
+      "SupportRequestOut": {
+        "description": "طلب دعم في الرد.\n\n📌 booking_id يُعاد كما هو (None إن لم يُربط) — الواجهة تستعمله\n   لفتح الحجز من شاشة الطلب.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "category",
+          "message",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SupportRequestOut",
+        "type": "object"
+      },
+      "SupportCategory": {
+        "description": "تصنيف الطلب.\n\n📌 قائمة مغلقة لا نص حر: الفرز في لوحة الإدارة يحتاج قيمًا ثابتة،\n   والنص الحر يتحول إلى قيم متضاربة بسرعة. التوسيع هجرة بسيطة.\n\n⚠️ OTHER موجودة عمدًا: بدونها يضطر المستخدم لاختيار تصنيف خاطئ،\n   فيفسد الفرز الذي وُجدت القائمة من أجله.",
+        "enum": [
+          "BOOKING_ISSUE",
+          "PAYMENT_ISSUE",
+          "CONTRACTOR_ISSUE",
+          "APP_ISSUE",
+          "OTHER"
+        ],
+        "title": "SupportCategory",
+        "type": "string"
+      },
+      "SupportRequestIn": {
+        "description": "إنشاء طلب دعم.\n\n⚠️ status غير موجود عمدًا: كل طلب يبدأ SUBMITTED، ولا يضبطه العميل.\n⚠️ user غير موجود: يُشتق من التوكن، فلا يمكن فتح طلب باسم غيرك.\n\n📌 category مُقيَّد بـSupportCategory: قيمة خارجها ترفضها طبقة\n   التحقق بـ422 قبل أن تصل إلى الخدمة.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/SupportCategory"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          }
+        },
+        "required": [
+          "category",
+          "message"
+        ],
+        "title": "SupportRequestIn",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -4962,6 +5788,10 @@
     {
       "name": "Payouts",
       "description": "Contractor payout for a completed booking."
+    },
+    {
+      "name": "Support",
+      "description": "Support requests raised from the app. One-way in this version: no replies and no attachments."
     },
     {
       "name": "System",
