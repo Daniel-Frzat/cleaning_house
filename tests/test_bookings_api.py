@@ -634,3 +634,170 @@ def test_booking_out_price_is_optional_and_lines_are_price_free():
 
     for name in ServiceSelectionOut.model_fields:
         assert "price" not in name
+
+
+# ============================================================
+# ملخص الدفع داخل الحجز
+# ============================================================
+@pytest.mark.django_db
+def test_payment_summary_is_absent_while_pending(
+    client, customer_a, property_a, general
+):
+    """📌 لا دفعة قبل قبول المقاول — والملخص None كـcomputed_price."""
+    r = post(
+        client,
+        "/api/bookings",
+        booking_payload(property_a, [(general, 3)]),
+        **auth(customer_a),
+    )
+
+    assert r.status_code == 201, r.content
+    assert r.json()["payment"] is None
+
+
+@pytest.mark.django_db
+def test_payment_summary_appears_once_confirmed(client, customer_a, property_a, general):
+    """📌 الحالة والمبلغ وطريقة الدفع — في نداء واحد مع الحجز."""
+    from apps.payments.models import Payment, PaymentMethod, PaymentStatus
+
+    booking = Booking.objects.create(
+        customer=customer_a,
+        property=property_a,
+        status=BookingStatus.CONFIRMED,
+        computed_price=Decimal("215.00"),
+    )
+    BookingServiceSelection.objects.create(
+        booking=booking, service_type=general, room_count=3
+    )
+    Payment.objects.create(
+        booking=booking,
+        amount=Decimal("215.00"),
+        method=PaymentMethod.APPLE_PAY,
+        status=PaymentStatus.SUCCEEDED,
+        provider_reference="fake_ref_123",
+    )
+
+    r = client.get(f"/api/bookings/{booking.id}", **auth(customer_a))
+
+    assert r.status_code == 200, r.content
+    summary = r.json()["payment"]
+
+    assert summary == {
+        "status": PaymentStatus.SUCCEEDED,
+        "amount": "215.00",
+        "method": PaymentMethod.APPLE_PAY,
+    }
+
+
+@pytest.mark.django_db
+def test_failed_payment_is_visible_on_a_confirmed_booking(
+    client, customer_a, property_a, general
+):
+    """
+    ⚠️ الحالة الواقعية: القبول ينجح والشحن يفشل.
+
+    الشحن يقع بعد الـcommit ولا يتراجع عن التأكيد، فالحجز CONFIRMED
+    ودفعته FAILED. الواجهة يجب أن ترى ذلك لا أن يُخفى عنها.
+    """
+    from apps.payments.models import Payment, PaymentMethod, PaymentStatus
+
+    booking = Booking.objects.create(
+        customer=customer_a,
+        property=property_a,
+        status=BookingStatus.CONFIRMED,
+        computed_price=Decimal("215.00"),
+    )
+    BookingServiceSelection.objects.create(
+        booking=booking, service_type=general, room_count=3
+    )
+    Payment.objects.create(
+        booking=booking,
+        amount=Decimal("215.00"),
+        method=PaymentMethod.CARD,
+        status=PaymentStatus.FAILED,
+        failure_reason="Card declined by issuer (simulated).",
+    )
+
+    r = client.get(f"/api/bookings/{booking.id}", **auth(customer_a))
+
+    assert r.status_code == 200, r.content
+    assert r.json()["payment"]["status"] == PaymentStatus.FAILED
+
+
+@pytest.mark.django_db
+def test_payment_summary_never_leaks_internal_fields(
+    client, customer_a, property_a, general, admin_user
+):
+    """
+    🔒 provider_reference و failure_reason غائبان من ملخص الحجز — لكل
+       الأدوار. التفاصيل تعيش في /bookings/{id}/payment وحده.
+    """
+    from apps.payments.models import Payment, PaymentMethod, PaymentStatus
+
+    booking = Booking.objects.create(
+        customer=customer_a,
+        property=property_a,
+        status=BookingStatus.CONFIRMED,
+        computed_price=Decimal("215.00"),
+    )
+    BookingServiceSelection.objects.create(
+        booking=booking, service_type=general, room_count=3
+    )
+    Payment.objects.create(
+        booking=booking,
+        amount=Decimal("215.00"),
+        method=PaymentMethod.CARD,
+        status=PaymentStatus.FAILED,
+        provider_reference="fake_secret_ref",
+        failure_reason="Card declined.",
+    )
+
+    r = client.get(f"/api/bookings/{booking.id}", **auth(customer_a))
+    raw = r.content.decode()
+
+    assert "fake_secret_ref" not in raw
+    assert "provider_reference" not in raw
+    assert "failure_reason" not in raw
+
+
+def test_payment_summary_schema_omits_internal_fields():
+    """🔒 الحجب هيكلي: الشكل لا يعرّف الحقلين أصلًا."""
+    from apps.bookings.api.schemas import PaymentSummaryOut
+
+    assert set(PaymentSummaryOut.model_fields) == {"status", "amount", "method"}
+
+
+@pytest.mark.django_db
+def test_booking_list_does_not_issue_a_query_per_payment(
+    client, customer_a, property_a, general, django_assert_num_queries
+):
+    """
+    ⚠️ select_related("payment") إلزامي لا تحسين: بدونه تصدر القائمة
+       استعلامًا لكل حجز (N+1).
+    """
+    from apps.payments.models import Payment, PaymentMethod, PaymentStatus
+
+    for _ in range(5):
+        booking = Booking.objects.create(
+            customer=customer_a,
+            property=property_a,
+            status=BookingStatus.CONFIRMED,
+            computed_price=Decimal("215.00"),
+        )
+        BookingServiceSelection.objects.create(
+            booking=booking, service_type=general, room_count=3
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("215.00"),
+            method=PaymentMethod.CARD,
+            status=PaymentStatus.SUCCEEDED,
+        )
+
+    # عدد ثابت لا يتناسب مع عدد الحجوزات
+    with django_assert_num_queries(4):
+        r = client.get("/api/bookings", **auth(customer_a))
+
+    assert r.status_code == 200, r.content
+    assert len(r.json()) == 5
+    assert all(b["payment"] is not None for b in r.json())

@@ -23,7 +23,7 @@ from apps.accounts.roles import ConfirmedRole
 from apps.properties.services import properties as properties_svc
 from apps.services.models import ServiceType
 
-from ..models import Booking, BookingServiceSelection, BookingStatus
+from ..models import Booking, BookingServiceSelection, BookingStatus, DispatchStatus
 from .scheduling import normalize_scheduled_at
 from .timezone import get_timezone_for_state
 
@@ -80,6 +80,21 @@ class InvalidRoomCountError(BookingError):
     """عدد الغرف سالب أو ليس عددًا صحيحًا."""
 
     code = "invalid_room_count"
+
+
+class BookingNotReschedulableError(BookingError):
+    """
+    الحجز ليس في الحالة الوحيدة التي تسمح بإعادة الجدولة.
+
+    📌 النطاق المسموح ضيّق عمدًا (قرار MVP): PENDING + NO_CONTRACTOR +
+       غير مُسنَد + بلا دفعة ناجحة. أي حالة أخرى تعني أن طرفًا آخر
+       (مقاول قَبِل، أو عرض قائم لدى مقاول) صار طرفًا في الحجز، وسحبه
+       من تحته قرارٌ يخصّ سياسة الإلغاء والاسترداد — وهي مؤجَّلة صراحةً.
+
+    409 لا 400: الطلب سليم شكلًا، والرفض بسبب حالة المورد الحالية.
+    """
+
+    code = "booking_not_reschedulable"
 
 
 # ------------------------------------------------------------
@@ -283,12 +298,18 @@ def _dispatch_after_commit(booking):
 
 
 def list_bookings(user):
-    """حجوزات المستخدم الحالي فقط — الأحدث أولًا."""
+    """
+    حجوزات المستخدم الحالي فقط — الأحدث أولًا.
+
+    ⚠️ select_related("payment") إلزامي لا تحسين: الرد يحمل ملخص الدفع
+       لكل حجز، وبدونه تصدر القائمة استعلامًا لكل صف (N+1).
+       العلاقة واحد-لواحد (Payment.booking) فـselect_related هو الصحيح.
+    """
     assert_is_customer(user)
 
     return (
         Booking.objects.filter(customer=user)
-        .select_related("property")
+        .select_related("property", "payment")
         .prefetch_related("service_selections__service_type")
     )
 
@@ -299,7 +320,7 @@ def get_booking(user, booking_id):
 
     booking = (
         Booking.objects.filter(pk=booking_id)
-        .select_related("property")
+        .select_related("property", "payment")
         .prefetch_related("service_selections__service_type")
         .first()
     )
@@ -308,3 +329,120 @@ def get_booking(user, booking_id):
 
     assert_owns(user, booking)
     return booking
+
+
+# ------------------------------------------------------------
+# إعادة الجدولة
+# ------------------------------------------------------------
+@transaction.atomic
+def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
+    """
+    يغيّر موعد حجز لم يجد مقاولًا، ويعيد إطلاق دورة الإسناد.
+
+    📌 النطاق المسموح (قرار MVP): PENDING + NO_CONTRACTOR + غير مُسنَد +
+       بلا دفعة ناجحة. إعادة الجدولة والإلغاء بعد الإسناد/التأكيد
+       مؤجَّلان حتى تُحسم سياسة الإلغاء والاسترداد.
+
+    ⚠️ لماذا تُحذف العروض القديمة: find_candidates يستبعد كل مقاول
+       عُرض عليه هذا الحجز **بأي حالة** (§36.5)، وقيد التفرد
+       (booking, contractor) يمنع عرضًا ثانيًا على المقاول نفسه. فبعد
+       NO_CONTRACTOR يكون لكل مقاول مؤهَّل صفُّ عرض، ولو تُركت الصفوف
+       لعادت القائمة فارغة فورًا ولعادت الحالة NO_CONTRACTOR — أي لكانت
+       إعادة الجدولة بلا أثر.
+
+       الحذف مبرَّر منطقيًا لا التفافًا على القيد: الموعد الجديد عرض
+       مختلف فعلًا، ومن رفض الثلاثاء قد يقبل الخميس. والحذف محصور في
+       مدخلات assign_next_contractor — لا تغيير في find_candidates ولا
+       في قيد التفرد، وكلاهما يعتمد عليه الرفض وانتهاء المهلة أيضًا.
+
+    ⚠️ ثمن الحذف مقبول ومعلوم: يضيع سجلّ من رُفض عليه الموعد القديم.
+       لا تقرير أداء يعتمد عليه اليوم، وإبقاؤه كان يتطلب تغيير القيد
+       ودالة الترشيح معًا — أثرٌ أوسع بكثير من الحاجة.
+    """
+    booking = get_booking(user, booking_id)
+
+    _assert_reschedulable(booking)
+
+    # منطقة الحجز المخزَّنة هي الافتراضي: العقار لم يتغيّر، فمنطقته هي
+    # نفسها. القيمة الصريحة تُحترم لمن أرسلها.
+    effective_timezone = timezone_name or booking.customer_timezone
+
+    # 🔒 نفس قواعد الإنشاء حرفيًا (ماضٍ / ساعات العمل) — تُعاد من
+    #    scheduling.py ولا تُكرَّر هنا، فلا تفترق القاعدتان.
+    scheduled_utc = normalize_scheduled_at(scheduled_at, effective_timezone)
+
+    # ⚠️ الحذف قبل الكتابة وداخل المعاملة نفسها: لو فشل ما بعده لا يبقى
+    #    حجز بموعد قديم وقد فُقدت عروضه.
+    deleted_count, _ = booking.dispatch_offers.all().delete()
+
+    booking.scheduled_at = scheduled_utc
+    booking.customer_timezone = effective_timezone
+    # 📌 العودة إلى SEARCHING: البحث يبدأ من جديد فعلًا. القيمة تُصحَّح
+    #    مباشرةً في assign_next_contractor إن لم يوجد مرشَّح.
+    booking.dispatch_status = DispatchStatus.SEARCHING
+    booking.save(
+        update_fields=[
+            "scheduled_at",
+            "customer_timezone",
+            "dispatch_status",
+            "updated_at",
+        ]
+    )
+
+    logger.info(
+        "Booking rescheduled (booking_id=%s, scheduled_at=%s, offers_cleared=%s)",
+        booking.id,
+        scheduled_utc,
+        deleted_count,
+    )
+
+    # ⚠️ بعد الـcommit لا داخله — نفس نمط الإنشاء: فشل الإسناد لا يجوز
+    #    أن يتراجع عن إعادة جدولة صحيحة.
+    transaction.on_commit(lambda: _dispatch_after_commit(booking), robust=True)
+
+    return booking
+
+
+def _assert_reschedulable(booking):
+    """
+    الشروط الأربعة، بترتيب الأعمّ فالأخصّ.
+
+    ⚠️ الشرط الرابع (دفعة ناجحة) زائد منطقيًا: صف الدفع لا يُنشأ إلا عند
+       القبول، والقبول يضبط dispatch_status=ASSIGNED فيسقط الشرطان قبله.
+       أُبقي صمّامًا أمام صف عُدّل يدويًا أو مسار مستقبلي يشحن قبل
+       الإسناد — استعلام واحد رخيص مقابل ألا يُعاد جدولة حجز مدفوع.
+    """
+    if booking.status != BookingStatus.PENDING:
+        raise BookingNotReschedulableError(
+            f"Only a PENDING booking can be rescheduled (currently {booking.status})."
+        )
+
+    if booking.dispatch_status != DispatchStatus.NO_CONTRACTOR:
+        raise BookingNotReschedulableError(
+            "A booking can only be rescheduled once the search has ended with no "
+            f"available cleaner (dispatch status is currently {booking.dispatch_status})."
+        )
+
+    if booking.assigned_contractor_id is not None:
+        raise BookingNotReschedulableError(
+            "This booking already has an assigned contractor."
+        )
+
+    if _has_successful_payment(booking):
+        raise BookingNotReschedulableError(
+            "This booking has already been paid and cannot be rescheduled."
+        )
+
+
+def _has_successful_payment(booking):
+    """
+    هل للحجز دفعة ناجحة؟
+
+    الاستيراد داخل الدالة: apps.payments يستورد من apps.bookings،
+    والاستيراد على مستوى الوحدة يصنع دورة (نفس نمط offers.py).
+    """
+    from apps.payments.models import Payment, PaymentStatus
+
+    return Payment.objects.filter(
+        booking=booking, status=PaymentStatus.SUCCEEDED
+    ).exists()

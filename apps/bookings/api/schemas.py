@@ -57,6 +57,22 @@ class BookingIn(Schema):
     access_notes: str = Field("", max_length=ACCESS_NOTES_MAX_LENGTH)
 
 
+class BookingRescheduleIn(Schema):
+    """
+    إعادة جدولة حجز لم يجد مقاولًا.
+
+    📌 timezone اختياري: حين يُترك فارغًا تُستعمل منطقة الحجز المخزَّنة
+       (المشتقة من عنوان العقار)، وهي الحالة الغالبة — فالعقار لم يتغيّر.
+       يُقبل صراحةً لمن يريد إرسال منطقة مختلفة عن المخزَّنة.
+
+    ⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد
+       وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.
+    """
+
+    scheduled_at: datetime
+    timezone: Optional[str] = None
+
+
 class ServiceSelectionOut(Schema):
     """
     سطر خدمة في الرد.
@@ -71,6 +87,29 @@ class ServiceSelectionOut(Schema):
     room_count: int
 
 
+class PaymentSummaryOut(Schema):
+    """
+    ملخص الدفع داخل الحجز — للعرض وحده.
+
+    📌 سبب الوجود: شاشة الحجز تعرض حالة الدفع ومبلغه، وكانت تحتاج نداءً
+       ثانيًا لكل حجز (/bookings/{id}/payment). في شاشة القائمة كان ذلك
+       نداءً لكل صف.
+
+    🔒 لا provider_reference ولا failure_reason هنا — والحذف هيكلي لا
+       مشروط: الشكل الذي لا يُعرِّف الحقل لا يستطيع كشفه مهما فعل
+       المُسلسِل. (نفس درس §43 الموثّق في payments/api/schemas.py.)
+
+    ⚠️ ملخص لا بديل: GET /api/bookings/{id}/payment يبقى مسار التفاصيل
+       بلا تغيير، وهو وحده ما يكشف provider_reference للإدارة.
+    """
+
+    # PENDING | SUCCEEDED | FAILED
+    status: str
+    amount: Decimal
+    # CARD | APPLE_PAY | GOOGLE_PAY
+    method: str
+
+
 class BookingOut(Schema):
     """
     📌 توقيت كشف السعر (§36.1/§36.2):
@@ -82,6 +121,9 @@ class BookingOut(Schema):
     """
 
     id: uuid.UUID
+    # 📌 الرقم المرجعي المقروء (CLN-7F3K9Q) — يُعرض للعميل ويُستعمل في
+    #    الدعم. ليس معرّفًا: لا يقبله أي مسار، والـid أعلاه يبقى المفتاح.
+    public_reference: str
     customer_id: uuid.UUID
     property_id: uuid.UUID
     status: str
@@ -111,6 +153,12 @@ class BookingOut(Schema):
     #    هو من يقرّر كشفها (نفس نمط computed_price أعلاه).
     # ⚠️ قد تحوي مكان مفتاح المنزل — لا تُكشف لمقاول لم يقبل بعد.
     access_notes: Optional[str] = None
+    # 📌 حالة الدفع ومبلغه وطريقته — None ما دام الحجز PENDING: لا توجد
+    #    دفعة قبل قبول المقاول أصلًا. نفس شرط computed_price أعلاه.
+    # ⚠️ SUCCEEDED ليس شرطًا للظهور: الحجز قد يكون CONFIRMED ودفعته
+    #    FAILED (الشحن يقع بعد التأكيد ولا يتراجع عنه)، والواجهة تحتاج
+    #    أن ترى ذلك لا أن يُخفى عنها.
+    payment: Optional[PaymentSummaryOut] = None
     service_selections: list[ServiceSelectionOut]
     created_at: datetime
     updated_at: datetime
