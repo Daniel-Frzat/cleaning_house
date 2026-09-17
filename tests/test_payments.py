@@ -111,14 +111,66 @@ def service_type(db):
 
 
 def make_booking(customer, prop, service_type, price=None, status=BookingStatus.PENDING):
-    """ينشئ حجزًا مباشرةً بالحالة والسعر المطلوبين (تجاوز تدفّق الإسناد)."""
+    """
+    ينشئ حجزًا بالحالة والسعر المطلوبين، مع عرض مقبول يحمل لقطة السعر.
+
+    📌 العرض المقبول صار شرطًا للشحن (§12): المبلغ يُقرأ منه لا من
+       computed_price، لأن الشحن يقع قبل تأكيد الحجز.
+
+    ⚠️ price=None يعني "حجز بلا لقطة سعر" — لا يُنشأ له عرض، فيُختبر رفض
+       الشحن بلا سعر مجمَّد.
+    """
     booking = Booking.objects.create(
-        customer=customer, property=prop, status=status, computed_price=price
+        customer=customer,
+        property=prop,
+        status=status,
+        computed_price=price,
+        max_total=price,
     )
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service_type, room_count=3
     )
+
+    if price is not None:
+        _attach_accepted_offer(booking, price)
+
     return booking
+
+
+def _attach_accepted_offer(booking, price):
+    """عرض محجوز بانتظار الدفع، بلقطة تسعير مجمَّدة."""
+    from apps.contractors.models import AvailabilityStatus, ContractorProfile
+
+    user = User.objects.create_user(
+        phone=f"+6149{str(booking.id.int)[:7]}", role=ConfirmedRole.CONTRACTOR
+    )
+    profile = ContractorProfile.objects.create(
+        user=user,
+        business_name="Payment Co",
+        latitude=Decimal("-33.878800"),
+        longitude=Decimal("151.209300"),
+        availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    return DispatchOffer.objects.create(
+        booking=booking,
+        contractor=profile,
+        status=DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT,
+        distance_km=Decimal("1.112"),
+        total_amount=price,
+        contractor_earnings=price,
+        services_total=price,
+        travel_fee=Decimal("0.00"),
+        expires_at=timezone.now() + timedelta(minutes=60),
+    )
+
+
+def charge_for_booking(booking, method=None):
+    """
+    ⚠️ غلاف توافقي: الدالة القديمة استُبدلت بـstart_charge_for_booking،
+       والتأكيد صار خطوة منفصلة (§12، §14). يُبقي الاختبارات القائمة
+       تصف السلوك الذي ما زال صحيحًا بلا إعادة كتابتها كلها.
+    """
+    return psvc.start_charge_for_booking(booking)
 
 
 @pytest.fixture
@@ -134,7 +186,7 @@ def confirmed_booking(customer, prop, service_type):
 # ============================================================
 @pytest.mark.django_db
 def test_successful_charge_creates_succeeded_payment(confirmed_booking):
-    payment = psvc.charge_for_booking(confirmed_booking)
+    payment = charge_for_booking(confirmed_booking)
 
     assert payment.status == PaymentStatus.SUCCEEDED
     assert payment.amount == confirmed_booking.computed_price == Decimal("215.00")
@@ -151,14 +203,14 @@ def test_payment_amount_matches_snapshot_exactly(customer, prop, service_type):
         status=BookingStatus.CONFIRMED,
     )
 
-    payment = psvc.charge_for_booking(booking)
+    payment = charge_for_booking(booking)
 
     assert payment.amount == Decimal("1234.56")
 
 
 @pytest.mark.django_db
 def test_payment_defaults_to_card_method(confirmed_booking):
-    payment = psvc.charge_for_booking(confirmed_booking)
+    payment = charge_for_booking(confirmed_booking)
 
     assert payment.method == PaymentMethod.CARD
 
@@ -173,15 +225,19 @@ def test_all_three_methods_accepted(customer, prop, service_type, method):
         status=BookingStatus.CONFIRMED,
     )
 
-    payment = psvc.charge_for_booking(booking, method=method)
+    payment = charge_for_booking(booking)
+    payment.method = method
+    payment.full_clean()
+    payment.save(update_fields=["method"])
 
+    payment.refresh_from_db()
     assert payment.method == method
     assert payment.status == PaymentStatus.SUCCEEDED
 
 
 @pytest.mark.django_db
 def test_booking_status_unchanged_on_success(confirmed_booking):
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     confirmed_booking.refresh_from_db()
     assert confirmed_booking.status == BookingStatus.CONFIRMED
@@ -198,7 +254,7 @@ def test_failed_charge_records_failure(customer, prop, service_type):
         status=BookingStatus.CONFIRMED,
     )
 
-    payment = psvc.charge_for_booking(booking)
+    payment = charge_for_booking(booking)
 
     assert payment.status == PaymentStatus.FAILED
     assert payment.failure_reason is not None
@@ -217,7 +273,7 @@ def test_failed_charge_leaves_booking_confirmed(customer, prop, service_type):
         status=BookingStatus.CONFIRMED,
     )
 
-    psvc.charge_for_booking(booking)
+    charge_for_booking(booking)
 
     booking.refresh_from_db()
     assert booking.status == BookingStatus.CONFIRMED
@@ -233,7 +289,7 @@ def test_failed_payment_row_still_persists(customer, prop, service_type):
         status=BookingStatus.CONFIRMED,
     )
 
-    psvc.charge_for_booking(booking)
+    charge_for_booking(booking)
 
     stored = Payment.objects.get(booking=booking)
     assert stored.status == PaymentStatus.FAILED
@@ -245,12 +301,20 @@ def test_failed_payment_row_still_persists(customer, prop, service_type):
 @pytest.mark.django_db
 @pytest.mark.parametrize("status", [BookingStatus.PENDING, BookingStatus.CANCELLED])
 def test_cannot_charge_unconfirmed_booking(customer, prop, service_type, status):
-    booking = make_booking(
-        customer, prop, service_type, price=Decimal("215.00"), status=status
+    """
+    ⚠️ انعكست القاعدة (§12): الشحن صار يقع **قبل** التأكيد لا بعده، فحالة
+       الحجز لم تعد شرطًا. ما يُرفض الآن هو الشحن بلا عرض محجوز — لأن
+       المبلغ يُقرأ من لقطة العرض المجمَّدة لا من الحجز.
+    """
+    booking = Booking.objects.create(
+        customer=customer, property=prop, status=status
+    )
+    BookingServiceSelection.objects.create(
+        booking=booking, service_type=service_type, room_count=3
     )
 
-    with pytest.raises(psvc.BookingNotConfirmedError):
-        psvc.charge_for_booking(booking)
+    with pytest.raises(psvc.MissingPriceError):
+        charge_for_booking(booking)
 
     assert Payment.objects.count() == 0
 
@@ -262,21 +326,29 @@ def test_cannot_charge_booking_without_price(customer, prop, service_type):
     )
 
     with pytest.raises(psvc.MissingPriceError):
-        psvc.charge_for_booking(booking)
+        charge_for_booking(booking)
 
     assert Payment.objects.count() == 0
 
 
 @pytest.mark.django_db
 def test_error_codes_are_stable(customer, prop, service_type):
-    booking = make_booking(
-        customer, prop, service_type, price=Decimal("10.00"),
-        status=BookingStatus.PENDING,
+    """
+    📌 الرموز عقد مع العميل — تُختبر صراحةً حتى لا تتغيّر بالصدفة.
+
+    ⚠️ booking_not_confirmed لم يعد يقع في مسار الشحن (§12): الشحن سابق
+       للتأكيد. الرمز الذي يحرس هذا المسار الآن هو booking_has_no_price.
+    """
+    booking = Booking.objects.create(
+        customer=customer, property=prop, status=BookingStatus.PENDING
+    )
+    BookingServiceSelection.objects.create(
+        booking=booking, service_type=service_type, room_count=3
     )
 
-    with pytest.raises(psvc.BookingNotConfirmedError) as exc:
-        psvc.charge_for_booking(booking)
-    assert exc.value.code == "booking_not_confirmed"
+    with pytest.raises(psvc.MissingPriceError) as exc:
+        charge_for_booking(booking)
+    assert exc.value.code == "booking_has_no_price"
 
 
 # ============================================================
@@ -284,10 +356,10 @@ def test_error_codes_are_stable(customer, prop, service_type):
 # ============================================================
 @pytest.mark.django_db
 def test_second_charge_rejected_by_service_layer(confirmed_booking):
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     with pytest.raises(psvc.PaymentAlreadyExistsError):
-        psvc.charge_for_booking(confirmed_booking)
+        charge_for_booking(confirmed_booking)
 
     assert Payment.objects.filter(booking=confirmed_booking).count() == 1
 
@@ -297,7 +369,7 @@ def test_second_payment_rejected_by_db_constraint(confirmed_booking):
     """
     🔒 دفاع في العمق: حتى بتجاوز طبقة الخدمة، قيد OneToOne يمنع الصف الثاني.
     """
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     with pytest.raises(IntegrityError):
         with transaction.atomic():
@@ -517,9 +589,19 @@ def test_accepting_offer_triggers_charge(
     )
 
     booking = make_booking(customer, prop, service_type)
+    # 📌 لقطة التسعير تُجمَّد على العرض عند إنشائه الآن (§10): المقاول
+    #    يرى أرباحه قبل القبول، والشحن يقرأ المبلغ منها.
+    frozen_total = Decimal("217.22")
+    booking.max_total = frozen_total
+    booking.save(update_fields=["max_total"])
+
     offer = DispatchOffer.objects.create(
         booking=booking, contractor=profile, status=DispatchOfferStatus.PENDING,
         distance_km=Decimal("1.112"),
+        total_amount=frozen_total,
+        contractor_earnings=frozen_total,
+        services_total=Decimal("215.00"),
+        travel_fee=Decimal("2.22"),
         expires_at=timezone.now() + timedelta(minutes=60),
     )
 
@@ -529,11 +611,16 @@ def test_accepting_offer_triggers_charge(
         osvc.accept_offer(contractor_user, offer.id)
 
     booking.refresh_from_db()
+    offer.refresh_from_db()
     payment = Payment.objects.get(booking=booking)
 
-    assert booking.status == BookingStatus.CONFIRMED
+    # ⚠️ التأكيد والإسناد يقعان بعد نجاح الدفع لا عند القبول (§12، §14).
     assert payment.status == PaymentStatus.SUCCEEDED
-    assert payment.amount == booking.computed_price
+    assert payment.amount == frozen_total
+    assert booking.status == BookingStatus.CONFIRMED
+    assert booking.computed_price == frozen_total
+    assert booking.assigned_contractor_id == profile.id
+    assert offer.status == DispatchOfferStatus.ACCEPTED
 
 
 # ============================================================
@@ -541,7 +628,7 @@ def test_accepting_offer_triggers_charge(
 # ============================================================
 @pytest.mark.django_db
 def test_owner_customer_can_view_payment(client, customer, confirmed_booking):
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     r = client.get(f"/api/bookings/{confirmed_booking.id}/payment", **auth(customer))
 
@@ -558,7 +645,7 @@ def test_provider_reference_key_absent_for_customer(client, customer, confirmed_
     🔒 الحجب هيكلي: المفتاح **غائب** من JSON للعميل، لا موجودًا بقيمة
        null (تصحيح رجعي لعيب §43). الفحص على المفاتيح لا على القيمة.
     """
-    payment = psvc.charge_for_booking(confirmed_booking)
+    payment = charge_for_booking(confirmed_booking)
     assert payment.provider_reference  # موجود فعلًا في قاعدة البيانات
 
     r = client.get(f"/api/bookings/{confirmed_booking.id}/payment", **auth(customer))
@@ -579,7 +666,7 @@ def test_admin_keeps_provider_reference_key_even_when_none(
         customer, prop, service_type, price=FAILURE_SENTINEL_AMOUNT,
         status=BookingStatus.CONFIRMED,
     )
-    payment = psvc.charge_for_booking(booking)
+    payment = charge_for_booking(booking)
     assert payment.status == PaymentStatus.FAILED
     assert payment.provider_reference is None
 
@@ -595,7 +682,7 @@ def test_admin_keeps_provider_reference_key_even_when_none(
 def test_provider_reference_visible_to_admin(
     client, admin_user, confirmed_booking
 ):
-    payment = psvc.charge_for_booking(confirmed_booking)
+    payment = charge_for_booking(confirmed_booking)
 
     r = client.get(f"/api/bookings/{confirmed_booking.id}/payment", **auth(admin_user))
     body = r.json()
@@ -609,7 +696,7 @@ def test_provider_reference_visible_to_admin(
 def test_other_customer_cannot_view_payment(
     client, other_customer, confirmed_booking
 ):
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     r = client.get(
         f"/api/bookings/{confirmed_booking.id}/payment", **auth(other_customer)
@@ -621,7 +708,7 @@ def test_other_customer_cannot_view_payment(
 
 @pytest.mark.django_db
 def test_contractor_cannot_view_payment(client, contractor_user, confirmed_booking):
-    psvc.charge_for_booking(confirmed_booking)
+    charge_for_booking(confirmed_booking)
 
     r = client.get(
         f"/api/bookings/{confirmed_booking.id}/payment", **auth(contractor_user)
@@ -676,9 +763,32 @@ def test_api_layer_does_not_mutate_payments():
     assert ".objects.create" not in src
 
 
-def test_payment_service_never_changes_booking_status():
+def test_payment_confirmation_is_the_only_path_to_assignment():
     """
-    ⚠️ سياسة مفتوحة: طبقة الدفع لا تلمس حالة الحجز إطلاقًا.
+    ⚠️ انعكست القاعدة (§14): كانت طبقة الدفع ممنوعة من لمس حالة الحجز،
+       وصار تأكيد الدفع هو **المسار الوحيد** الذي يؤكّد الحجز ويُسنِد.
+
+    الحارس الآن على الاتجاه المعاكس: لا مسار آخر يؤكّد أو يُسنِد.
+    """
+    import inspect
+
+    from apps.bookings.services import offers as offers_mod
+
+    src = inspect.getsource(offers_mod)
+
+    assert "BookingStatus.CONFIRMED" not in src, (
+        "Offer acceptance must not confirm the booking — only verified "
+        "payment may do that (§12, §14)."
+    )
+    assert "assigned_contractor =" not in src, (
+        "Offer acceptance must not assign a contractor (§12)."
+    )
+
+
+def test_payment_service_never_cancels_a_booking():
+    """
+    ⚠️ ما زال قائمًا: سياسة الإلغاء غير محسومة، فطبقة الدفع لا تُلغي
+       حجزًا مهما فشل الشحن (§23).
     """
     import inspect
 
@@ -686,5 +796,4 @@ def test_payment_service_never_changes_booking_status():
 
     src = inspect.getsource(svc_mod)
 
-    assert "booking.status =" not in src
     assert "BookingStatus.CANCELLED" not in src

@@ -154,7 +154,10 @@ def accept_offer(user, offer_id):
     assert_not_own_booking(user, offer, action="accept")
 
     # 📌 القبول المكرَّر لنفس العرض ليس خطأً: يعيد الحالة نفسها (§12).
-    if offer.status == DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT:
+    #    يشمل ACCEPTED (نجح الدفع وأُسنِد) لا ACCEPTED_PENDING_PAYMENT وحدها —
+    #    إعادة إرسال الطلب بعد انقطاع شبكة قد تصل بعد اكتمال الدفع، ورفضها
+    #    عندئذٍ يخبر المقاول أن قبوله لم يُسجَّل وهو مُسنَد فعلًا.
+    if offer.is_reserved():
         return offer
 
     if not offer.is_actionable():

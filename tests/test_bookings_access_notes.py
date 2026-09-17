@@ -111,6 +111,8 @@ def make_contractor(admin, phone="+61400330002", coords=("-33.878800",
         expiry_date=timezone.localdate() + timedelta(days=365),
         status=VerificationStatus.VERIFIED, reviewed_by=admin,
         reviewed_at=timezone.now())
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(profile, (Decimal(coords[0]), Decimal(coords[1])))
     return user, profile
 
 
@@ -125,10 +127,6 @@ def create(customer, prop, service, notes=NOTES, capture=None):
         service_selections=[{"service_type_id": service.id, "room_count": 1}],
         scheduled_at=when(),
         access_notes=notes,
-    )
-    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
-    set_contractor_location(
-        profile, (Decimal(coords[0]), Decimal(coords[1]))
     )
     if capture is None:
         return booking_svc.create_booking(customer, **kwargs)

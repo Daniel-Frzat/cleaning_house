@@ -30,6 +30,8 @@ from apps.contractors.models import (
 from apps.properties.models import PropertyAddress
 from apps.services.models import ServiceType
 
+from tests.conftest import set_contractor_location
+
 SYDNEY_LAT = "-33.870000"
 SYDNEY_LNG = "151.210000"
 
@@ -254,6 +256,8 @@ def _make_eligible(worker, client, lat="-33.868800", lng="151.209300"):
     profile = ContractorProfile.objects.get(user=worker)
     profile.availability_status = AvailabilityStatus.AVAILABLE
     profile.save(update_fields=["availability_status"])
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(profile, (Decimal(lat), Decimal(lng)))
     BusinessRegistration.objects.create(
         contractor=profile, abn="12345678901", business_name="Sparkle Co",
         status=VerificationStatus.VERIFIED)

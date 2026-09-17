@@ -73,10 +73,16 @@ def set_contractor_location(profile, coords, recorded_at=None):
 
     ⚠️ ليس عنوان العمل: ContractorProfile.latitude/longitude تبقى كما هي،
        وهذا موقع الهاتف الذي يقرأه الإسناد.
+
+    📌 إحداثيات None تعني "مقاول بلا موقع" — لا يُنشأ له صف، فيسقط من
+       الترشيح كما يقصد الاختبار. الكتابة بـNone كانت ستكسر قيد العمود.
     """
     from django.utils import timezone as _tz
 
     from apps.contractors.models import ContractorCurrentLocation
+
+    if coords is None or coords[0] is None or coords[1] is None:
+        return None
 
     return ContractorCurrentLocation.objects.update_or_create(
         contractor=profile,

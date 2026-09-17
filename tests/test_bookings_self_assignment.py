@@ -206,11 +206,21 @@ def _force_offer(booking, profile):
     يحاكي عرضًا أُنشئ قبل تطبيق القاعدة، أو صفًّا أُدخل مباشرةً — وهو
     بالضبط ما تحرسه الطبقة الثانية.
     """
+    # 📌 لقطة التسعير مجمَّدة على العرض (§10) — بدونها يُرفض القبول.
+    total = Decimal("217.00")
+    if booking.max_total is None:
+        booking.max_total = total
+        booking.save(update_fields=["max_total"])
+
     return DispatchOffer.objects.create(
         booking=booking,
         contractor=profile,
         status=DispatchOfferStatus.PENDING,
         distance_km=Decimal("1.000"),
+        total_amount=total,
+        contractor_earnings=total,
+        services_total=Decimal("215.00"),
+        travel_fee=Decimal("2.00"),
         expires_at=timezone.now() + datetime.timedelta(minutes=OFFER_TTL_MINUTES),
     )
 
@@ -260,16 +270,18 @@ def test_api_returns_403_with_a_named_code(client, dual_user, service):
 
 @pytest.mark.django_db
 def test_another_contractor_can_still_accept_normally(
-    client, dual_user, other_contractor, service
+    client, dual_user, other_contractor, service, django_capture_on_commit_callbacks
 ):
     """⚠️ الحارس لا يعطّل المسار السليم."""
     other = make_eligible_contractor(other_contractor)
     booking = make_booking(dual_user, service)
     offer = _force_offer(booking, other)
 
-    r = client.post(
-        f"/api/contractor/offers/{offer.id}/accept", **auth(other_contractor)
-    )
+    # القبول يبدأ الشحن، والشحن الناجح يُسنِد — كلاهما بعد الـcommit.
+    with django_capture_on_commit_callbacks(execute=True):
+        r = client.post(
+            f"/api/contractor/offers/{offer.id}/accept", **auth(other_contractor)
+        )
 
     assert r.status_code == 200, r.content
     booking.refresh_from_db()

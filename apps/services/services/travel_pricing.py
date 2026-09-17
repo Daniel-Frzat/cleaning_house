@@ -116,11 +116,19 @@ def calculate_final_total(services_total, distance_km, config=None):
     الإجمالي النهائي = مجموع الخدمات + رسم المسافة، مقرَّبًا مرة واحدة.
 
     services_total يصل جاهزًا (مجمَّدًا من الاقتباس عادةً) ولا يُشتق هنا.
+
+    ⚠️ يعيد (total, travel_fee) — والرسم المُعاد **مقرَّب للسنت للتخزين
+       وحده**. الجمع يستعمل القيمة الكاملة الدقة قبل التقريب: المسافة
+       بثلاث منازل، فحاصل ضربها في سعر الكيلومتر قد يحمل منازل أكثر،
+       وتقريبه قبل الجمع تقريبٌ مزدوج يُدخل انحرافًا.
     """
     config = config or get_active_config()
 
     travel_fee = calculate_travel_fee(distance_km, config)
     total = apply_rounding(services_total + travel_fee, config)
+
+    # للتخزين في عمود بمنزلتين — لا يدخل أي حساب بعد هذه النقطة.
+    travel_fee = travel_fee.quantize(CENT, rounding=ROUND_HALF_UP)
 
     logger.info(
         "Final total calculated (services=%s, travel_fee=%s, distance_km=%s, "

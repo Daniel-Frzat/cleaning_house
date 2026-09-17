@@ -194,14 +194,24 @@ def test_job_auto_created_when_booking_confirmed(
     # قبل القبول: لا مهمة
     assert Job.objects.filter(booking=booking).count() == 0
 
+    # 📌 لقطة التسعير مجمَّدة على العرض (§10) — الشحن يقرأ المبلغ منها.
+    frozen_total = Decimal("217.22")
+    booking.max_total = frozen_total
+    booking.save(update_fields=["max_total"])
+
     offer = DispatchOffer.objects.create(
         booking=booking, contractor=profile, status=DispatchOfferStatus.PENDING,
         distance_km=Decimal("1.112"),
+        total_amount=frozen_total,
+        contractor_earnings=frozen_total,
+        services_total=Decimal("215.00"),
+        travel_fee=Decimal("2.22"),
         expires_at=timezone.now() + timedelta(minutes=60),
     )
 
     from apps.bookings.services import offers as osvc
 
+    # ⚠️ المهمة تُنشأ بعد **نجاح الدفع** لا عند القبول (§12، §14).
     with django_capture_on_commit_callbacks(execute=True):
         osvc.accept_offer(contractor_user, offer.id)
 

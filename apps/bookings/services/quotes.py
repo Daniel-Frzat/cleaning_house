@@ -29,7 +29,6 @@ from apps.services.services import travel_pricing
 from ..models import QUOTE_TTL_MINUTES, BookingQuote
 from .bookings import (
     BookingError,
-    BookingPermissionError,
     EmptySelectionError,
     InactiveServiceError,
     InvalidRoomCountError,
