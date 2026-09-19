@@ -136,9 +136,10 @@ NINJA_JWT = {
 # ------------------------------------------------------------
 # Provider Adapters
 # ------------------------------------------------------------
-# SMS Gateway Provider ما زال قرارًا مفتوحًا (🟢 غير معطِّل).
-# الافتراضي هنا adapter تطويري يطبع الرمز في الـconsole فقط.
-# عند حسم الـProvider: يُستبدل هذا المسار فقط — دون تعديل كود الـDomain.
+# مزوّد SMS: ClickSend متاح الآن كتنفيذ فعلي، والافتراضي يبقى الـadapter
+# التطويري الذي يطبع الرمز في الـconsole. التبديل بمتغيّر بيئة وحده:
+#   SMS_ADAPTER=adapters.sms.clicksend.ClickSendAdapter
+# لا تعديل كود في طبقة الـDomain عند التبديل.
 SMS_ADAPTER = config(
     "SMS_ADAPTER",
     default="adapters.sms.dev_console.DevConsoleSMSAdapter",
@@ -147,6 +148,15 @@ SMS_ADAPTER = config(
 # صمّام أمان: DevConsoleSMSAdapter يرفض العمل عند DEBUG=False إلا إذا
 # فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
 SMS_DEV_ALLOW_INSECURE = config("SMS_DEV_ALLOW_INSECURE", default=False, cast=bool)
+
+# --- ClickSend (يُقرأ فقط عندما يكون SMS_ADAPTER هو ClickSendAdapter) ---
+# 🔒 لا قيمة حقيقية هنا إطلاقًا: الاعتماد يأتي من البيئة، والافتراضي فارغ.
+#    ClickSendAdapter يسقط بـImproperlyConfigured إن بقي أيٌّ منها فارغًا،
+#    فلا إرسال باعتماد فارغ ولا فشل صامت.
+# ⚠️ Sender ID لا يُختار هنا — أيًّا كانت القيمة فهي قرار تشغيلي خارجي.
+CLICKSEND_USERNAME = config("CLICKSEND_USERNAME", default="")
+CLICKSEND_API_KEY = config("CLICKSEND_API_KEY", default="")
+CLICKSEND_SENDER_ID = config("CLICKSEND_SENDER_ID", default="")
 
 # ------------------------------------------------------------
 # Social Auth (Sign in with Apple / Google — Phase 1)
