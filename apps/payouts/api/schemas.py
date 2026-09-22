@@ -19,7 +19,7 @@ API Schemas — Payout Domain (Change Set §36.5)
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -60,3 +60,24 @@ class ErrorOut(Schema):
 
     code: str
     detail: str
+
+
+class EarningsItemOut(Schema):
+    payout_id: uuid.UUID
+    booking_id: uuid.UUID
+    public_reference: str
+    service_summary: list[str]
+    completed_at: Optional[datetime] = None
+    amount: Decimal
+    currency: str = "AUD"
+    status: str
+
+
+class EarningsOut(Schema):
+    from_date: date
+    to_date: date
+    total: Decimal
+    paid_total: Decimal
+    processing_total: Decimal
+    completed_jobs: int
+    items: list[EarningsItemOut]

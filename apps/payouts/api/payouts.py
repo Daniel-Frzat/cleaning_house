@@ -21,6 +21,7 @@ Payouts API — Payout Domain (Change Set §36.5)
 """
 
 import uuid
+from datetime import date, timedelta
 
 from typing import Union
 
@@ -30,9 +31,10 @@ from ninja_jwt.authentication import JWTAuth
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import payouts as svc
-from .schemas import ErrorOut, PayoutAdminOut, PayoutOut
+from .schemas import EarningsOut, ErrorOut, PayoutAdminOut, PayoutOut
 
 router = Router(tags=["Payouts"], auth=JWTAuth())
+earnings_router = Router(tags=["Payouts"], auth=JWTAuth())
 
 
 def _error(status, code, detail):
@@ -112,3 +114,44 @@ def retrieve_payout(request, booking_id: uuid.UUID):
 
     is_admin = request.user.has_admin_access()
     return 200, _serialize(payout, as_admin=is_admin)
+
+
+@earnings_router.get(
+    "/contractor/earnings",
+    response={200: EarningsOut, 400: ErrorOut, 403: ErrorOut},
+    summary="List contractor earnings for a date range",
+)
+def retrieve_earnings(
+    request,
+    from_date: date | None = None,
+    to_date: date | None = None,
+):
+    end = to_date or date.today()
+    start = from_date or (end - timedelta(days=6))
+    if start > end:
+        return _error(400, "invalid_date_range", "from_date must be before to_date.")
+
+    try:
+        result = svc.list_earnings(request.user, start, end)
+    except svc.PayoutPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+
+    result["items"] = [
+        {
+            "payout_id": payout.id,
+            "booking_id": payout.booking_id,
+            "public_reference": payout.booking.public_reference,
+            "service_summary": [
+                selection.service_type.name
+                for selection in payout.booking.service_selections.all()
+            ],
+            "completed_at": getattr(payout.booking, "job", None).confirmed_at
+            if getattr(payout.booking, "job", None)
+            else None,
+            "amount": payout.amount,
+            "currency": payout.booking.currency,
+            "status": payout.status,
+        }
+        for payout in result["items"]
+    ]
+    return 200, result

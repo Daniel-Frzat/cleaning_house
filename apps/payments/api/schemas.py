@@ -43,6 +43,13 @@ class PaymentOut(Schema):
     updated_at: datetime
 
 
+class PaymentActionOut(PaymentOut):
+    """Customer-safe result for retry or 3-D Secure confirmation."""
+
+    attempt_number: int
+    action_payload: Optional[dict] = None
+
+
 class PaymentAdminOut(PaymentOut):
     """
     شكل الإدارة — يضيف المرجع التشخيصي وحده.

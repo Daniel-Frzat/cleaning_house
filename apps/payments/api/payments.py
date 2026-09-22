@@ -29,7 +29,7 @@ from ninja_jwt.authentication import JWTAuth
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import payments as svc
-from .schemas import ErrorOut, PaymentAdminOut, PaymentOut
+from .schemas import ErrorOut, PaymentActionOut, PaymentAdminOut, PaymentOut
 
 router = Router(tags=["Payments"], auth=JWTAuth())
 
@@ -67,6 +67,68 @@ def _serialize(payment, *, as_admin):
         )
 
     return PaymentOut(**common)
+
+
+def _serialize_action(payment):
+    return PaymentActionOut(
+        id=payment.id,
+        booking_id=payment.booking_id,
+        amount=payment.amount,
+        method=payment.method,
+        status=payment.status,
+        failure_reason=payment.failure_reason,
+        created_at=payment.created_at,
+        updated_at=payment.updated_at,
+        attempt_number=payment.attempt_number,
+        action_payload=payment.action_payload,
+    )
+
+
+@router.post(
+    "/payments/{payment_id}/retry",
+    response={200: PaymentActionOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
+    summary="Retry a failed payment (booking owner only)",
+    description=(
+        "Retries a FAILED or REQUIRES_ACTION payment using the frozen booking "
+        "amount. The optional payment method reference is an opaque provider "
+        "token; raw card data is never accepted or stored."
+    ),
+)
+def retry_payment(request, payment_id: uuid.UUID, payment_method_reference: str = ""):
+    try:
+        payment = svc.retry_payment(
+            request.user,
+            payment_id,
+            payment_method_reference=payment_method_reference or None,
+        )
+    except svc.PaymentNotFoundError as exc:
+        return _not_found()
+    except svc.PaymentNotRetryableError as exc:
+        return _error(409, exc.code, str(exc))
+    except svc.OfferNoLongerReservedError as exc:
+        return _error(409, exc.code, str(exc))
+    except svc.PaymentError as exc:
+        return _error(422, exc.code, str(exc))
+
+    return 200, _serialize_action(payment)
+
+
+@router.post(
+    "/payments/{payment_id}/confirm-action",
+    response={200: PaymentActionOut, 404: ErrorOut, 409: ErrorOut, 501: ErrorOut},
+    summary="Confirm a payment authentication action (booking owner only)",
+)
+def confirm_payment_action(request, payment_id: uuid.UUID):
+    try:
+        payment = svc.confirm_payment_action(request.user, payment_id)
+    except svc.PaymentNotFoundError:
+        return _not_found()
+    except svc.PaymentActionNotAvailableError as exc:
+        return _error(409, exc.code, str(exc))
+    except NotImplementedError as exc:
+        return _error(501, "payment_action_not_supported", str(exc))
+
+    return 200, _serialize_action(payment)
 
 
 @router.get(

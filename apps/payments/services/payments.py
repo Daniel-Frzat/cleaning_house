@@ -106,6 +106,10 @@ class OfferNoLongerReservedError(PaymentError):
     code = "offer_no_longer_reserved"
 
 
+class PaymentActionNotAvailableError(PaymentError):
+    code = "payment_action_not_available"
+
+
 def _accepted_offer(booking):
     """العرض الذي يحجز هذا الحجز حاليًا، أو None."""
     return booking.dispatch_offers.filter(
@@ -370,6 +374,57 @@ def retry_payment(user, payment_id, payment_method_reference=None):
     payment.save(update_fields=["attempt_number", "status", "amount", "updated_at"])
 
     return _attempt_charge(payment, booking)
+
+
+@transaction.atomic
+def confirm_payment_action(user, payment_id):
+    """Confirm a provider action after the customer completes 3-D Secure."""
+    payment = (
+        Payment.objects.select_for_update()
+        .select_related("booking")
+        .filter(pk=payment_id)
+        .first()
+    )
+    if payment is None or payment.booking.customer_id != user.id:
+        raise PaymentNotFoundError("Payment not found.")
+
+    if payment.status != PaymentStatus.REQUIRES_ACTION:
+        raise PaymentActionNotAvailableError(
+            f"Payment is {payment.status} and does not require customer action."
+        )
+    if not payment.provider_reference:
+        raise PaymentActionNotAvailableError("Payment has no provider action reference.")
+
+    result = get_payment_adapter().confirm(payment.provider_reference)
+    payment.provider_error_code = result.error_code or ""
+    payment.provider_reference = result.provider_reference or payment.provider_reference
+    payment.method_summary = result.method_summary or payment.method_summary
+
+    if result.success:
+        payment.status = PaymentStatus.SUCCEEDED
+        payment.failure_reason = None
+        payment.action_payload = None
+    elif result.requires_action:
+        payment.action_payload = result.action_payload
+    else:
+        payment.status = PaymentStatus.FAILED
+        payment.failure_reason = result.failure_reason
+        payment.action_payload = None
+
+    payment.save(
+        update_fields=[
+            "status",
+            "provider_reference",
+            "provider_error_code",
+            "method_summary",
+            "failure_reason",
+            "action_payload",
+            "updated_at",
+        ]
+    )
+    if payment.status == PaymentStatus.SUCCEEDED:
+        transaction.on_commit(lambda: confirm_payment(payment.id), robust=True)
+    return payment
 
 
 def get_payment_by_booking_id(user, booking_id):

@@ -51,6 +51,21 @@ class JobOut(Schema):
     created_at: datetime
 
 
+class ContractorJobOut(JobOut):
+   """Contractor-facing job summary for the jobs tab and resume flow."""
+
+   public_reference: str
+   service_summary: list[str]
+   property_summary: Optional[str] = None
+   scheduled_at_local: Optional[datetime] = None
+   earnings: Optional[Decimal] = None
+   payout_status: Optional[str] = None
+
+
+class ContractorJobsQuery(Schema):
+   status: Optional[str] = None
+
+
 class ErrorOut(Schema):
     """نفس شكل الخطأ المستخدم في بقية النطاقات."""
 

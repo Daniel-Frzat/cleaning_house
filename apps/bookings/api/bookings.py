@@ -197,6 +197,21 @@ def create_booking(request, payload: BookingIn):
     """
     selections = [s.dict() for s in payload.service_selections]
 
+    quote = None
+    if payload.quote_id is not None:
+        from ..services import quotes as quotes_svc
+
+        try:
+            quote = quotes_svc.get_usable_quote(
+                request.user, payload.quote_id, property_id=payload.property_id
+            )
+        except quotes_svc.QuoteNotFoundError as exc:
+            return _error(404, exc.code, str(exc))
+        except (quotes_svc.QuoteExpiredError, quotes_svc.QuoteAlreadyUsedError) as exc:
+            return _error(409, exc.code, str(exc))
+        except quotes_svc.QuoteError as exc:
+            return _error(400, exc.code, str(exc))
+
     try:
         booking = svc.create_booking(
             request.user,
@@ -205,6 +220,8 @@ def create_booking(request, payload: BookingIn):
             scheduled_at=payload.scheduled_at,
             # 📌 من العميل مباشرةً — لا يُشتق ولا يُورَّث من حجز سابق
             access_notes=payload.access_notes,
+            quote=quote,
+            payment_method_reference=payload.payment_method_reference,
         )
     except scheduling_svc.SchedulingError as exc:
         # 400: موعد ماضٍ أو خارج ساعات العمل — نفس رتبة بقية قواعد العمل

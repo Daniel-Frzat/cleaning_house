@@ -34,27 +34,32 @@ class ServiceSelectionIn(Schema):
 
 
 class BookingIn(Schema):
-    """
-    إنشاء حجز.
-
-    ⚠️ status غير موجود عمدًا: كل حجز جديد يبدأ PENDING.
-    ⚠️ computed_price و assigned_contractor غير موجودين — لا يُقبلان من
-       العميل ولا يُضبطان في هذه المرحلة.
-
-    📌 scheduled_at إلزامي هنا (ISO 8601). بلا إزاحة توقيت يُفسَّر بتوقيت
-       المنطقة المحسوبة من عنوان العقار؛ وبإزاحة صريحة يُحترم كما وصل.
-       الطرفان يُخزَّنان UTC.
-    ⚠️ customer_timezone غير موجود: يُشتق من العنوان ولا يُقبل من العميل.
-    """
+    """Create a booking from an optional frozen quote."""
 
     property_id: uuid.UUID
-    # القائمة الفارغة تُرفض في طبقة الخدمة برسالة مفهومة (400)
-    service_selections: list[ServiceSelectionIn]
+    service_selections: list[ServiceSelectionIn] = Field(default_factory=list)
     scheduled_at: datetime
-    # 📌 اختياري ويكتبه العميل بنفسه: "المفتاح تحت السجادة"، "الكلب في
-    #    الحديقة". أغلب الحجوزات تتركه فارغًا.
-    # 🔒 لا يُعاد إلا للمقاول المُسنَد — راجع BookingOut أدناه.
     access_notes: str = Field("", max_length=ACCESS_NOTES_MAX_LENGTH)
+    quote_id: Optional[uuid.UUID] = None
+    payment_method_reference: str = Field("", max_length=255)
+
+
+class QuoteIn(Schema):
+   """Create a frozen maximum-price quote for one property."""
+
+   property_id: uuid.UUID
+   service_selections: list[ServiceSelectionIn]
+
+
+class QuoteOut(Schema):
+   id: uuid.UUID
+   property_id: uuid.UUID
+   maximum_total: Decimal
+   services_total: Decimal
+   currency: str
+   pricing_version: int
+   expires_at: datetime
+   created_at: datetime
 
 
 class BookingRescheduleIn(Schema):
@@ -177,22 +182,22 @@ class ErrorOut(Schema):
 
 
 class OfferOut(Schema):
-    """
-    عرض إسناد.
+   """Dispatch offer data safe for the addressed contractor."""
 
-    ⚠️ بلا أي حقل سعر: العرض لا يحمل سعرًا، والسعر يعيش على الحجز بعد
-       القبول وحده (§36.1). distance_km ليست سعرًا — هي الأساس المخزَّن
-       الذي سيُحسب عليه السعر إن قُبل العرض.
-    """
-
-    id: uuid.UUID
-    booking_id: uuid.UUID
-    contractor_id: uuid.UUID
-    status: str
-    distance_km: Optional[Decimal] = None
-    offered_at: datetime
-    responded_at: Optional[datetime] = None
-    expires_at: datetime
+   id: uuid.UUID
+   booking_id: uuid.UUID
+   contractor_id: uuid.UUID
+   status: str
+   distance_km: Optional[Decimal] = None
+   offered_at: datetime
+   responded_at: Optional[datetime] = None
+   expires_at: datetime
+   total_amount: Optional[Decimal] = None
+   contractor_earnings: Optional[Decimal] = None
+   currency: str = "AUD"
+   eta_seconds: Optional[int] = None
+   service_summary: list[str] = Field(default_factory=list)
+   property_summary: Optional[str] = None
 
 
 class OfferResponseOut(Schema):

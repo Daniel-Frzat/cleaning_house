@@ -30,11 +30,19 @@ from ninja import File, Router, UploadedFile
 from ninja_jwt.authentication import JWTAuth
 
 from apps.accounts.roles import ConfirmedRole
+from apps.bookings.services.scheduling import to_local as to_local_scheduled_at
 
 from ..services import jobs as jobs_svc
 from ..services import photos as photos_svc
 from ..services import tracking as tracking_svc
-from .schemas import ErrorOut, JobLocationIn, JobOut, JobPhotoOut, JobTrackingOut
+from .schemas import (
+    ContractorJobOut,
+    ErrorOut,
+    JobLocationIn,
+    JobOut,
+    JobPhotoOut,
+    JobTrackingOut,
+)
 
 # ------------------------------------------------------------
 # Router للمقاول (يُركَّب على /contractor)
@@ -140,6 +148,47 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
         ],
         "created_at": job.created_at,
     }
+
+
+def _serialize_contractor_job(job):
+    address = getattr(job.booking.property, "address", None)
+    property_summary = None
+    if address is not None:
+        property_summary = f"{address.street_address}, {address.suburb}, {address.state}"
+
+    payout = getattr(job.booking, "payout", None)
+    return {
+        **_serialize_job(
+            job,
+            photos_svc.list_photos_with_urls(job),
+            include_storage_key=False,
+            include_access_notes=True,
+        ),
+        "public_reference": job.booking.public_reference,
+        "service_summary": [
+            selection.service_type.name
+            for selection in job.booking.service_selections.all()
+        ],
+        "property_summary": property_summary,
+        "scheduled_at_local": to_local_scheduled_at(
+            job.booking.scheduled_at, job.booking.customer_timezone
+        ),
+        "earnings": job.booking.computed_price,
+        "payout_status": payout.status if payout is not None else None,
+    }
+
+
+@contractor_router.get(
+    "/jobs",
+    response={200: list[ContractorJobOut], 403: ErrorOut},
+    summary="List assigned contractor jobs",
+)
+def list_contractor_jobs(request, status: str | None = None):
+    try:
+        jobs = jobs_svc.list_jobs_for_contractor(request.user, status=status)
+    except jobs_svc.JobPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    return 200, [_serialize_contractor_job(job) for job in jobs]
 
 
 # ------------------------------------------------------------

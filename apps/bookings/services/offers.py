@@ -104,6 +104,25 @@ def get_offer_for_contractor(user, offer_id):
     return offer
 
 
+def list_offers_for_contractor(user):
+    """Return current actionable offers for the authenticated contractor."""
+    assert_is_contractor(user)
+
+    profile = getattr(user, "contractor_profile", None)
+    if profile is None:
+        return DispatchOffer.objects.none()
+
+    return (
+        DispatchOffer.objects.filter(
+            contractor=profile,
+            status=DispatchOfferStatus.PENDING,
+        )
+        .select_related("booking", "booking__property", "booking__property__address")
+        .prefetch_related("booking__service_selections__service_type")
+        .order_by("expires_at", "-offered_at")
+    )
+
+
 def assert_not_own_booking(user, offer, *, action):
     """
     🔒 لا يردّ المستخدم على عرض يخص حجزه هو — قبولًا كان أو رفضًا.

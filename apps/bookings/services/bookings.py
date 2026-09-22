@@ -142,7 +142,7 @@ def _validate_room_count(raw_count, service_type_id):
     return raw_count
 
 
-def _resolve_selections(service_selections):
+def _resolve_selections(service_selections, *, allow_inactive=False):
     """
     يحوّل المدخل الخام إلى [(ServiceType, room_count)] بعد التحقق.
 
@@ -178,7 +178,7 @@ def _resolve_selections(service_selections):
         if service is None:
             raise UnknownServiceError(f"Service type {service_type_id} not found.")
 
-        if not service.is_active:
+        if not service.is_active and not allow_inactive:
             # 🔒 لا حجز لخدمة مسحوبة من التداول
             logger.warning(
                 "Booking attempted for inactive service (service_id=%s)", service.id
@@ -197,7 +197,13 @@ def _resolve_selections(service_selections):
 # ------------------------------------------------------------
 @transaction.atomic
 def create_booking(
-    user, property_id, service_selections, scheduled_at=None, access_notes=""
+    user,
+    property_id,
+    service_selections,
+    scheduled_at=None,
+    access_notes="",
+    quote=None,
+    payment_method_reference="",
 ):
     """
     ينشئ حجزًا بحالة PENDING مع أسطر خدماته.
@@ -226,8 +232,21 @@ def create_booking(
     # يرفع PropertyPermissionError / PropertyNotFoundError عند الفشل
     prop = properties_svc.get_property(user, property_id)
 
-    # كل التحقق قبل أي كتابة
-    resolved = _resolve_selections(service_selections)
+    # All validation precedes writes. A quote owns the frozen selection snapshot;
+    # inactive services remain usable because the customer already approved it.
+    if quote is not None:
+        if quote.customer_id != user.id or quote.property_id != prop.id:
+            raise BookingError("This quote does not belong to this property.")
+        service_selections = [
+            {
+                "service_type_id": entry["service_type_id"],
+                "room_count": entry["room_count"],
+            }
+            for entry in quote.service_snapshot
+        ]
+        resolved = _resolve_selections(service_selections, allow_inactive=True)
+    else:
+        resolved = _resolve_selections(service_selections)
 
     address = getattr(prop, "address", None)
     customer_timezone = get_timezone_for_state(getattr(address, "state", ""))
@@ -247,6 +266,11 @@ def create_booking(
         customer_timezone=customer_timezone,
         # نصّ العميل كما كتبه — التشذيب فقط، بلا أي تفسير
         access_notes=(access_notes or "").strip(),
+        quote=quote,
+        max_total=quote.maximum_total if quote is not None else None,
+        pricing_version=quote.pricing_version if quote is not None else None,
+        currency=quote.currency if quote is not None else "AUD",
+        payment_method_reference=(payment_method_reference or "").strip(),
     )
     # full_clean يفرض حدّ الطول (ACCESS_NOTES_MAX_LENGTH) ويرفع 422
     booking.full_clean()

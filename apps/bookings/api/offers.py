@@ -31,10 +31,11 @@ def _error(status, code, detail):
 
 
 def _serialize_offer(offer):
-    """
-    ⚠️ لا يكشف سعرًا: العرض لا يحمل سعرًا أصلًا، والسعر يعيش على الحجز
-       بعد القبول وحده.
-    """
+    address = getattr(offer.booking.property, "address", None)
+    property_summary = None
+    if address is not None:
+        property_summary = f"{address.suburb}, {address.state} {address.postcode}"
+
     return {
         "id": offer.id,
         "booking_id": offer.booking_id,
@@ -44,6 +45,15 @@ def _serialize_offer(offer):
         "offered_at": offer.offered_at,
         "responded_at": offer.responded_at,
         "expires_at": offer.expires_at,
+        "total_amount": offer.total_amount,
+        "contractor_earnings": offer.contractor_earnings,
+        "currency": offer.currency,
+        "eta_seconds": offer.eta_seconds,
+        "service_summary": [
+            selection.service_type.name
+            for selection in offer.booking.service_selections.all()
+        ],
+        "property_summary": property_summary,
     }
 
 
@@ -65,6 +75,28 @@ def _handle_offer_errors(exc):
     return None
 
 
+@router.get(
+    "/offers",
+    response={200: list[OfferOut], 403: ErrorOut},
+    summary="List actionable dispatch offers (contractor only)",
+    description=(
+        "Returns pending offers addressed to the authenticated contractor, "
+        "ordered by expiry. The response includes the frozen total, contractor "
+        "earnings, service names, distance and optional ETA. Customer access "
+        "notes and contact details are never included before acceptance."
+    ),
+)
+def list_offers(request):
+    try:
+        offers = svc.list_offers_for_contractor(request.user)
+    except svc.InvalidContractorRoleError as exc:
+        return _error(403, exc.code, str(exc))
+    except svc.OfferPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+
+    return 200, [_serialize_offer(offer) for offer in offers]
+
+
 # ------------------------------------------------------------
 # POST /contractor/offers/{id}/accept
 # ------------------------------------------------------------
@@ -83,7 +115,8 @@ def _handle_offer_errors(exc):
         "2. The booking moves to `CONFIRMED`, the contractor is assigned, and the "
         "price becomes visible to the customer — this is the first moment it is.\n"
         "3. The customer is charged directly (there is no escrow).\n"
-        "4. The job is created and starts `IN_PROGRESS`.\n\n"
+        "4. The job is created as `ASSIGNED`; the contractor starts it explicitly "
+        "with `POST /api/contractor/jobs/{id}/start`.\n\n"
         "The distance used for pricing is the one recorded on **this offer**, not "
         "a freshly measured one, so moving the contractor's profile between offer "
         "and acceptance does not change the price.\n\n"
