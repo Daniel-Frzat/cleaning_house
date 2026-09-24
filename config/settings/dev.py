@@ -3,6 +3,7 @@
 from .base import *  # noqa
 
 DEBUG = True
+OTP_ACCEPT_ANY_CODE = True
 
 # ------------------------------------------------------------
 # Database — SQLite للتطوير المحلي فقط (Change Set — قسم 4B)

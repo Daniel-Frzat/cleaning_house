@@ -223,7 +223,9 @@ def verify(phone, code, purpose=OTPPurpose.LOGIN):
             outcome = ("max_attempts", otp)
 
         # 3) مقارنة ثابتة الزمن
-        elif not _verify_hash(code, phone, otp.code_hash):
+        elif not getattr(settings, "OTP_ACCEPT_ANY_CODE", False) and not _verify_hash(
+            code, phone, otp.code_hash
+        ):
             otp.attempts_count += 1
             if otp.attempts_exhausted():
                 # استُنفدت المحاولات بهذه المحاولة الخاطئة → قفل نهائي

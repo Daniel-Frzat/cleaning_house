@@ -227,6 +227,8 @@ OTP_EXPIRY_SECONDS = config("OTP_EXPIRY_SECONDS", default=300, cast=int)  # 5 د
 OTP_MAX_ATTEMPTS = config("OTP_MAX_ATTEMPTS", default=5, cast=int)
 OTP_RESEND_COOLDOWN_SECONDS = config("OTP_RESEND_COOLDOWN_SECONDS", default=60, cast=int)
 OTP_CODE_LENGTH = config("OTP_CODE_LENGTH", default=6, cast=int)
+# Accept any submitted OTP only in explicitly opted-in development environments.
+OTP_ACCEPT_ANY_CODE = config("OTP_ACCEPT_ANY_CODE", default=False, cast=bool)
 
 # ------------------------------------------------------------
 # Celery / Redis (Background Jobs infra only — no tasks with
