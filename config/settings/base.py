@@ -19,7 +19,8 @@ ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="", cast=lambda v: [s.strip() fo
 # Applications
 # ------------------------------------------------------------
 DJANGO_APPS = [
-    "django.contrib.admin",
+    # موقع إدارة مخصّص بدخول على خطوتين (كلمة سر + رمز SMS) — config/admin_site.py
+    "config.admin_apps.CleaningHouseAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -85,7 +86,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -115,6 +116,24 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # المعرّف الأساسي هو phone (OTP-based auth) — لا يوجد حقل username.
 # ------------------------------------------------------------
 AUTH_USER_MODEL = "accounts.User"
+
+# سياسة كلمات السر — تسري على كلمات سر الإدارة (العملاء بلا كلمات سر)
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+     "OPTIONS": {"user_attributes": ("phone", "email", "full_name")}},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+     "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# ------------------------------------------------------------
+# دخول الإدارة — بريد/هاتف + كلمة سر + رمز SMS (قرار PO — 2026-09-25)
+# ------------------------------------------------------------
+ADMIN_MAX_FAILED_LOGINS = config("ADMIN_MAX_FAILED_LOGINS", default=5, cast=int)
+ADMIN_LOCKOUT_MINUTES = config("ADMIN_LOCKOUT_MINUTES", default=15, cast=int)
+# الجهاز الذي اجتاز رمز SMS يُعفى منه هذه المدة (كلمة السر تبقى مطلوبة)
+ADMIN_TRUSTED_DEVICE_DAYS = config("ADMIN_TRUSTED_DEVICE_DAYS", default=30, cast=int)
 
 # ------------------------------------------------------------
 # Internationalization

@@ -27,6 +27,8 @@ from django.contrib import admin
 from django.urls import path
 from ninja import NinjaAPI
 
+from apps.accounts.api.admin_auth import accounts_router as admin_accounts_router
+from apps.accounts.api.admin_auth import router as admin_auth_router
 from apps.accounts.api.auth import router as auth_router
 from apps.accounts.authentication import AuthzError
 from apps.bookings.api.bookings import router as bookings_router
@@ -193,6 +195,9 @@ def _authz_error(request, exc):
 
 
 api.add_router("/auth/", auth_router)
+# دخول الإدارة بعاملين (كلمة سر + SMS) وإدارة حسابات الأدمن (Superuser).
+api.add_router("/admin/auth", admin_auth_router)
+api.add_router("/admin/admins", admin_accounts_router)
 api.add_router("/properties", properties_router)
 # كتالوج الخدمات والتسعير — ADMIN فقط (إنشاء/تعديل/تعطيل + سعر الكيلومتر).
 api.add_router("/admin", admin_catalog_router)

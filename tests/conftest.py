@@ -110,3 +110,12 @@ def pay_and_assign(booking):
     payments_svc.confirm_payment(payment.id)
     booking.refresh_from_db()
     return booking
+
+
+@pytest.fixture(autouse=True)
+def _fast_password_hasher(settings):
+    """
+    PBKDF2 بطيء عمدًا (مئات آلاف الدورات) — مناسب للإنتاج، ومكلف جدًا لمئات
+    الاختبارات التي تضبط كلمات سر. MD5 للاختبارات وحدها.
+    """
+    settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

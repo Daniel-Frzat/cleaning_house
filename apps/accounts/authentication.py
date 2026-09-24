@@ -22,7 +22,7 @@ from .models import UserStatus
 # المسارات المسموحة لحساب عليه must_change_password — تغيير كلمة السر
 # وقراءة الحساب فقط.
 PASSWORD_CHANGE_ALLOWED_PATHS = (
-    "/api/admin/auth/password",
+    "/api/admin/auth/",
     "/api/auth/me",
 )
 
@@ -48,7 +48,7 @@ class ActiveUserJWTAuth(JWTAuth):
     def authenticate(self, request, token):
         user = super().authenticate(request, token)
         if user is not None and user.must_change_password:
-            if not request.path.rstrip("/").startswith(PASSWORD_CHANGE_ALLOWED_PATHS):
+            if not request.path.startswith(PASSWORD_CHANGE_ALLOWED_PATHS):
                 raise AuthzError(
                     "password_change_required",
                     "Your password was reset. Change it before using the API.",

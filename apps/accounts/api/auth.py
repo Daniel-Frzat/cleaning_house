@@ -208,7 +208,7 @@ def request_otp(request, payload: OTPRequestIn):
     "/otp/verify",
     response={200: AuthOut, 400: ErrorOut, 403: ErrorOut, 429: ErrorOut},
     auth=None,
-    summary="Verify an OTP code and issue JWT",
+    summary="Verify an OTP code and issue JWT (customers and contractors)",
     description=(
         "**Who may call:** anyone — this endpoint is public and needs no token.\n\n"
         "**Preconditions:** a code must have been requested for this phone number "
@@ -250,6 +250,11 @@ def verify_otp(request, payload: OTPVerifyIn):
         user, _created = identity_service.get_or_create_user_by_phone(otp.phone)
     except identity_service.InactiveUserError as exc:
         return _error(403, exc.code, "This account is not active.")
+
+    # 🔒 رسالة SMS وحدها لا تكفي لصلاحيات الإدارة — الأدمن يدخل من
+    #    /api/admin/auth/login (كلمة سر + رمز).
+    if user.has_admin_access():
+        return _error(403, "admin_login_required", "Administrators must use the admin login.")
 
     return 200, _auth_response(user)
 
@@ -300,6 +305,10 @@ def social_login(request, provider: str, payload: SocialLoginIn):
         return _error(403, exc.code, "This account is not active.")
     except social_service.SocialLoginError as exc:
         return _error(400, exc.code, "Social login failed.")
+
+    # 🔒 نفس قاعدة OTP: لا دخول إدارة عبر مزوّد اجتماعي
+    if user.has_admin_access():
+        return _error(403, "admin_login_required", "Administrators must use the admin login.")
 
     return 200, _auth_response(user)
 

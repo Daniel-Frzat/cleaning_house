@@ -328,16 +328,24 @@ def test_otp_request_validates_payload(client):
 
 @pytest.mark.django_db
 def test_no_password_login_endpoint_exists(client):
-    """نموذج المصادقة المعتمد لا يشمل كلمة المرور."""
+    """
+    العملاء والمقاولون بلا كلمات سر (OTP + Apple + Google + JWT).
+
+    📌 الاستثناء الوحيد (قرار PO — 2026-09-25): دخول الإدارة بكلمة سر ثم رمز
+       SMS، تحت /admin/auth و /admin/admins وحدهما.
+    """
     from config.urls import api
 
+    admin_prefixes = ("/admin/auth", "/admin/admins")
     paths = []
     for prefix, router in api._routers:
         for p in router.path_operations:
             paths.append(f"{prefix.rstrip('/')}{p}")
 
+    customer_paths = [p for p in paths if not p.startswith(admin_prefixes)]
     for banned in ("password", "login/password", "token/pair"):
-        assert not any(banned in p for p in paths), f"unexpected endpoint containing {banned}"
+        assert not any(banned in p for p in customer_paths), f"unexpected endpoint containing {banned}"
+    assert not any("token/pair" in p for p in paths)
 
 
 @pytest.mark.django_db

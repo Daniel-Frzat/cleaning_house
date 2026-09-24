@@ -58,3 +58,5 @@ celerybeat.pid
 build/
 dist/
 *.egg
+# --- Claude Code agent worktrees ---
+.claude/worktrees/

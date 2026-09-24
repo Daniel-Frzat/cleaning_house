@@ -1,0 +1,54 @@
+{% extends "admin/login.html" %}
+{% load i18n %}
+
+{% block content %}
+{% if messages %}
+<ul class="messagelist">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if form.non_field_errors %}
+<p class="errornote">{% for error in form.non_field_errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</p>
+{% endif %}
+
+<div id="content-main">
+{% if step == "password" %}
+  <form method="post" id="login-form">{% csrf_token %}
+    <div class="form-row">
+      {{ form.identifier.errors }}
+      <label for="{{ form.identifier.id_for_label }}" class="required">{{ form.identifier.label }}:</label>
+      {{ form.identifier }}
+    </div>
+    <div class="form-row">
+      {{ form.password.errors }}
+      <label for="{{ form.password.id_for_label }}" class="required">{{ form.password.label }}:</label>
+      {{ form.password }}
+      <input type="hidden" name="next" value="{{ next }}">
+    </div>
+    <div class="submit-row">
+      <input type="submit" value="{% translate 'Continue' %}">
+    </div>
+  </form>
+{% else %}
+  <form method="post" id="login-form">{% csrf_token %}
+    <p>Enter the code we sent by SMS to your phone.</p>
+    <div class="form-row">
+      {{ form.code.errors }}
+      <label for="{{ form.code.id_for_label }}" class="required">{{ form.code.label }}:</label>
+      {{ form.code }}
+    </div>
+    <div class="form-row">
+      {{ form.remember_device }}
+      <label for="{{ form.remember_device.id_for_label }}" class="vCheckboxLabel">{{ form.remember_device.label }}</label>
+    </div>
+    <div class="submit-row">
+      <input type="submit" value="{% translate 'Log in' %}">
+    </div>
+  </form>
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="resend" value="1">
+    <p><button type="submit" class="button">Send a new code</button>
+       &nbsp;<a href="{% url 'admin:login' %}">Start again</a></p>
+  </form>
+{% endif %}
+</div>
+{% endblock %}
