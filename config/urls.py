@@ -29,10 +29,12 @@ from ninja import NinjaAPI
 
 from apps.accounts.api.auth import router as auth_router
 from apps.bookings.api.bookings import router as bookings_router
+from apps.bookings.api.quotes import router as booking_quotes_router
 from apps.bookings.api.offers import router as contractor_offers_router
 from apps.jobs.api.jobs import booking_router as jobs_booking_router
 from apps.jobs.api.jobs import contractor_router as jobs_contractor_router
 from apps.payments.api.payments import router as payments_router
+from apps.payouts.api.payouts import earnings_router as contractor_earnings_router
 from apps.payouts.api.payouts import router as payouts_router
 from apps.properties.api.properties import router as properties_router
 from apps.contractors.api.admin_contractors import router as admin_contractors_router
@@ -96,7 +98,8 @@ A booking is created as `PENDING` with **no price and no contractor**. Dispatch
 then offers it to the nearest available contractor. The price is calculated and
 frozen onto the booking **only when a contractor accepts an offer** — that is
 also the first moment the price is visible to the customer. Acceptance moves the
-booking to `CONFIRMED`, charges the customer directly, and starts the job.
+booking to `CONFIRMED`, charges the customer directly, and creates the job as
+`ASSIGNED`; the contractor starts it explicitly.
 The contractor marks the job done, the customer confirms it, and the contractor
 payout is released.
 
@@ -196,6 +199,7 @@ api.add_router("/contractor", contractor_profile_router)
 api.add_router("/admin", admin_contractors_router)
 # الحجوزات — CUSTOMER فقط. الرد بلا أي حقل سعر (§36.1).
 api.add_router("/bookings", bookings_router)
+api.add_router("/quotes", booking_quotes_router)
 # رد المقاول على عروض الإسناد — مسارات /offers/* لا تتعارض مع /profile*
 # في الـrouter الآخر المركّب على /contractor.
 api.add_router("/contractor", contractor_offers_router)
@@ -207,6 +211,7 @@ api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)
 # دفع المقاول — قراءة فقط (المقاول المستحِق أو الإدارة). لا مسار إطلاق يدوي.
 api.add_router("/bookings", payouts_router)
+api.add_router("", contractor_earnings_router)
 # الدعم — مسار مستقل تمامًا: متاح لأي دور مصادَق عليه، والصلاحية ملكية
 # لا دور. لا تعارض مع /bookings رغم أن الطلب قد يشير إلى حجز.
 api.add_router("/support-requests", support_router)

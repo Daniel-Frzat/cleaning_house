@@ -147,9 +147,10 @@ NINJA_JWT = {
 # ------------------------------------------------------------
 # Provider Adapters
 # ------------------------------------------------------------
-# SMS Gateway Provider ما زال قرارًا مفتوحًا (🟢 غير معطِّل).
-# الافتراضي هنا adapter تطويري يطبع الرمز في الـconsole فقط.
-# عند حسم الـProvider: يُستبدل هذا المسار فقط — دون تعديل كود الـDomain.
+# مزوّد SMS: ClickSend متاح الآن كتنفيذ فعلي، والافتراضي يبقى الـadapter
+# التطويري الذي يطبع الرمز في الـconsole. التبديل بمتغيّر بيئة وحده:
+#   SMS_ADAPTER=adapters.sms.clicksend.ClickSendAdapter
+# لا تعديل كود في طبقة الـDomain عند التبديل.
 SMS_ADAPTER = config(
     "SMS_ADAPTER",
     default="adapters.sms.dev_console.DevConsoleSMSAdapter",
@@ -158,6 +159,15 @@ SMS_ADAPTER = config(
 # صمّام أمان: DevConsoleSMSAdapter يرفض العمل عند DEBUG=False إلا إذا
 # فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
 SMS_DEV_ALLOW_INSECURE = config("SMS_DEV_ALLOW_INSECURE", default=False, cast=bool)
+
+# --- ClickSend (يُقرأ فقط عندما يكون SMS_ADAPTER هو ClickSendAdapter) ---
+# 🔒 لا قيمة حقيقية هنا إطلاقًا: الاعتماد يأتي من البيئة، والافتراضي فارغ.
+#    ClickSendAdapter يسقط بـImproperlyConfigured إن بقي أيٌّ منها فارغًا،
+#    فلا إرسال باعتماد فارغ ولا فشل صامت.
+# ⚠️ Sender ID لا يُختار هنا — أيًّا كانت القيمة فهي قرار تشغيلي خارجي.
+CLICKSEND_USERNAME = config("CLICKSEND_USERNAME", default="")
+CLICKSEND_API_KEY = config("CLICKSEND_API_KEY", default="")
+CLICKSEND_SENDER_ID = config("CLICKSEND_SENDER_ID", default="")
 
 # ------------------------------------------------------------
 # Social Auth (Sign in with Apple / Google — Phase 1)
@@ -224,6 +234,30 @@ PAYOUT_PROVIDER_ADAPTER_CLASS = config(
 # هذا الخيار صراحةً — نفس نمط PAYMENTS_ALLOW_FAKE_ADAPTER.
 PAYOUTS_ALLOW_FAKE_ADAPTER = config(
     "PAYOUTS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
+)
+
+# ------------------------------------------------------------
+# Directions Provider (§9 — route distance and ETA)
+# ------------------------------------------------------------
+# 🔴 مزوّد الاتجاهات (Google Directions / Mapbox) قرار مفتوح. haversine
+#    يعطي مسافة خط مستقيم فقط — لا مسار شوارع ولا زمن وصول.
+DIRECTIONS_PROVIDER_ADAPTER_CLASS = config(
+    "DIRECTIONS_PROVIDER_ADAPTER_CLASS",
+    default="adapters.directions.fake.FakeDirectionsAdapter",
+)
+
+# صمّام أمان: FakeDirectionsAdapter يشتق الـETA من سرعة مفترضة، فيرفض
+# العمل عند DEBUG=False إلا إذا فُعّل هذا الخيار صراحةً.
+DIRECTIONS_ALLOW_FAKE_ADAPTER = config(
+    "DIRECTIONS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
+)
+
+# ⚠️ الارتداد إلى haversine حين يتعذّر المسار (§9).
+#    القرار صريح لا صامت: العرض يخزّن distance_source، فيظهر في تدقيق
+#    الإدارة بأي أساس حُسب السعر. الافتراضي False — الإنتاج لا يرتدّ
+#    ضمنيًا إلى مسافة خط مستقيم دون سياسة معلنة.
+DISPATCH_ALLOW_HAVERSINE_FALLBACK = config(
+    "DISPATCH_ALLOW_HAVERSINE_FALLBACK", default=False, cast=bool
 )
 
 # ------------------------------------------------------------

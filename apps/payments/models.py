@@ -36,14 +36,39 @@ class PaymentMethod(models.TextChoices):
 
 class PaymentStatus(models.TextChoices):
     """
-    حالة الشحن المباشر (§36.4).
+    حالة الشحن المباشر (§36.4، §13).
 
-    ⚠️ ثلاث حالات فقط. لا حالات تفويض/حجز — راجع docstring الملف.
+    ⚠️ لا حالات تفويض/حجز (HELD، AUTHORIZED، CAPTURED): الـescrow مسحوب
+       من التصميم، وإضافتها تُحيي نموذجًا مُلغى — راجع docstring الملف.
+
+    NOT_CHARGED     : لم يقبل مقاول بعد، فلا محاولة شحن.
+    PROCESSING      : محاولة الشحن جارية لدى المزوّد.
+    REQUIRES_ACTION : البنك يطلب مصادقة العميل (3-D Secure).
+    SUCCEEDED       : تأكد الشحن.
+    FAILED          : فشلت آخر محاولة.
+    REFUNDED        : استُرد المبلغ فعليًا.
+
+    ⚠️ REFUNDED معرَّفة ولا يصل إليها أي مسار اليوم: الاسترداد عملية
+       حقيقية لدى المزوّد وسياسته غير محسومة. لا تُستعمل لتلوين حالة
+       بلا استرداد فعلي (§13).
+
+    📌 PENDING مُبقاة للتوافق مع الصفوف القائمة وحدها — المسارات الجديدة
+       تبدأ NOT_CHARGED. حذفها كان سيكسر حجوزات مسجَّلة.
     """
 
-    PENDING = "PENDING", "Pending"
+    NOT_CHARGED = "NOT_CHARGED", "Not charged"
+    PENDING = "PENDING", "Pending (legacy)"
+    PROCESSING = "PROCESSING", "Processing"
+    REQUIRES_ACTION = "REQUIRES_ACTION", "Requires customer authentication"
     SUCCEEDED = "SUCCEEDED", "Succeeded"
     FAILED = "FAILED", "Failed"
+    REFUNDED = "REFUNDED", "Refunded"
+
+
+# الحالات التي يجوز إعادة المحاولة منها (§16).
+RETRYABLE_PAYMENT_STATUSES = frozenset(
+    {PaymentStatus.FAILED, PaymentStatus.REQUIRES_ACTION}
+)
 
 
 class Payment(models.Model):
@@ -88,8 +113,31 @@ class Payment(models.Model):
     # 🔒 مبهم: يُخزَّن ولا يُفسَّر. ولا يُكشف للعميل (تفصيل تشخيصي داخلي).
     provider_reference = models.TextField(null=True, blank=True)
 
-    # يُملأ عند الفشل فقط
+    # يُملأ عند الفشل فقط — رسالة مقروءة للإدارة لا للعميل.
     failure_reason = models.TextField(null=True, blank=True)
+
+    # 🔒 رمز خطأ المزوّد الخام — للتشخيص الإداري وحده، لا يُكشف للعميل:
+    #    تفاصيل الرفض البنكي قد تساعد على تخمين بيانات البطاقة (§15).
+    provider_error_code = models.CharField(max_length=64, blank=True, default="")
+
+    # ------------------------------------------------------------
+    # المحاولات (§16)
+    # ------------------------------------------------------------
+    # 📌 يُرقَّم مع كل محاولة جديدة، ويدخل في مفتاح التكرار. المفتاح
+    #    الثابت الواحد كان يمنع محاولة مشروعة بطريقة دفع مختلفة: المزوّد
+    #    يرى المفتاح نفسه فيعيد نتيجة المحاولة الفاشلة السابقة.
+    attempt_number = models.PositiveIntegerField(default=1)
+
+    # 🔒 ملخّص آمن لطريقة الدفع للعرض: {"type","display_name","card_brand",
+    #    "last4"}. لا PAN ولا CVC ولا رمز مزوّد (§13).
+    method_summary = models.JSONField(null=True, blank=True)
+
+    # 📌 بيانات المصادقة المطلوبة (3-D Secure) كما يعيدها المزوّد —
+    #    تُمرَّر للعميل ليكملها بالـSDK ثم تُمسح عند الحسم (§17).
+    action_payload = models.JSONField(null=True, blank=True)
+
+    # لحظة تأكيد الشحن — مصدرها تأكيد المزوّد لا استجابة الواجهة (§14).
+    paid_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -119,17 +167,51 @@ class Payment(models.Model):
         if booking is None:
             return
 
-        if booking.computed_price is None:
+        # 📌 المبلغ يُقاس بالعرض المقبول المجمَّد لا بـcomputed_price:
+        #    الشحن يقع **قبل** تأكيد الحجز الآن (§12)، فـcomputed_price لم
+        #    تُكتب بعد لحظة إنشاء الدفعة. اللقطة الحقيقية تعيش على العرض.
+        expected = self._expected_amount(booking)
+
+        if expected is None:
             raise ValidationError(
-                {"amount": "Booking has no computed price; it cannot be charged yet."}
+                {"amount": "Booking has no frozen price yet; it cannot be charged."}
             )
 
-        if self.amount != booking.computed_price:
+        if self.amount != expected:
             raise ValidationError(
                 {
                     "amount": (
-                        f"Payment amount ({self.amount}) must equal the booking's "
-                        f"computed price ({booking.computed_price})."
+                        f"Payment amount ({self.amount}) must equal the frozen "
+                        f"accepted-offer total ({expected})."
                     )
                 }
             )
+
+        # 🔒 حارس السقف (§7): الشحن لا يتجاوز ما وافق عليه العميل أبدًا.
+        #    الخرق هنا يعني خللًا في التسعير — يُرفض الشحن ولا يُصحَّح بصمت.
+        if booking.max_total is not None and self.amount > booking.max_total:
+            raise ValidationError(
+                {
+                    "amount": (
+                        f"Payment amount ({self.amount}) exceeds the customer's "
+                        f"approved maximum ({booking.max_total})."
+                    )
+                }
+            )
+
+    @staticmethod
+    def _expected_amount(booking):
+        """
+        المبلغ المتوقَّع: إجمالي العرض المقبول المجمَّد، وإلا computed_price.
+
+        📌 الرجوع إلى computed_price يخدم الحجوزات السابقة لهذا التغيير —
+           تلك لا عرض مجمَّد لها، ومبلغها مكتوب على الحجز.
+        """
+        accepted = booking.dispatch_offers.filter(
+            status__in=("ACCEPTED", "ACCEPTED_PENDING_PAYMENT")
+        ).first()
+
+        if accepted is not None and accepted.total_amount is not None:
+            return accepted.total_amount
+
+        return booking.computed_price

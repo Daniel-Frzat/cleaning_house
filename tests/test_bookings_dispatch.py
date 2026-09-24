@@ -43,6 +43,8 @@ from apps.contractors.models import (
 from apps.properties.models import Property, PropertyAddress, PropertyType
 from apps.services.models import PricingConfig, ServiceType
 
+from tests.conftest import set_contractor_location
+
 # إحداثيات مرجعية (سيدني ومحيطها)
 SYDNEY = (Decimal("-33.868800"), Decimal("151.209300"))
 NEAR = (Decimal("-33.878800"), Decimal("151.209300"))    # ~1.1 km
@@ -99,6 +101,10 @@ def make_contractor(phone, coords=NEAR, available=True, eligible=True):
         availability_status=(
             AvailabilityStatus.AVAILABLE if available else AvailabilityStatus.UNAVAILABLE
         ),
+    )
+    # §8: الإسناد يقرأ موقع الهاتف الحالي لا عنوان العمل.
+    set_contractor_location(
+        profile, (coords[0] if coords else None, coords[1] if coords else None)
     )
     if eligible:
         admin = User.objects.filter(role=ConfirmedRole.ADMIN).first() or make_user(
@@ -223,9 +229,14 @@ def test_accept_computes_price_matching_formula(
     )
     offer = DispatchOffer.objects.get(booking=booking)
 
-    r = post(
-        client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
-    )
+    # 📌 القبول يبدأ الشحن، والشحن الناجح يُسنِد — وكلاهما بعد
+    #    الـcommit (§12، §14). بلا التقاطها يبقى الحجز PENDING.
+    with django_capture_on_commit_callbacks(execute=True):
+        r = post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
     assert r.status_code == 200, r.content
 
     booking.refresh_from_db()
@@ -261,7 +272,12 @@ def test_price_uses_offer_stored_distance_not_recomputed(
     profile.latitude, profile.longitude = FAR
     profile.save()
 
-    post(client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user))
+    with django_capture_on_commit_callbacks(execute=True):
+        post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
 
     booking.refresh_from_db()
     expected = (Decimal("45") * 3 + Decimal("80")) + original_distance * Decimal("2.00")
@@ -289,7 +305,12 @@ def test_price_hidden_while_pending_revealed_after_confirm(
     assert before["assigned_contractor_id"] is None
 
     offer = DispatchOffer.objects.get(booking=booking)
-    post(client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user))
+    with django_capture_on_commit_callbacks(execute=True):
+        post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
 
     # بعد القبول: CONFIRMED ومعه السعر
     after = client.get(f"/api/bookings/{booking.id}", **auth(customer)).json()
@@ -489,7 +510,12 @@ def test_expiry_task_does_not_touch_answered_offers(
         customer, prop, general, capture=django_capture_on_commit_callbacks
     )
     offer = DispatchOffer.objects.get(booking=booking)
-    post(client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user))
+    with django_capture_on_commit_callbacks(execute=True):
+        post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
 
     DispatchOffer.objects.filter(pk=offer.pk).update(
         expires_at=timezone.now() - timedelta(hours=2)
@@ -544,7 +570,12 @@ def test_non_contractor_cannot_respond(
     )
     offer = DispatchOffer.objects.get(booking=booking)
 
-    r = post(client, f"/api/contractor/offers/{offer.id}/accept", **auth(other))
+    # بلا التقاط on_commit: الطلب يُرفض قبل أي أثر جانبي.
+    r = post(
+        client,
+        f"/api/contractor/offers/{offer.id}/accept",
+        **auth(other),
+    )
 
     assert r.status_code == 403, r.content
 
@@ -580,9 +611,14 @@ def test_accepting_expired_offer_is_rejected(
         status=DispatchOfferStatus.EXPIRED, expires_at=timezone.now() - timedelta(minutes=1)
     )
 
-    r = post(
-        client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
-    )
+    # 📌 القبول يبدأ الشحن، والشحن الناجح يُسنِد — وكلاهما بعد
+    #    الـcommit (§12، §14). بلا التقاطها يبقى الحجز PENDING.
+    with django_capture_on_commit_callbacks(execute=True):
+        r = post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
 
     assert r.status_code == 409, r.content
     assert r.json()["code"] == "offer_not_actionable"
@@ -609,9 +645,14 @@ def test_accepting_time_expired_offer_rejected_before_task_runs(
         expires_at=timezone.now() - timedelta(minutes=1)
     )
 
-    r = post(
-        client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
-    )
+    # 📌 القبول يبدأ الشحن، والشحن الناجح يُسنِد — وكلاهما بعد
+    #    الـcommit (§12، §14). بلا التقاطها يبقى الحجز PENDING.
+    with django_capture_on_commit_callbacks(execute=True):
+        r = post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
 
     assert r.status_code == 409, r.content
     offer.refresh_from_db()
@@ -622,21 +663,83 @@ def test_accepting_time_expired_offer_rejected_before_task_runs(
 def test_double_accept_is_rejected(
     client, customer, prop, general, pricing, django_capture_on_commit_callbacks
 ):
+    """
+    ⚠️ تغيّرت القاعدة (§12): إعادة القبول من **نفس** المقاول صارت
+       تكرارية لا مرفوضة — إعادة إرسال الطلب بعد انقطاع شبكة يجب ألا
+       تُعامل كخطأ. الحارس الحقيقي (مقاول ثانٍ لا يستطيع القبول) في
+       الاختبار التالي.
+    """
     contractor_user, _ = make_contractor("+61400007503", coords=NEAR)
     booking = create_booking(
         customer, prop, general, capture=django_capture_on_commit_callbacks
     )
     offer = DispatchOffer.objects.get(booking=booking)
 
-    first = post(
-        client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
-    )
+    with django_capture_on_commit_callbacks(execute=True):
+        first = post(
+            client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
+        )
     second = post(
         client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user)
     )
 
     assert first.status_code == 200
-    assert second.status_code == 409, second.content
+    assert second.status_code == 200, second.content
+
+    # 🔒 ولا دفعة ثانية ولا مهمة ثانية مهما تكرّر الطلب.
+    from apps.jobs.models import Job
+    from apps.payments.models import Payment
+
+    assert Payment.objects.filter(booking=booking).count() == 1
+    assert Job.objects.filter(booking=booking).count() == 1
+
+
+@pytest.mark.django_db
+def test_a_second_contractor_cannot_accept_a_reserved_booking(
+    client, customer, prop, general, pricing, django_capture_on_commit_callbacks
+):
+    """
+    🔒 الحارس الحقيقي: لا يُسنَد حجز واحد لمقاولَين (§8 من المواصفة).
+
+    العرض الأول يحجز الحجز، فيُرفض قبول أي عرض آخر عليه بـ409.
+    """
+    first_user, _ = make_contractor("+61400007505", coords=NEAR)
+    second_user, second_profile = make_contractor("+61400007506", coords=MID)
+
+    booking = create_booking(
+        customer, prop, general, capture=django_capture_on_commit_callbacks
+    )
+    first_offer = DispatchOffer.objects.get(booking=booking)
+
+    # عرض ثانٍ مُركَّب يدويًا على المقاول الآخر في الجولة نفسها.
+    second_offer = DispatchOffer.objects.create(
+        booking=booking,
+        contractor=second_profile,
+        status=DispatchOfferStatus.PENDING,
+        dispatch_round=booking.dispatch_round,
+        distance_km=Decimal("5.600"),
+        total_amount=Decimal("226.20"),
+        contractor_earnings=Decimal("226.20"),
+        services_total=Decimal("215.00"),
+        travel_fee=Decimal("11.20"),
+        expires_at=timezone.now() + timedelta(minutes=60),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        accepted = post(
+            client,
+            f"/api/contractor/offers/{first_offer.id}/accept",
+            **auth(first_user),
+        )
+    rejected = post(
+        client, f"/api/contractor/offers/{second_offer.id}/accept", **auth(second_user)
+    )
+
+    assert accepted.status_code == 200, accepted.content
+    assert rejected.status_code == 409, rejected.content
+
+    booking.refresh_from_db()
+    assert booking.assigned_contractor_id != second_profile.id
 
 
 @pytest.mark.django_db
@@ -649,7 +752,12 @@ def test_declining_after_accepting_is_rejected(
     )
     offer = DispatchOffer.objects.get(booking=booking)
 
-    post(client, f"/api/contractor/offers/{offer.id}/accept", **auth(contractor_user))
+    with django_capture_on_commit_callbacks(execute=True):
+        post(
+            client,
+            f"/api/contractor/offers/{offer.id}/accept",
+            **auth(contractor_user),
+        )
     r = post(
         client, f"/api/contractor/offers/{offer.id}/decline", **auth(contractor_user)
     )
@@ -805,15 +913,22 @@ def test_haversine_same_point_is_zero():
 
 def test_distance_module_calls_no_adapter():
     """
-    ⚠️ رياضيات محلية فقط — لا gps_distance adapter ولا Routing Engine
-       (Infra §8). الفحص على الاستيرادات الفعلية (AST) لا على النص.
+    ⚠️ distance.py رياضيات محلية بحتة — لا adapter ولا عميل HTTP.
+
+    📌 dispatch.py **استُثني عمدًا** (§9): صار يستدعي مزوّد الاتجاهات
+       للحصول على مسافة الطريق والـETA، وهو المطلوب. الحارس هنا يبقى على
+       distance.py وحدها: haversine يجب أن تظل حسابًا محليًا لا نداء شبكة،
+       وإلا صار الاحتياطي نفسه يعتمد على مزوّد.
+
+    ⚠️ لا تُضف dispatch إلى هذه الحلقة مجددًا — استدعاؤه للمزوّد متعمَّد،
+       والانتقال بين المصدرين محروس بـdistance_source لا بمنع الاستيراد.
     """
     import ast
     import inspect
 
-    from apps.bookings.services import distance, dispatch
+    from apps.bookings.services import distance
 
-    for mod in (distance, dispatch):
+    for mod in (distance,):
         tree = ast.parse(inspect.getsource(mod))
         imported = set()
         for node in ast.walk(tree):

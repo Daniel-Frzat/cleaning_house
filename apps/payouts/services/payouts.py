@@ -31,6 +31,8 @@ Payout Service — Payout Domain (Change Set §36.5؛ Infra §14/§16)
 """
 
 import logging
+from datetime import datetime, time
+from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 
@@ -297,3 +299,39 @@ def release_missing_payouts(completed_before):
         except Exception:  # noqa: BLE001 — حجز واحد لا يوقف البقية
             logger.exception("Deferred payout failed (booking_id=%s)", booking.id)
     return released
+
+
+def list_earnings(user, from_date, to_date):
+    """Return contractor payouts and aggregates for a calendar period."""
+    if user is None or not user.is_authenticated:
+        raise PayoutPermissionError("Authentication required.")
+    if not user.has_contractor_access():
+        raise PayoutPermissionError("Only contractors can view earnings.")
+
+    payouts = list(
+        Payout.objects.filter(
+            contractor=user,
+            created_at__gte=datetime.combine(from_date, time.min),
+            created_at__lte=datetime.combine(to_date, time.max),
+        )
+        .select_related("booking")
+        .prefetch_related("booking__service_selections__service_type")
+        .order_by("-created_at")
+    )
+    paid_total = sum(
+        (p.amount for p in payouts if p.status == PayoutStatus.SUCCEEDED),
+        Decimal("0"),
+    )
+    processing_total = sum(
+        (p.amount for p in payouts if p.status != PayoutStatus.SUCCEEDED),
+        Decimal("0"),
+    )
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "total": paid_total + processing_total,
+        "paid_total": paid_total,
+        "processing_total": processing_total,
+        "completed_jobs": len(payouts),
+        "items": payouts,
+    }

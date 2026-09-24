@@ -87,27 +87,30 @@ def expire_pending_offers():
 @shared_task(name="bookings.repair_confirmed_bookings")
 def repair_confirmed_bookings(stale_after_minutes=5):
     """
-    يُكمل الآثار الجانبية التي لم تحدث بعد تأكيد الحجز أو إكمال المهمة.
+    يُكمل الآثار الجانبية التي لم تحدث بعد قبول العرض أو الدفع أو إكمال المهمة.
 
     الـhooks بعد الـcommit تبتلع استثناءاتها عمدًا (لا تُسقط طلبًا ناجحًا)،
-    فحجز قد يبقى CONFIRMED بلا مهمة أو بلا دفعة، ومهمة مكتملة بلا دفع
-    للمقاول. هذه المهمة تلتقطها:
+    فتبقى حالات معلّقة. هذه المهمة تلتقطها:
 
-      1) CONFIRMED بلا Job          → create_job_for_booking
-      2) CONFIRMED بلا Payment      → charge_for_booking
-      3) Job COMPLETED + دفعة عميل SUCCEEDED + بلا Payout → release_payout
+      1) عرض ACCEPTED_PENDING_PAYMENT بلا Payment → start_charge_for_booking
+         (hook بدء الشحن لم يعمل؛ المقاول ينتظر والحجز محجوز بلا دفع)
+      2) Payment SUCCEEDED والحجز غير CONFIRMED → confirm_payment
+         (hook الإسناد لم يعمل؛ العميل دفع ولم يُسنَد أحد)
+      3) CONFIRMED بلا Job → create_job_for_booking
+      4) Job COMPLETED + دفعة عميل SUCCEEDED + بلا Payout → release_payout
 
     🔒 لا يعيد أي محاولة على سجل موجود (Payment/Payout بأي حالة): التكرارية
        الصارمة محفوظة. السجل PENDING بعد خطأ مزوّد يحتاج مطابقة لا إعادة.
     📌 stale_after_minutes: لا نلمس ما تغيّر للتو — hook قد يكون قيد التنفيذ.
     """
     from apps.jobs.services.jobs import create_job_for_booking
-    from apps.payments.services.payments import charge_for_booking
+    from apps.payments.models import Payment, PaymentStatus
+    from apps.payments.services.payments import confirm_payment, start_charge_for_booking
     from apps.payouts.services.payouts import release_missing_payouts
 
     cutoff = timezone.now() - timezone.timedelta(minutes=stale_after_minutes)
     confirmed = Booking.objects.filter(status=BookingStatus.CONFIRMED, updated_at__lt=cutoff)
-    counts = {"jobs": 0, "charges": 0, "payouts": 0}
+    counts = {"charges": 0, "confirmations": 0, "jobs": 0, "payouts": 0}
 
     def attempt(kind, func, booking):
         try:
@@ -116,11 +119,28 @@ def repair_confirmed_bookings(stale_after_minutes=5):
         except Exception:  # noqa: BLE001 — حجز واحد لا يوقف البقية
             logger.exception("Repair %s failed (booking_id=%s)", kind, booking.id)
 
+    reserved_unpaid = Booking.objects.filter(
+        status=BookingStatus.PENDING,
+        payment__isnull=True,
+        dispatch_offers__status=DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT,
+        dispatch_offers__responded_at__lt=cutoff,
+    ).distinct()
+    for booking in reserved_unpaid:
+        attempt("charges", start_charge_for_booking, booking)
+
+    paid_unassigned = Payment.objects.filter(
+        status=PaymentStatus.SUCCEEDED,
+        updated_at__lt=cutoff,
+    ).exclude(booking__status=BookingStatus.CONFIRMED)
+    for payment in paid_unassigned:
+        try:
+            confirm_payment(payment.id)
+            counts["confirmations"] += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("Repair confirmation failed (payment_id=%s)", payment.id)
+
     for booking in confirmed.filter(job__isnull=True):
         attempt("jobs", create_job_for_booking, booking)
-
-    for booking in confirmed.filter(payment__isnull=True):
-        attempt("charges", charge_for_booking, booking)
 
     counts["payouts"] = release_missing_payouts(completed_before=cutoff)
 

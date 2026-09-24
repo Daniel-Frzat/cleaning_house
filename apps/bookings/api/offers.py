@@ -24,7 +24,7 @@ from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import offers as svc
 from ..services.scheduling import to_local
-from .schemas import ErrorOut, OfferDetailOut, OfferOut, OfferResponseOut
+from .schemas import ErrorOut, OfferDetailOut, OfferResponseOut
 
 router = Router(tags=["Contractor Offers"], auth=ActiveUserJWTAuth())
 
@@ -34,10 +34,11 @@ def _error(status, code, detail):
 
 
 def _serialize_offer(offer):
-    """
-    ⚠️ لا يكشف سعرًا: العرض لا يحمل سعرًا أصلًا، والسعر يعيش على الحجز
-       بعد القبول وحده.
-    """
+    address = getattr(offer.booking.property, "address", None)
+    property_summary = None
+    if address is not None:
+        property_summary = f"{address.suburb}, {address.state} {address.postcode}"
+
     return {
         "id": offer.id,
         "booking_id": offer.booking_id,
@@ -47,6 +48,15 @@ def _serialize_offer(offer):
         "offered_at": offer.offered_at,
         "responded_at": offer.responded_at,
         "expires_at": offer.expires_at,
+        "total_amount": offer.total_amount,
+        "contractor_earnings": offer.contractor_earnings,
+        "currency": offer.currency,
+        "eta_seconds": offer.eta_seconds,
+        "service_summary": [
+            selection.service_type.name
+            for selection in offer.booking.service_selections.all()
+        ],
+        "property_summary": property_summary,
     }
 
 
@@ -86,7 +96,7 @@ def _handle_offer_errors(exc):
         return _error(403, exc.code, str(exc))
     if isinstance(exc, svc.OfferNotFoundError):
         return _error(404, exc.code, "Offer not found.")
-    if isinstance(exc, (svc.OfferNotActionableError, svc.BookingNotPriceableError)):
+    if isinstance(exc, svc.OfferNotActionableError):
         # 409: تعارض مع حالة المورد الحالية — ليس خطأ في صيغة الطلب
         return _error(409, exc.code, str(exc))
     return None
@@ -105,10 +115,11 @@ def _handle_offer_errors(exc):
         "By default only offers that can still be answered are returned "
         "(`PENDING` and not expired) — this is the inbox the app polls. Pass "
         "`include_closed=true` for the full history.\n\n"
-        "Each offer shows the visit time, suburb/state/postcode, property type "
-        "and requested services — enough to decide. The street address and "
-        "access notes are revealed only after acceptance. No price is shown: it "
-        "is calculated and frozen at acceptance."
+        "Each offer shows the frozen total and the contractor's exact earnings, "
+        "the visit time, suburb/state/postcode, property type, requested "
+        "services, distance and optional ETA — enough to decide. The street "
+        "address, access notes and customer contact details are revealed only "
+        "after acceptance."
     ),
 )
 def list_offers(request, include_closed: bool = False):
@@ -163,8 +174,8 @@ def retrieve_offer(request, offer_id: uuid.UUID):
         "2. The booking moves to `CONFIRMED`, the contractor is assigned, and the "
         "price becomes visible to the customer — this is the first moment it is.\n"
         "3. The customer is charged directly (there is no escrow).\n"
-        "4. The job is created in `ASSIGNED` (the contractor starts it on "
-        "arrival).\n\n"
+        "4. The job is created as `ASSIGNED`; the contractor starts it explicitly "
+        "with `POST /api/contractor/jobs/{id}/start`.\n\n"
         "The distance used for pricing is the one recorded on **this offer**, not "
         "a freshly measured one, so moving the contractor's profile between offer "
         "and acceptance does not change the price.\n\n"
@@ -205,7 +216,6 @@ def accept_offer(request, offer_id: uuid.UUID):
         svc.SelfAssignmentError,
         svc.OfferNotFoundError,
         svc.OfferNotActionableError,
-        svc.BookingNotPriceableError,
     ) as exc:
         return _handle_offer_errors(exc)
     except ValidationError as exc:

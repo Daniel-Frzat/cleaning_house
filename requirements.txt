@@ -47,6 +47,12 @@ django-ninja-jwt==5.3.1
 celery==5.4.0
 redis==5.0.7
 
+# --- SMS Provider (ClickSend — Change Set §21) ---
+# عميل HTTP لـadapters/sms/clicksend.py. أول حزمة خاصة بمزوّد تُضاف هنا:
+# القاعدة أعلاه تمنع إضافتها *قبل* حسم القرار، وقد حُسم SMS لصالح ClickSend.
+# لا SDK خاص بالمزوّد — REST مباشرة، فيبقى استبدال المزوّد تغييرَ ملف واحد.
+requests==2.32.3
+
 # --- Testing ---
 pytest==8.2.2
 pytest-django==4.8.0

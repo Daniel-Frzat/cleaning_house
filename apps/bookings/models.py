@@ -62,6 +62,21 @@ class DispatchStatus(models.TextChoices):
     ASSIGNED = "ASSIGNED", "Assigned"
 
 
+class DistanceSource(models.TextChoices):
+    """
+    من أين جاءت المسافة المستعملة في التسعير (§9).
+
+    📌 يُخزَّن على العرض حتى لا يكون الانتقال بين المصدرين صامتًا: تدقيق
+       الإدارة يجب أن يرى بأي أساس حُسب سعرٌ ما.
+
+    ROUTE     : مسافة طريق فعلية من مزوّد الاتجاهات.
+    HAVERSINE : مسافة خط مستقيم محلية — احتياطي بإعداد صريح.
+    """
+
+    ROUTE = "ROUTE", "Route distance (directions provider)"
+    HAVERSINE = "HAVERSINE", "Straight-line distance (fallback)"
+
+
 # حدّ ملاحظات الوصول: تعليمات وصول لا رسالة. الحدّ يمنع إساءة استعمال
 # الحقل كقناة تواصل، ويبقى واسعًا لأي تعليمات معقولة.
 ACCESS_NOTES_MAX_LENGTH = 500
@@ -198,6 +213,16 @@ class Booking(models.Model):
     # "نبحث منذ ..." بلا تخمين.
     last_dispatch_attempt_at = models.DateTimeField(null=True, blank=True)
 
+    # 📌 جولة الإسناد الحالية (§4). تُرفَّع عند كل إعادة محاولة، فيُعاد
+    #    النظر في كل المقاولين من جديد.
+    # ⚠️ لماذا رقم جولة بدل حذف العروض القديمة: الحذف يُفقد سجلّ من رفض
+    #    ومتى، وهو ما تحتاجه تقارير أداء المقاولين لاحقًا. الترقيم يحتفظ
+    #    بكل شيء ويجعل الاستبعاد محصورًا بالجولة الجارية.
+    dispatch_round = models.PositiveIntegerField(
+        default=1,
+        help_text="Incremented on each retry; offers are scoped to a round.",
+    )
+
     # ملاحظات وصول يكتبها العميل بنفسه لهذه الزيارة: "المفتاح تحت السجادة"،
     # "الكلب في الحديقة"، "الجرس معطّل — اطرق".
     #
@@ -219,6 +244,52 @@ class Booking(models.Model):
             "Customer's own arrival instructions for this visit. "
             "Visible only to the assigned contractor."
         ),
+    )
+
+    # ------------------------------------------------------------
+    # الطلب الفوري (§3) واقتباس السعر (§5، §6)
+    # ------------------------------------------------------------
+    # 📌 لحظة الطلب. منفصل عن created_at عمدًا: الأخير تفصيل تخزين يتغيّر
+    #    معناه لو أُنشئ صف بمسار آخر (استيراد، أمر إداري)، وهذا يعني
+    #    "متى طلب العميل عاملًا" ويُستعمل في العرض وفي حساب مدة البحث.
+    requested_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="When the customer requested a cleaner (on-demand).",
+    )
+
+    # الاقتباس الذي وافق عليه العميل. SET_NULL: حذف اقتباس قديم لا يجوز
+    # أن يمحو حجزًا، والسقف المجمَّد أدناه يبقى محفوظًا على الحجز نفسه.
+    quote = models.ForeignKey(
+        "bookings.BookingQuote",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bookings",
+    )
+
+    # 🔒 السقف الذي وافق عليه العميل. الشحن لا يتجاوزه أبدًا — يُفحص قبل
+    #    أي محاولة شحن، ويُرفض الشحن عند المخالفة بدل تجاوزه بصمت (§7).
+    max_total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Customer-approved ceiling, frozen from the quote.",
+    )
+
+    # نسخة قواعد التسعير المستعملة — تدقيق إداري (§9).
+    pricing_version = models.PositiveIntegerField(null=True, blank=True)
+
+    currency = models.CharField(max_length=3, default="AUD")
+
+    # 📌 مرجع طريقة الدفع لدى المزوّد. رمز مبهم لا بيانات بطاقة (§6).
+    # 🔒 لا PAN ولا CVC ولا أي بيان حسّاس — يُخزَّن ما يعيده المزوّد فقط.
+    payment_method_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Opaque provider token for the selected method. Never card data.",
     )
 
     # 📌 لقطة السعر المجمَّدة (§36.2). null حتى يقبل مقاولٌ العرض.
@@ -362,12 +433,18 @@ class DispatchOfferStatus(models.TextChoices):
     """
 
     PENDING = "PENDING", "Pending"
+    # 📌 قَبِل المقاول والشحن جارٍ — الحجز **ليس** مؤكَّدًا بعد (§12).
+    #    هذه الحالة تُوقف العرض على مقاولين آخرين دون أن تُسنِد أحدًا.
+    ACCEPTED_PENDING_PAYMENT = "ACCEPTED_PENDING_PAYMENT", "Accepted, awaiting payment"
     ACCEPTED = "ACCEPTED", "Accepted"
     DECLINED = "DECLINED", "Declined"
     EXPIRED = "EXPIRED", "Expired"
 
 
-# مهلة الرد على العرض (§36.6)
+# مهلة الرد على العرض (§36.6).
+# ⚠️ احتياطي فقط: القيمة الفعلية تأتي من PricingConfig.dispatch_offer_ttl_seconds
+#    ويضبطها الداشبورد (§11). يبقى هنا لتوافق الكود القائم ولحالة تعذّر
+#    قراءة الإعداد.
 OFFER_TTL_MINUTES = 60
 
 
@@ -393,11 +470,15 @@ class DispatchOffer(models.Model):
         related_name="dispatch_offers",
     )
 
+    # 32: يتّسع لـACCEPTED_PENDING_PAYMENT (24 حرفًا) مع هامش.
     status = models.CharField(
-        max_length=16,
+        max_length=32,
         choices=DispatchOfferStatus.choices,
         default=DispatchOfferStatus.PENDING,
     )
+
+    # جولة الإسناد التي وُلد فيها هذا العرض (§4).
+    dispatch_round = models.PositiveIntegerField(default=1)
 
     # 📌 المسافة المستخدمة فعليًا عند توليد هذا العرض — تُخزَّن ولا يُعاد
     #    حسابها عند القبول. لو أُعيد حسابها لحظة القبول وكان المقاول قد
@@ -411,6 +492,65 @@ class DispatchOffer(models.Model):
         help_text="Distance used for this offer; frozen, never recomputed.",
     )
 
+    # ------------------------------------------------------------
+    # لقطة التسعير المجمَّدة على العرض (§10)
+    # ------------------------------------------------------------
+    # 📌 سبب الوجود: المقاول يجب أن يرى أرباحه **قبل** أن يضغط قبول.
+    #    السعر كان يُحسب بعد القبول، فكان يقبل على المجهول.
+    #
+    # ⚠️ تُجمَّد كلها لحظة إنشاء العرض ولا يُعاد حسابها: لو تحرّك المقاول
+    #    أو غيّرت الإدارة الأسعار بين العرض والقبول، يبقى ما رآه هو ما
+    #    يُشحن ويُدفع له.
+    total_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Frozen final total for this offer; never recomputed.",
+    )
+
+    # 🔒 صفر عمولة: يساوي total_amount دائمًا. حقل منفصل لأن المعنى مختلف
+    #    (ما يُدفع للمقاول) ولأن أي عمولة مستقبلية تُغيَّر هنا صراحةً.
+    contractor_earnings = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Frozen contractor payout for this offer; zero commission.",
+    )
+
+    travel_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Admin-only breakdown component.",
+    )
+
+    services_total = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Admin-only breakdown component.",
+    )
+
+    currency = models.CharField(max_length=3, default="AUD")
+
+    pricing_version = models.PositiveIntegerField(null=True, blank=True)
+
+    # 📌 مصدر المسافة (§9): ROUTE من مزوّد الاتجاهات، أو HAVERSINE احتياطًا
+    #    بإعداد صريح. يُخزَّن حتى لا يكون الانتقال بينهما صامتًا في التدقيق.
+    distance_source = models.CharField(
+        max_length=16,
+        choices=DistanceSource.choices,
+        default=DistanceSource.HAVERSINE,
+    )
+
+    # زمن الوصول المقدَّر من مزوّد الاتجاهات — null حين لا مزوّد.
+    # ⚠️ لا يُختلق أبدًا: haversine مسافة لا زمن.
+    eta_seconds = models.PositiveIntegerField(null=True, blank=True)
+
     offered_at = models.DateTimeField(auto_now_add=True)
     responded_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()
@@ -420,9 +560,12 @@ class DispatchOffer(models.Model):
         verbose_name_plural = "Dispatch offers"
         ordering = ["-offered_at"]
         constraints = [
+            # 📌 التفرد لكل جولة لا للأبد: لا يُعرض الحجز مرتين على
+            #    المقاول نفسه داخل الجولة الواحدة، لكن إعادة المحاولة
+            #    جولة جديدة يجوز فيها عرضه عليه ثانيةً (§4).
             models.UniqueConstraint(
-                fields=["booking", "contractor"],
-                name="unique_offer_per_booking_contractor",
+                fields=["booking", "contractor", "dispatch_round"],
+                name="unique_offer_per_booking_contractor_round",
             ),
         ]
         indexes = [
@@ -453,3 +596,96 @@ class DispatchOffer(models.Model):
         تحدّثه المهمة الدورية — الوقت هو الحَكَم، لا آخر تشغيل للمهمة.
         """
         return self.status == DispatchOfferStatus.PENDING and not self.is_expired(now)
+
+    def is_reserved(self):
+        """
+        هل هذا العرض يحجز الحجز حاليًا؟
+
+        📌 القبول بانتظار الدفع يحجز الحجز: لا يُعرض على مقاول آخر، ولا
+           يُسنَد أحد بعد. المحاولة والمحاولة المعادة تعيشان في هذه الحالة.
+        """
+        return self.status in (
+            DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT,
+            DispatchOfferStatus.ACCEPTED,
+        )
+
+
+# ============================================================
+# اقتباس السعر قبل الحجز (§5)
+# ============================================================
+# 📌 سبب الوجود: شاشة المراجعة تعرض "Up to A$152.00" قبل أن يوجد أي
+#    مقاول. السعر النهائي لا يُعرف قبل القبول (المسافة مجهولة)، لكن
+#    السقف يُعرف: مجموع الخدمات + أقصى رسم مسافة.
+#
+# 🔒 السقف هو ما يوافق عليه العميل. الشحن اللاحق لا يتجاوزه أبدًا —
+#    مضمون رياضيًا لأن رسم المسافة مسقوف.
+#
+# ⚠️ الاقتباس **غير قابل للتعديل** بعد إنشائه: أسعار الخدمات تُجمَّد فيه،
+#    فتغيير الداشبورد للأسعار بين شاشة المراجعة وقبول المقاول لا يمسّ ما
+#    وافق عليه العميل.
+
+# صلاحية الاقتباس. قصيرة عمدًا: الطلب فوري، والسقف يعكس أسعارًا قد
+# تتغيّر. طويلة بما يكفي لإكمال شاشة المراجعة بلا عجلة.
+QUOTE_TTL_MINUTES = 30
+
+
+class BookingQuote(models.Model):
+    """
+    لقطة تسعير مجمَّدة يوافق عليها العميل قبل طلب عامل.
+
+    🔒 يُستهلك مرة واحدة: الحجز الذي يستعمله يُربط به، ولا يُعاد استعماله
+       لحجز ثانٍ — وإلا لأمكن تثبيت سعر قديم إلى الأبد.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    customer = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="booking_quotes",
+    )
+
+    property = models.ForeignKey(
+        "properties.Property",
+        on_delete=models.CASCADE,
+        related_name="booking_quotes",
+    )
+
+    # 📌 اختيارات الخدمات وأسعارها لحظة الاقتباس — مجمَّدة كـJSON:
+    #    [{"service_type_id": str, "name": str, "room_count": int,
+    #      "room_price": str, "base_price": str}, ...]
+    # ⚠️ الأسماء تُحفظ كذلك (§9): الخدمة قد يُعاد تسميتها لاحقًا، والفاتورة
+    #    يجب أن تعرض ما رآه العميل.
+    service_snapshot = models.JSONField(
+        help_text="Frozen service selections, names and prices at quote time."
+    )
+
+    # مجموع الخدمات المجمَّد — لا يُعاد حسابه من الكتالوج أبدًا.
+    services_total = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # 🔒 السقف الذي يوافق عليه العميل ويُشحن ضمنه.
+    maximum_total = models.DecimalField(max_digits=10, decimal_places=2)
+
+    currency = models.CharField(max_length=3, default="AUD")
+
+    # نسخة قواعد التسعير المستعملة — للتدقيق الإداري (§9).
+    pricing_version = models.PositiveIntegerField()
+
+    expires_at = models.DateTimeField(db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Booking quote"
+        verbose_name_plural = "Booking quotes"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["customer", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Quote {self.id} (max {self.maximum_total} {self.currency})"
+
+    def is_expired(self, now=None):
+        """قراءة لحظية — لا تكتب ولا تغيّر حالة."""
+        return self.expires_at <= (now or timezone.now())

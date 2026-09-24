@@ -78,26 +78,29 @@ def make_pending_booking(customer, prop, service, scheduled_at=None):
     return booking
 
 
-# ============================================================
-# 1) قبول العرض — أقفال وحالة الحجز
-# ============================================================
 @pytest.mark.django_db
-def test_second_acceptance_cannot_overwrite_frozen_price(customer, prop, general, pricing):
+def test_second_acceptance_cannot_overwrite_frozen_price(
+    customer, prop, general, pricing, django_capture_on_commit_callbacks
+):
     """
-    السيناريو: قبول من جهاز ورفض من آخر أوصلا عرضًا ثانيًا لمقاول آخر.
-    قبول المقاول الثاني كان يكتب فوق السعر المجمّد والمقاول المُسنَد.
+    السيناريو: عرض قديم ثانٍ لمقاول آخر على حجز سبق قبوله ودفعه. قبوله كان
+    يكتب فوق السعر المجمّد والمقاول المُسنَد.
     """
     user_a, a = make_contractor("+61400070001", coords=NEAR)
     user_b, b = make_contractor("+61400070002", coords=FAR)
     booking = make_pending_booking(customer, prop, general)
     offer_a = assign_next_contractor(booking)
-    offers_svc.accept_offer(user_a, offer_a.id)
+    with django_capture_on_commit_callbacks(execute=True):
+        offers_svc.accept_offer(user_a, offer_a.id)
     booking.refresh_from_db()
+    assert booking.status == BookingStatus.CONFIRMED
     frozen = booking.computed_price
 
     stale = DispatchOffer.objects.create(
         booking=booking, contractor=b, status=DispatchOfferStatus.PENDING,
-        distance_km=Decimal("22"), expires_at=timezone.now() + timedelta(minutes=30),
+        distance_km=Decimal("22"), total_amount=Decimal("999.00"),
+        contractor_earnings=Decimal("999.00"),
+        expires_at=timezone.now() + timedelta(minutes=30),
     )
     with pytest.raises(offers_svc.OfferNotActionableError):
         offers_svc.accept_offer(user_b, stale.id)
@@ -108,20 +111,42 @@ def test_second_acceptance_cannot_overwrite_frozen_price(customer, prop, general
 
 
 @pytest.mark.django_db
-def test_decline_on_confirmed_booking_does_not_cascade(customer, prop, general, pricing):
+def test_decline_on_reserved_or_confirmed_booking_does_not_cascade(
+    customer, prop, general, pricing, django_capture_on_commit_callbacks
+):
     user_a, _ = make_contractor("+61400070011", coords=NEAR)
     user_b, b = make_contractor("+61400070012", coords=FAR)
+    make_contractor("+61400070013", coords=FAR)
     booking = make_pending_booking(customer, prop, general)
     offer_a = assign_next_contractor(booking)
-    offers_svc.accept_offer(user_a, offer_a.id)
+    offers_svc.accept_offer(user_a, offer_a.id)  # محجوز بانتظار الدفع
+
     stale = DispatchOffer.objects.create(
         booking=booking, contractor=b, status=DispatchOfferStatus.PENDING,
-        distance_km=Decimal("22"), expires_at=timezone.now() + timedelta(minutes=30),
+        distance_km=Decimal("22"), total_amount=Decimal("300.00"),
+        contractor_earnings=Decimal("300.00"),
+        expires_at=timezone.now() + timedelta(minutes=30),
     )
-
-    with pytest.raises(offers_svc.OfferNotActionableError):
-        offers_svc.decline_offer(user_b, stale.id)
+    # محجوز: الرفض يُسجَّل بلا عرض جديد لمقاول ثالث
+    _, next_offer = offers_svc.decline_offer(user_b, stale.id)
+    assert next_offer is None
     assert DispatchOffer.objects.filter(booking=booking).count() == 2
+
+    # بعد الدفع والتأكيد: الرد نفسه مرفوض
+    from apps.payments.services.payments import start_charge_for_booking
+
+    with django_capture_on_commit_callbacks(execute=True):
+        start_charge_for_booking(booking)
+    booking.refresh_from_db()
+    assert booking.status == BookingStatus.CONFIRMED
+    late = DispatchOffer.objects.create(
+        booking=booking, contractor=b, status=DispatchOfferStatus.PENDING,
+        distance_km=Decimal("22"), total_amount=Decimal("300.00"),
+        contractor_earnings=Decimal("300.00"), dispatch_round=2,
+        expires_at=timezone.now() + timedelta(minutes=30),
+    )
+    with pytest.raises(offers_svc.OfferNotActionableError):
+        offers_svc.decline_offer(user_b, late.id)
 
 
 @pytest.mark.django_db
@@ -139,18 +164,21 @@ def test_acceptance_after_visit_time_is_refused(customer, prop, general, pricing
 
 
 @pytest.mark.django_db
-def test_service_deactivated_after_booking_can_still_be_accepted(customer, prop, general, pricing):
-    """كان: InactiveServiceError غير ملتقط → 500 لكل مقاول في التتابع."""
+def test_service_deactivated_after_booking_can_still_be_accepted(
+    customer, prop, general, pricing, django_capture_on_commit_callbacks
+):
+    """السعر مجمَّد على العرض — تعطيل الخدمة بعده لا يُفشل القبول."""
     user, _ = make_contractor("+61400070031", coords=NEAR)
     booking = make_pending_booking(customer, prop, general)
     offer = assign_next_contractor(booking)
     general.is_active = False
     general.save()
 
-    offers_svc.accept_offer(user, offer.id)
+    with django_capture_on_commit_callbacks(execute=True):
+        offers_svc.accept_offer(user, offer.id)
     booking.refresh_from_db()
     assert booking.status == BookingStatus.CONFIRMED
-    assert booking.computed_price is not None
+    assert booking.computed_price == offer.total_amount
 
 
 # ============================================================
@@ -356,10 +384,12 @@ def test_job_cannot_start_before_customer_payment_succeeds(client, customer, pro
 
 
 @pytest.mark.django_db
-def test_provider_exception_keeps_a_pending_payment_record(customer, prop, general, monkeypatch):
-    """كان: الاستثناء يُرجع المعاملة كلها فيضيع أثر خصم ربما تم."""
-    _, profile = make_contractor("+61400070141")
-    booking = make_confirmed(customer, prop, general, profile)
+def test_provider_exception_keeps_the_payment_record(customer, prop, general, pricing, monkeypatch):
+    """كان: الاستثناء داخل المعاملة يمحو سجل الدفعة فيضيع أثر خصم ربما تم."""
+    user, _ = make_contractor("+61400070141", coords=NEAR)
+    booking = make_pending_booking(customer, prop, general)
+    offer = assign_next_contractor(booking)
+    offers_svc.accept_offer(user, offer.id)
 
     class Exploding:
         def charge(self, **kwargs):
@@ -368,35 +398,64 @@ def test_provider_exception_keeps_a_pending_payment_record(customer, prop, gener
     from apps.payments.services import payments as payments_svc
 
     monkeypatch.setattr(payments_svc, "get_payment_adapter", lambda: Exploding())
-    payment = payments_svc.charge_for_booking(booking)
+    payment = payments_svc.start_charge_for_booking(booking)
 
     stored = Payment.objects.get(booking=booking)
     assert stored.pk == payment.pk
-    assert stored.status == PaymentStatus.PENDING
+    assert stored.status == PaymentStatus.PROCESSING
     assert "TimeoutError" in stored.failure_reason
+    booking.refresh_from_db()
+    assert booking.status == BookingStatus.PENDING  # لا إسناد بلا دفع مؤكَّد
 
 
 @pytest.mark.django_db
-def test_repair_task_finishes_missing_side_effects(customer, prop, general):
-    _, profile = make_contractor("+61400070151")
+def test_repair_task_finishes_missing_side_effects(customer, prop, general, pricing):
+    past = timezone.now() - timedelta(hours=1)
+
+    # 1) قُبل العرض ولم يبدأ الشحن
+    user, _ = make_contractor("+61400070151", coords=NEAR)
+    reserved = make_pending_booking(customer, prop, general)
+    offer = assign_next_contractor(reserved)
+    offers_svc.accept_offer(user, offer.id)
+    DispatchOffer.objects.filter(pk=offer.pk).update(responded_at=past)
+
+    # 2) مؤكَّد بلا مهمة، 3) مهمة مكتملة ودفعة ناجحة بلا Payout
+    _, profile = make_contractor("+61400070152")
     no_job = make_confirmed(customer, prop, general, profile)
-    no_payment = make_confirmed(customer, prop, general, profile)
-    Job.objects.create(booking=no_payment, status=JobStatus.ASSIGNED)
+    mark_paid(no_job)
     unpaid_contractor = make_confirmed(customer, prop, general, profile)
     mark_paid(unpaid_contractor)
-    Job.objects.create(booking=unpaid_contractor, status=JobStatus.COMPLETED,
-                       confirmed_at=timezone.now() - timedelta(hours=1))
-    mark_paid(no_job)
-    Booking.objects.all().update(updated_at=timezone.now() - timedelta(hours=1))
+    Job.objects.create(booking=unpaid_contractor, status=JobStatus.COMPLETED, confirmed_at=past)
+    Booking.objects.filter(status=BookingStatus.CONFIRMED).update(updated_at=past)
 
     counts = repair_confirmed_bookings()
 
-    assert counts == {"jobs": 1, "charges": 1, "payouts": 1}
+    assert counts["charges"] == 1
+    assert counts["jobs"] == 1
+    assert counts["payouts"] == 1
+    assert Payment.objects.filter(booking=reserved).exists()
     assert Job.objects.filter(booking=no_job).exists()
-    assert Payment.objects.get(booking=no_payment).status == PaymentStatus.SUCCEEDED
     assert Payout.objects.filter(booking=unpaid_contractor).exists()
-    # تشغيل ثانٍ لا يفعل شيئًا
-    assert repair_confirmed_bookings() == {"jobs": 0, "charges": 0, "payouts": 0}
+
+
+@pytest.mark.django_db
+def test_repair_task_assigns_a_paid_but_unconfirmed_booking(customer, prop, general, pricing):
+    """العميل دفع ولم يعمل hook الإسناد — الإصلاح يُسند بدل أن يبقى عالقًا."""
+    user, _ = make_contractor("+61400070153", coords=NEAR)
+    booking = make_pending_booking(customer, prop, general)
+    offer = assign_next_contractor(booking)
+    offers_svc.accept_offer(user, offer.id)
+    Payment.objects.create(
+        booking=booking, amount=offer.total_amount, method="CARD",
+        status=PaymentStatus.SUCCEEDED,
+    )
+    Payment.objects.filter(booking=booking).update(updated_at=timezone.now() - timedelta(hours=1))
+
+    counts = repair_confirmed_bookings()
+
+    assert counts["confirmations"] == 1
+    booking.refresh_from_db()
+    assert booking.status == BookingStatus.CONFIRMED
 
 
 # ============================================================

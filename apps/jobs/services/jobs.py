@@ -251,6 +251,29 @@ def get_job_for_contractor(user, job_id, lock=False):
     return job
 
 
+def list_jobs_for_contractor(user, status=None):
+    """List assigned jobs so a contractor can recover them on any device."""
+    if user is None or not user.is_authenticated:
+        raise JobPermissionError("Authentication required.")
+    if not user.has_contractor_access():
+        raise JobPermissionError("Only contractors can view jobs.")
+
+    queryset = (
+        Job.objects.filter(booking__assigned_contractor__user=user)
+        .select_related(
+            "booking",
+            "booking__property",
+            "booking__property__address",
+            "booking__assigned_contractor",
+            "booking__payout",
+        )
+        .prefetch_related("booking__service_selections__service_type", "photos")
+    )
+    if status:
+        queryset = queryset.filter(status=status)
+    return queryset.order_by("-created_at")
+
+
 # ------------------------------------------------------------
 # انتقالات الحالة (§36.3)
 # ------------------------------------------------------------

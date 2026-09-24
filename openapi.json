@@ -3,7 +3,7 @@
   "info": {
     "title": "Cleaning House API",
     "version": "1.0.0",
-    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nNine domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and starts the job.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
+    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nNine domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and creates the job as\n`ASSIGNED`; the contractor starts it explicitly.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
   },
   "paths": {
     "/api/health": {
@@ -2302,6 +2302,74 @@
         ]
       }
     },
+    "/api/quotes": {
+      "post": {
+        "operationId": "apps_bookings_api_quotes_create_quote",
+        "summary": "Create a maximum-price quote (customer only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Creates a short-lived, single-use quote for the selected property and services. The maximum is frozen from the current pricing configuration; it is not the final price because travel distance is unknown until a contractor is assigned. Use the returned `id` as `quote_id` when creating the booking.",
+        "tags": [
+          "Booking Quotes"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/offers": {
       "get": {
         "operationId": "apps_bookings_api_offers_list_offers",
@@ -2344,7 +2412,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CONTRACTOR` only. Returns offers addressed to the caller, newest first.\n\nBy default only offers that can still be answered are returned (`PENDING` and not expired) — this is the inbox the app polls. Pass `include_closed=true` for the full history.\n\nEach offer shows the visit time, suburb/state/postcode, property type and requested services — enough to decide. The street address and access notes are revealed only after acceptance. No price is shown: it is calculated and frozen at acceptance.",
+        "description": "**Who may call:** `CONTRACTOR` only. Returns offers addressed to the caller, newest first.\n\nBy default only offers that can still be answered are returned (`PENDING` and not expired) — this is the inbox the app polls. Pass `include_closed=true` for the full history.\n\nEach offer shows the frozen total and the contractor's exact earnings, the visit time, suburb/state/postcode, property type, requested services, distance and optional ETA — enough to decide. The street address, access notes and customer contact details are revealed only after acceptance.",
         "tags": [
           "Contractor Offers"
         ],
@@ -2482,7 +2550,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Another contractor's offer returns `403`.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired — the booking must still be waiting for a contractor, and the visit time must not have passed. Concurrent responses are serialised: only one acceptance can ever succeed.\n\n**This is the pivotal moment of the booking lifecycle.** On success:\n\n1. The price is calculated and **frozen** onto the booking. It is never recalculated afterwards, even if catalog prices change.\n2. The booking moves to `CONFIRMED`, the contractor is assigned, and the price becomes visible to the customer — this is the first moment it is.\n3. The customer is charged directly (there is no escrow).\n4. The job is created in `ASSIGNED` (the contractor starts it on arrival).\n\nThe distance used for pricing is the one recorded on **this offer**, not a freshly measured one, so moving the contractor's profile between offer and acceptance does not change the price.\n\nSteps 3 and 4 run after the confirmation is committed and are isolated from it: if the charge or the job creation fails, the booking stays validly confirmed and the failure is recorded rather than returned as an error here.\n\n`next_offer` is always `null` in this response — the cascade stops at acceptance.",
+        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Another contractor's offer returns `403`.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired — the booking must still be waiting for a contractor, and the visit time must not have passed. Concurrent responses are serialised: only one acceptance can ever succeed.\n\n**This is the pivotal moment of the booking lifecycle.** On success:\n\n1. The price is calculated and **frozen** onto the booking. It is never recalculated afterwards, even if catalog prices change.\n2. The booking moves to `CONFIRMED`, the contractor is assigned, and the price becomes visible to the customer — this is the first moment it is.\n3. The customer is charged directly (there is no escrow).\n4. The job is created as `ASSIGNED`; the contractor starts it explicitly with `POST /api/contractor/jobs/{id}/start`.\n\nThe distance used for pricing is the one recorded on **this offer**, not a freshly measured one, so moving the contractor's profile between offer and acceptance does not change the price.\n\nSteps 3 and 4 run after the confirmation is committed and are isolated from it: if the charge or the job creation fails, the booking stays validly confirmed and the failure is recorded rather than returned as an error here.\n\n`next_offer` is always `null` in this response — the cascade stops at acceptance.",
         "tags": [
           "Contractor Offers"
         ],
@@ -2564,6 +2632,153 @@
         "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired.\n\n**Side effects:** declining immediately cascades the booking to the next nearest available contractor, exactly as an expiry would. The new offer's id is returned in `next_offer`, with no details about the contractor behind it.\n\nIf no further contractor is eligible, `next_offer` is `null` and the booking stays `PENDING` with no active offer. That is a normal outcome, not an error; nothing cancels the booking automatically.\n\nNo price is calculated or revealed by declining.",
         "tags": [
           "Contractor Offers"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/payments/{payment_id}/retry": {
+      "post": {
+        "operationId": "apps_payments_api_payments_retry_payment",
+        "summary": "Retry a failed payment (booking owner only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "payment_method_reference",
+            "schema": {
+              "default": "",
+              "title": "Payment Method Reference",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Retries a FAILED or REQUIRES_ACTION payment using the frozen booking amount. The optional payment method reference is an opaque provider token; raw card data is never accepted or stored.",
+        "tags": [
+          "Payments"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/payments/{payment_id}/confirm-action": {
+      "post": {
+        "operationId": "apps_payments_api_payments_confirm_payment_action",
+        "summary": "Confirm a payment authentication action (booking owner only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentActionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not Implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Payments"
         ],
         "security": [
           {
@@ -2788,6 +3003,64 @@
         "description": "**Who may call:** the booking's own customer, an `ADMIN`, or the assigned contractor — the same audience that can view the job.\n\nReturns the contractor's last known position together with the property's coordinates, so a map can be drawn from a single request.\n\n**The tracking window is `ASSIGNED` only.** While `tracking_active` is `true` the contractor is on the way. Once work starts it flips to `false` and `contractor_location` is `null` **even though a point is still stored** — the cleaner's position is not exposed once they are inside the property, and never after the service ends.\n\n`contractor_location` is also `null` while `tracking_active` is `true` if the contractor has not reported yet, or has location sharing off. That is a normal state, not an error — show \"on the way\" rather than a failure.\n\nCheck `is_stale` before drawing a live marker: it means updates have stopped arriving (backgrounded app, poor signal), so show \"last updated N seconds ago\" instead of a point that pretends to be current. `age_seconds` gives the exact age.\n\n**Polling:** there is no WebSocket or SSE channel in this version — poll this endpoint every few seconds while the map is open, and stop polling as soon as `tracking_active` is `false`.\n\n**No ETA and no street route.** Two coordinates are not a road path: drawing the route and estimating arrival needs a directions provider (Google or Mapbox), which is not wired into this backend.\n\n**Side effects:** none — read-only.",
         "tags": [
           "Jobs"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/jobs": {
+      "get": {
+        "operationId": "apps_jobs_api_jobs_list_contractor_jobs",
+        "summary": "List assigned contractor jobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ContractorJobOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Contractor Jobs"
         ],
         "security": [
           {
@@ -3209,6 +3482,88 @@
           }
         },
         "description": "**Who may call:** the contractor being paid, or an `ADMIN`. The customer cannot see the payout.\n\n**Preconditions:** a payout record exists only once the customer has confirmed job completion. It is released immediately and **per booking** — payouts are never batched, and there is no endpoint to trigger or retry one manually; this one is read-only.\n\nThe amount is the full booking price: no commission is deducted.\n\n**Side effects:** none — read-only.\n\nAdministrators additionally receive `provider_reference`; for the contractor that field is absent from the response body altogether, not merely blank.",
+        "tags": [
+          "Payouts"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/earnings": {
+      "get": {
+        "operationId": "apps_payouts_api_payouts_retrieve_earnings",
+        "summary": "List contractor earnings for a date range",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from_date",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "to_date",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Date"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
         "tags": [
           "Payouts"
         ],
@@ -5143,7 +5498,7 @@
         "type": "object"
       },
       "BookingIn": {
-        "description": "إنشاء حجز.\n\n⚠️ status غير موجود عمدًا: كل حجز جديد يبدأ PENDING.\n⚠️ computed_price و assigned_contractor غير موجودين — لا يُقبلان من\n   العميل ولا يُضبطان في هذه المرحلة.\n\n📌 scheduled_at إلزامي هنا (ISO 8601). بلا إزاحة توقيت يُفسَّر بتوقيت\n   المنطقة المحسوبة من عنوان العقار؛ وبإزاحة صريحة يُحترم كما وصل.\n   الطرفان يُخزَّنان UTC.\n⚠️ customer_timezone غير موجود: يُشتق من العنوان ولا يُقبل من العميل.",
+        "description": "Create a booking from an optional frozen quote.",
         "properties": {
           "property_id": {
             "format": "uuid",
@@ -5167,11 +5522,28 @@
             "maxLength": 500,
             "title": "Access Notes",
             "type": "string"
+          },
+          "quote_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Id"
+          },
+          "payment_method_reference": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Payment Method Reference",
+            "type": "string"
           }
         },
         "required": [
           "property_id",
-          "service_selections",
           "scheduled_at"
         ],
         "title": "BookingIn",
@@ -5224,8 +5596,99 @@
         "title": "BookingRescheduleIn",
         "type": "object"
       },
+      "QuoteOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "maximum_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Maximum Total"
+          },
+          "services_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Services Total"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "pricing_version": {
+            "title": "Pricing Version",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "maximum_total",
+          "services_total",
+          "currency",
+          "pricing_version",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "QuoteOut",
+        "type": "object"
+      },
+      "QuoteIn": {
+        "description": "Create a frozen maximum-price quote for one property.",
+        "properties": {
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "service_selections": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceSelectionIn"
+            },
+            "title": "Service Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "property_id",
+          "service_selections"
+        ],
+        "title": "QuoteIn",
+        "type": "object"
+      },
       "OfferDetailOut": {
-        "description": "العرض كما يراه المقاول قبل الرد — ما يكفي ليقرر.\n\n🔒 قبل القبول: الضاحية والولاية والرمز البريدي فقط، بلا عنوان الشارع\n   ولا ملاحظات الوصول — تُكشف للمقاول المُسنَد بعد القبول وحده.\n⚠️ بلا سعر (§36.1): السعر يُحسب ويُجمَّد عند القبول.",
+        "description": "العرض كما يراه المقاول قبل الرد — ما يكفي ليقرر.\n\n🔒 قبل القبول: الضاحية والولاية والرمز البريدي فقط، بلا عنوان الشارع\n   ولا ملاحظات الوصول — تُكشف للمقاول المُسنَد بعد القبول وحده.\n📌 السعر والأرباح مجمَّدان على العرض منذ إنشائه (OfferOut).",
         "properties": {
           "id": {
             "format": "uuid",
@@ -5282,6 +5745,70 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "contractor_earnings": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Earnings"
+          },
+          "currency": {
+            "default": "AUD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
+          "service_summary": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Service Summary",
+            "type": "array"
+          },
+          "property_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Summary"
           },
           "scheduled_at": {
             "anyOf": [
@@ -5377,7 +5904,7 @@
         "type": "object"
       },
       "OfferOut": {
-        "description": "عرض إسناد.\n\n⚠️ بلا أي حقل سعر: العرض لا يحمل سعرًا، والسعر يعيش على الحجز بعد\n   القبول وحده (§36.1). distance_km ليست سعرًا — هي الأساس المخزَّن\n   الذي سيُحسب عليه السعر إن قُبل العرض.",
+        "description": "Dispatch offer data safe for the addressed contractor.",
         "properties": {
           "id": {
             "format": "uuid",
@@ -5434,6 +5961,70 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "contractor_earnings": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Earnings"
+          },
+          "currency": {
+            "default": "AUD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
+          "service_summary": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Service Summary",
+            "type": "array"
+          },
+          "property_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Summary"
           }
         },
         "required": [
@@ -5469,6 +6060,90 @@
           "offer"
         ],
         "title": "OfferResponseOut",
+        "type": "object"
+      },
+      "PaymentActionOut": {
+        "description": "Customer-safe result for retry or 3-D Secure confirmation.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "action_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Payload"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "amount",
+          "method",
+          "status",
+          "created_at",
+          "updated_at",
+          "attempt_number"
+        ],
+        "title": "PaymentActionOut",
         "type": "object"
       },
       "PaymentAdminOut": {
@@ -5898,6 +6573,155 @@
         "title": "PropertyLocationOut",
         "type": "object"
       },
+      "ContractorJobOut": {
+        "description": "Contractor-facing job summary for the jobs tab and resume flow.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "access_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
+          "marked_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked Done At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/JobPhotoOut"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "service_summary": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Service Summary",
+            "type": "array"
+          },
+          "property_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Summary"
+          },
+          "scheduled_at_local": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At Local"
+          },
+          "earnings": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earnings"
+          },
+          "payout_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Status"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "status",
+          "photos",
+          "created_at",
+          "public_reference",
+          "service_summary"
+        ],
+        "title": "ContractorJobOut",
+        "type": "object"
+      },
       "JobLocationIn": {
         "description": "تحديث موقع المقاول المُسنَد.\n\n⚠️ الإحداثيتان إلزاميتان: تحديث موقع بإحداثية واحدة لا معنى له.\n\n📌 recorded_at إلزامي ويصل من الجهاز — لحظة التقاط النقطة لا لحظة\n   وصولها. الفارق مهم حين تتأخر الشبكة: نقطة عمرها دقيقتان يجب أن\n   تُعرض كذلك لا كأنها الآن.\n⚠️ لا يُوثق به وحده: الخادم يختم وقت الاستلام بنفسه، وحساب التقادم\n   يقوم على ختمه لا على ساعة الجهاز.",
         "properties": {
@@ -6104,6 +6928,146 @@
           "updated_at"
         ],
         "title": "PayoutOut",
+        "type": "object"
+      },
+      "EarningsItemOut": {
+        "properties": {
+          "payout_id": {
+            "format": "uuid",
+            "title": "Payout Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "service_summary": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Service Summary",
+            "type": "array"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "default": "AUD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payout_id",
+          "booking_id",
+          "public_reference",
+          "service_summary",
+          "amount",
+          "status"
+        ],
+        "title": "EarningsItemOut",
+        "type": "object"
+      },
+      "EarningsOut": {
+        "properties": {
+          "from_date": {
+            "format": "date",
+            "title": "From Date",
+            "type": "string"
+          },
+          "to_date": {
+            "format": "date",
+            "title": "To Date",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total"
+          },
+          "paid_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Paid Total"
+          },
+          "processing_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Processing Total"
+          },
+          "completed_jobs": {
+            "title": "Completed Jobs",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EarningsItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "from_date",
+          "to_date",
+          "total",
+          "paid_total",
+          "processing_total",
+          "completed_jobs",
+          "items"
+        ],
+        "title": "EarningsOut",
         "type": "object"
       },
       "SupportRequestOut": {

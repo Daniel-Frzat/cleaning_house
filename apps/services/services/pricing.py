@@ -257,17 +257,6 @@ def calculate_price(
     return _calculate(service_selections, distance_km, allow_inactive=False)
 
 
-def calculate_price_for_existing_booking(service_selections, distance_km):
-    """
-    calculate_price لحجز قائم — يقبل خدمة عُطّلت بعد إنشائه.
-
-    📌 التعطيل يمنع الحجوزات الجديدة ولا يُبطل حجزًا قائمًا. بدون هذا يفشل
-       قبول العرض لكل مقاول في التتابع ويدور الحجز حتى NO_CONTRACTOR بلا
-       ذنب من العميل. تُستدعى عند قبول العرض وحده.
-    """
-    return _calculate(service_selections, distance_km, allow_inactive=True)
-
-
 def _calculate(service_selections, distance_km, allow_inactive):
     # كل التحقق أولًا: لا حساب جزئي على مدخلات غير صالحة.
     parsed = _parse_selections(service_selections)
