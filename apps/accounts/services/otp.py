@@ -251,7 +251,8 @@ def generate_and_send(phone, purpose=OTPPurpose.LOGIN, ip=None):
     ).update(status=OTPStatus.EXPIRED)
 
     # 3) توليد وتخزين الـhash فقط
-    fixed_code = test_numbers().get(phone)
+    # 🔒 أرقام الاختبار لدخول العملاء وحده — لا تعفي عاملًا ثانيًا لأدمن
+    fixed_code = test_numbers().get(phone) if purpose == OTPPurpose.LOGIN else None
     code = fixed_code or generate_code(policy["code_length"])
     otp = OTPVerification.objects.create(
         phone=phone,

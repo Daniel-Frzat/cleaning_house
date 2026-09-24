@@ -19,12 +19,69 @@ from ninja_jwt.exceptions import AuthenticationFailed
 
 from .models import UserStatus
 
+# المسارات المسموحة لحساب عليه must_change_password — تغيير كلمة السر
+# وقراءة الحساب فقط.
+PASSWORD_CHANGE_ALLOWED_PATHS = (
+    "/api/admin/auth/password",
+    "/api/auth/me",
+)
+
+
+class AuthzError(Exception):
+    """
+    رفض صلاحية بعد مصادقة ناجحة — يُترجم إلى 403 بشكل ErrorOut الموحّد
+    (معالج الاستثناء في config/urls.py).
+    """
+
+    def __init__(self, code, detail, status=403):
+        self.code = code
+        self.detail = detail
+        self.status = status
+        super().__init__(detail)
+
 
 class ActiveUserJWTAuth(JWTAuth):
-    """JWTAuth + رفض أي حساب حالته ليست ACTIVE."""
+    """
+    JWTAuth + رفض أي حساب حالته ليست ACTIVE + فرض تغيير كلمة السر المؤقتة.
+    """
+
+    def authenticate(self, request, token):
+        user = super().authenticate(request, token)
+        if user is not None and user.must_change_password:
+            if not request.path.rstrip("/").startswith(PASSWORD_CHANGE_ALLOWED_PATHS):
+                raise AuthzError(
+                    "password_change_required",
+                    "Your password was reset. Change it before using the API.",
+                )
+        return user
 
     def get_user(self, validated_token):
         user = super().get_user(validated_token)
         if user.status != UserStatus.ACTIVE:
             raise AuthenticationFailed(_("User is not active"))
+        return user
+
+
+class AdminJWTAuth(ActiveUserJWTAuth):
+    """
+    لمسارات لوحة التحكم (/api/admin/*): ADMIN حصرًا.
+
+    📌 الخدمات تعيد فحص الدور بنفسها (طبقتان)، لكن هذا يرفض غير الأدمن قبل
+       أن يصل أي منطق.
+    """
+
+    def authenticate(self, request, token):
+        user = super().authenticate(request, token)
+        if user is not None and not user.has_admin_access():
+            raise AuthzError("admin_required", "Only administrators can access this endpoint.")
+        return user
+
+
+class SuperuserJWTAuth(AdminJWTAuth):
+    """إدارة حسابات الأدمن — Superuser حصرًا."""
+
+    def authenticate(self, request, token):
+        user = super().authenticate(request, token)
+        if user is not None and not user.is_superuser:
+            raise AuthzError("superuser_required", "Only a superuser can manage administrators.")
         return user

@@ -15,6 +15,8 @@ Dual-role tests — Identity + Contractors
 """
 
 import datetime
+
+from django.utils import timezone
 import json
 
 import pytest
@@ -73,7 +75,9 @@ def approve_docs(profile, *, registration=VerificationStatus.VERIFIED,
         status=registration,
         rejection_reason="no" if registration == VerificationStatus.REJECTED else None,
     )
-    expiry = datetime.date.today() + datetime.timedelta(days=-1 if expired else 300)
+    # timezone.localdate لا date.today: التطبيق يقارن بتاريخ TIME_ZONE (UTC)،
+    # وتاريخ الجهاز المحلي يختلف عنه ساعات كل ليلة فيفشل الاختبار حينها.
+    expiry = timezone.localdate() + datetime.timedelta(days=-1 if expired else 300)
     InsuranceDocument.objects.create(
         contractor=profile, document_reference="POL-1", expiry_date=expiry,
         status=insurance,

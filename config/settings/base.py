@@ -62,6 +62,8 @@ LOCAL_APPS = [
     # Support Domain — SupportRequest (قرار MVP). قناة باتجاه واحد خلف
     # شاشتَي Contact support و Report an issue: لا ردود ولا مرفقات.
     "apps.support",
+    # سجل أفعال الإدارة — للإضافة فقط
+    "apps.audit",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

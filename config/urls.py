@@ -28,6 +28,7 @@ from django.urls import path
 from ninja import NinjaAPI
 
 from apps.accounts.api.auth import router as auth_router
+from apps.accounts.authentication import AuthzError
 from apps.bookings.api.bookings import router as bookings_router
 from apps.bookings.api.quotes import router as booking_quotes_router
 from apps.bookings.api.offers import router as contractor_offers_router
@@ -183,6 +184,12 @@ api = NinjaAPI(
 def health_check(request):
     """يتأكد أن التطبيق والاتصال بقاعدة البيانات يعملان."""
     return {"status": "ok", "phase": "Phase 0 — Foundation"}
+
+
+@api.exception_handler(AuthzError)
+def _authz_error(request, exc):
+    """رفض صلاحية بعد مصادقة ناجحة — بشكل ErrorOut الموحّد."""
+    return api.create_response(request, {"code": exc.code, "detail": exc.detail}, status=exc.status)
 
 
 api.add_router("/auth/", auth_router)

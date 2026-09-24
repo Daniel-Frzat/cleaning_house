@@ -150,6 +150,17 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Designates whether the user can log into the Django admin site.",
     )
 
+    # ------------------------------------------------------------
+    # أمان دخول الإدارة (بريد + كلمة سر + رمز SMS)
+    # ------------------------------------------------------------
+    # 🔒 بعد إعادة تعيين كلمة السر من Superuser تكون مؤقتة: كل مسارات الـAPI
+    #    ترفض الحساب (403 password_change_required) حتى يغيّرها بنفسه.
+    must_change_password = models.BooleanField(default=False)
+    password_changed_at = models.DateTimeField(null=True, blank=True)
+    # قفل مؤقت بعد تكرار كلمة سر خاطئة — يمنع التخمين
+    failed_login_attempts = models.PositiveSmallIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+
     date_joined = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -157,9 +168,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = "phone"
     EMAIL_FIELD = "email"
-    # phone مُستبعَد تلقائيًا (هو USERNAME_FIELD). لا نطلب أي حقل إضافي
-    # في createsuperuser عدا كلمة المرور.
-    REQUIRED_FIELDS = []
+    # phone مُستبعَد تلقائيًا (هو USERNAME_FIELD). البريد مطلوب في
+    # createsuperuser: الأدمن يدخل بالبريد وكلمة السر ثم رمز SMS على الهاتف.
+    REQUIRED_FIELDS = ["email"]
 
     class Meta:
         verbose_name = "User"
@@ -185,6 +196,35 @@ class User(AbstractBaseUser, PermissionsMixin):
             raise ValidationError(
                 {"is_contractor": "An ADMIN account cannot also be a contractor."}
             )
+        # 🔒 Superuser هو أدمن رئيسي — لا صلاحيات لوحة كاملة لحساب عميل
+        if self.is_superuser and self.role != ConfirmedRole.ADMIN:
+            raise ValidationError(
+                {"is_superuser": "Only an ADMIN account can be a superuser."}
+            )
+
+    def save(self, *args, **kwargs):
+        """
+        🔒 مصدر حقيقة واحد: الدور ADMIN وحده يمنح دخول لوحة Django.
+
+        كان role و is_staff/is_superuser منفصلين: أدمن يُنشأ من اللوحة بدور
+        ADMIN يبقى is_staff=False فلا يدخلها، وحساب superuser بدور CUSTOMER
+        يدخل اللوحة بكل الصلاحيات ويُرفض في الـAPI. الآن يُشتق الاثنان من الدور.
+        """
+        if self.role == ConfirmedRole.ADMIN:
+            self.is_staff = True
+        else:
+            self.is_staff = False
+            self.is_superuser = False
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "role" in update_fields:
+            kwargs["update_fields"] = set(update_fields) | {"is_staff", "is_superuser"}
+        super().save(*args, **kwargs)
+
+    # ------------------------------------------------------------
+    # قفل الدخول
+    # ------------------------------------------------------------
+    def is_login_locked(self, now=None):
+        return self.locked_until is not None and self.locked_until > (now or timezone.now())
 
     # ------------------------------------------------------------
     # الصلاحيات — المصدر الوحيد لكل فحوص الوصول
@@ -245,6 +285,8 @@ class OTPPurpose(models.TextChoices):
     """
 
     LOGIN = "LOGIN", "Login"
+    # العامل الثاني لدخول الإدارة — بعد كلمة سر صحيحة وحدها
+    ADMIN_LOGIN = "ADMIN_LOGIN", "Admin login (second factor)"
 
 
 class OTPStatus(models.TextChoices):
@@ -387,3 +429,60 @@ class SocialAccount(models.Model):
 
     def __str__(self):
         return f"{self.get_provider_display()} account for {self.user.phone}"
+
+
+class TrustedDevice(models.Model):
+    """
+    جهاز أدمن اجتاز رمز SMS ويُعفى منه لفترة (ADMIN_TRUSTED_DEVICE_DAYS).
+
+    🔒 يُخزَّن hash التوكن فقط — التوكن الخام يُعاد للجهاز مرة واحدة ولا
+       يُحفظ. كلمة السر وحدها تبقى مطلوبة دائمًا: الجهاز الموثوق يعفي من
+       العامل الثاني فقط.
+    🔒 تغيير كلمة السر أو إعادة تعيينها أو تعطيل الحساب يُبطل كل الأجهزة.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, related_name="trusted_devices"
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=255, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Trusted device {self.label or self.id} for {self.user_id}"
+
+    def is_valid(self, now=None):
+        now = now or timezone.now()
+        return self.revoked_at is None and self.expires_at > now
+
+
+class AdminLoginChallenge(models.Model):
+    """
+    خطوة بين كلمة السر الصحيحة ورمز SMS.
+
+    🔒 معرّفها وحده لا يمنح شيئًا: يحتاج رمز SMS صحيحًا مرسلًا لهاتف
+       الأدمن نفسه، ويُستهلك مرة واحدة، وينتهي بانتهاء صلاحية الرمز.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, related_name="admin_login_challenges"
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def is_open(self, now=None):
+        return self.consumed_at is None and self.expires_at > (now or timezone.now())
