@@ -26,7 +26,17 @@ def admin_client(db):
 def test_user_model_is_registered():
     assert User in admin.site._registry
     model_admin = admin.site._registry[User]
-    assert model_admin.list_display == ("phone", "role", "is_contractor", "status", "is_active")
+    assert model_admin.list_display == (
+        "phone",
+        "full_name",
+        "email",
+        "role_display",
+        "is_contractor",
+        "status_display",
+        "is_active",
+        "date_joined",
+        "last_login",
+    )
 
 
 @pytest.mark.django_db
