@@ -305,15 +305,7 @@ def validate_new_password(password, user=None):
         raise PasswordPolicyError(" ".join(exc.messages)) from exc
 
 
-def revoke_all_sessions(user):
-    """يبطل كل توكنات refresh وكل الأجهزة الموثوقة للمستخدم."""
-    from ninja_jwt.token_blacklist.models import BlacklistedToken, OutstandingToken
-
-    for token in OutstandingToken.objects.filter(user=user, expires_at__gt=timezone.now()):
-        BlacklistedToken.objects.get_or_create(token=token)
-    TrustedDevice.objects.filter(user=user, revoked_at__isnull=True).update(
-        revoked_at=timezone.now()
-    )
+from .sessions import revoke_all_sessions  # noqa: E402 — المصدر الوحيد
 
 
 @transaction.atomic

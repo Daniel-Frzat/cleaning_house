@@ -88,7 +88,7 @@
     "/api/auth/otp/verify": {
       "post": {
         "operationId": "apps_accounts_api_auth_verify_otp",
-        "summary": "Verify an OTP code and issue JWT",
+        "summary": "Verify an OTP code and issue JWT (customers and contractors)",
         "parameters": [],
         "responses": {
           "200": {
@@ -370,6 +370,761 @@
         "security": [
           {
             "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/auth/login": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_admin_login",
+        "summary": "Admin login — step 1: email (or phone) and password",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLoginOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone — public. Only ADMIN accounts can log in here; customers and contractors use `/api/auth/otp/*`, and admins cannot use those paths.\n\nOn a correct password:\n* with a valid `device_token` from a previous login on this device → `state: \"authenticated\"` and `tokens` straight away;\n* otherwise → an SMS code is sent to the admin's registered phone and the response is `state: \"otp_required\"` with `challenge_id` and a masked `phone_hint`. Complete with `POST /api/admin/auth/verify`.\n\n**Errors:** `401 invalid_credentials` for an unknown account or a wrong password (identical, so accounts cannot be discovered); `429 account_locked` after too many wrong passwords (`retry_after_seconds`); `403 account_inactive`; `409 second_factor_unavailable` when the account has no valid phone; `429`/`503` when the SMS cannot be sent.",
+        "tags": [
+          "Admin — Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLoginIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/admin/auth/verify": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_admin_verify",
+        "summary": "Admin login — step 2: SMS code",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminVerifyOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone holding a `challenge_id` from `/login`.\n\nReturns `access` and `refresh` tokens. With `remember_device: true` the response also carries a `device_token` (shown once): send it with the next `/login` on this device to skip the SMS code for `ADMIN_TRUSTED_DEVICE_DAYS` days. The password is always required.\n\n`must_change_password: true` means the password was set by a superuser: every other endpoint answers `403 password_change_required` until `POST /api/admin/auth/password` succeeds.",
+        "tags": [
+          "Admin — Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminVerifyIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/admin/auth/resend": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_admin_resend",
+        "summary": "Admin login — resend the SMS code",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLoginOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sends a new code for an open challenge. Cooldown and hourly/daily limits apply.",
+        "tags": [
+          "Admin — Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminResendIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/admin/auth/me": {
+      "get": {
+        "operationId": "apps_accounts_api_admin_auth_admin_me",
+        "summary": "Current administrator",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMeOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Allowed even while `must_change_password` is set.",
+        "tags": [
+          "Admin — Auth"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/auth/password": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_change_password",
+        "summary": "Change own password",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Requires the current password. The new one must pass the password policy (at least 12 characters, not common, not all digits, not similar to the account's details). Clears `must_change_password`.\n\n**Side effects:** every other session and every trusted device of this account is revoked; the response carries fresh tokens for this session.",
+        "tags": [
+          "Admin — Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/auth/devices": {
+      "get": {
+        "operationId": "apps_accounts_api_admin_auth_list_devices",
+        "summary": "List own trusted devices",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrustedDeviceOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Auth"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/auth/devices/{device_id}": {
+      "delete": {
+        "operationId": "apps_accounts_api_admin_auth_revoke_device",
+        "summary": "Revoke one of own trusted devices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Auth"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/admins": {
+      "get": {
+        "operationId": "apps_accounts_api_admin_auth_list_admins",
+        "summary": "List administrator accounts (superuser only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "title": "Status",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_create_admin",
+        "summary": "Create an administrator (superuser only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountCreatedOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Creates an ADMIN with a **temporary password returned once**. Give it to the new admin through a secure channel; they must change it on first login. `phone` receives the login SMS codes.",
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAccountCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/admins/{admin_id}": {
+      "get": {
+        "operationId": "apps_accounts_api_admin_auth_retrieve_admin",
+        "summary": "Retrieve an administrator (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "admin_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Admin Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_accounts_api_admin_auth_update_admin",
+        "summary": "Update an administrator (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "admin_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Admin Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Change name, email, phone, `status` (`ACTIVE`/`INACTIVE`/`SUSPENDED`) or `is_superuser`. A superuser cannot deactivate or demote themselves, and the last active superuser cannot be removed. Deactivating an account or changing its phone revokes all its sessions and trusted devices.",
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAccountPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/admins/{admin_id}/reset-password": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_reset_password",
+        "summary": "Reset an administrator's password (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "admin_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Admin Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountCreatedOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sets a new temporary password (returned once), forces a change on next login, unlocks the account and revokes all its sessions and devices.",
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/admins/{admin_id}/revoke-sessions": {
+      "post": {
+        "operationId": "apps_accounts_api_admin_auth_revoke_sessions",
+        "summary": "Sign an administrator out everywhere (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "admin_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Admin Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Accounts"
+        ],
+        "security": [
+          {
+            "SuperuserJWTAuth": []
           }
         ]
       }
@@ -1752,6 +2507,65 @@
         "security": [
           {
             "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/contractors/{profile_id}/verifications": {
+      "get": {
+        "operationId": "apps_contractors_api_admin_contractors_contractor_verifications",
+        "summary": "Full verification history of one contractor (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorVerificationsOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\nEvery business registration and insurance document this contractor ever submitted, in every state (pending, verified, rejected), newest first. **Side effects:** none — read-only.",
+        "tags": [
+          "Admin — Contractors"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
           }
         ]
       }
@@ -3764,6 +4578,2105 @@
           }
         ]
       }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "apps_accounts_api_backoffice_users_list_users",
+        "summary": "List user accounts (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConfirmedRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UserStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "is_contractor",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Contractor"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "joined_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Joined From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "joined_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Joined To"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Users"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{user_id}": {
+      "get": {
+        "operationId": "apps_accounts_api_backoffice_users_retrieve_user",
+        "summary": "Retrieve a user account (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Users"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{user_id}/suspend": {
+      "post": {
+        "operationId": "apps_accounts_api_backoffice_users_suspend_user",
+        "summary": "Suspend a user account (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sets the account to `SUSPENDED`, revokes every refresh token it holds and marks its contractor profile `UNAVAILABLE`. Existing access tokens stop working immediately. Administrator accounts are refused with `409 admin_account`. Recorded in the audit log.",
+        "tags": [
+          "Admin — Users"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{user_id}/reactivate": {
+      "post": {
+        "operationId": "apps_accounts_api_backoffice_users_reactivate_user",
+        "summary": "Reactivate a suspended user account (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Users"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/properties": {
+      "get": {
+        "operationId": "apps_properties_api_admin_list_properties",
+        "summary": "List properties (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AustralianState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "is_active",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Active"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPropertyListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Properties"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/properties/{property_id}": {
+      "get": {
+        "operationId": "apps_properties_api_admin_retrieve_property",
+        "summary": "Retrieve a property (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPropertyDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Properties"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/bookings": {
+      "get": {
+        "operationId": "apps_bookings_api_admin_list_bookings",
+        "summary": "List bookings (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BookingStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "dispatch_status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DispatchStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "customer_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Customer Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "contractor_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contractor Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "scheduled_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheduled From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "scheduled_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scheduled To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "public_reference contains",
+              "title": "Q"
+            },
+            "required": false,
+            "description": "public_reference contains"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Bookings"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/bookings/{booking_id}": {
+      "get": {
+        "operationId": "apps_bookings_api_admin_retrieve_booking",
+        "summary": "Retrieve a booking with its full history (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Bookings"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/jobs": {
+      "get": {
+        "operationId": "apps_jobs_api_admin_list_jobs",
+        "summary": "List jobs (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "contractor_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contractor Id"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminJobListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Jobs"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/jobs/{job_id}": {
+      "get": {
+        "operationId": "apps_jobs_api_admin_retrieve_job",
+        "summary": "Retrieve a job with its photos (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminJobDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Photos carry a short-lived signed `url` **and** the raw `storage_key` (administrators only). The contractor's live location is deliberately not exposed here.",
+        "tags": [
+          "Admin — Jobs"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payments": {
+      "get": {
+        "operationId": "apps_payments_api_admin_list_payments",
+        "summary": "List customer payments (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PaymentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "booking_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Booking Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "needs_reconciliation",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Reconciliation"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPaymentListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "`needs_reconciliation=true` returns `PROCESSING` payments whose provider call raised (outcome unknown — `failure_reason` starts with `provider_error`).",
+        "tags": [
+          "Admin — Payments"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payments/{payment_id}": {
+      "get": {
+        "operationId": "apps_payments_api_admin_retrieve_payment",
+        "summary": "Retrieve a customer payment (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPaymentDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Payments"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payments/{payment_id}/reconcile": {
+      "post": {
+        "operationId": "apps_payments_api_admin_reconcile_payment",
+        "summary": "Record the provider outcome of an unknown-outcome payment (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentReconcileOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Only for a `PROCESSING` payment whose provider call raised (`failure_reason` starts with `provider_error`); anything else is `409`. The provider is **not** called — this records what the superuser verified with the provider.\n\n`SUCCEEDED` (requires `provider_reference`) marks the payment paid and runs the normal confirmation (contractor assigned, booking `CONFIRMED`, job created). If the accepted offer is no longer reserved the payment stays `SUCCEEDED` and `booking_confirmed` is `false` — what happens next is an open product decision.\n\n`FAILED` marks the payment failed with `note` as the reason; the customer may retry from the app. Recorded in the audit log.",
+        "tags": [
+          "Admin — Payments"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payouts": {
+      "get": {
+        "operationId": "apps_payouts_api_admin_list_payouts",
+        "summary": "List contractor payouts (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PayoutStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "contractor_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contractor Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "needs_reconciliation",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Reconciliation"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPayoutListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Payouts"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payouts/{payout_id}": {
+      "get": {
+        "operationId": "apps_payouts_api_admin_retrieve_payout",
+        "summary": "Retrieve a contractor payout (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payout_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payout Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPayoutOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Payouts"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payouts/{payout_id}/reconcile": {
+      "post": {
+        "operationId": "apps_payouts_api_admin_reconcile_payout",
+        "summary": "Record the provider outcome of an unknown-outcome payout (superuser only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payout_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payout Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPayoutOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Only for a `PENDING` payout whose provider call raised (`failure_reason` starts with `provider_error`); anything else is `409`. The provider is not called and no retry is attempted. `SUCCEEDED` requires `provider_reference`; `FAILED` stores `note` as the failure reason. Recorded in the audit log.",
+        "tags": [
+          "Admin — Payouts"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/support-requests": {
+      "get": {
+        "operationId": "apps_support_api_admin_list_support_requests",
+        "summary": "List support requests (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "booking_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Booking Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "message contains",
+              "title": "Q"
+            },
+            "required": false,
+            "description": "message contains"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSupportRequestListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Support"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/support-requests/{request_id}": {
+      "get": {
+        "operationId": "apps_support_api_admin_retrieve_support_request",
+        "summary": "Retrieve a support request (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSupportRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Support"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_support_api_admin_update_support_request",
+        "summary": "Change a support request's status (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSupportRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Allowed: `SUBMITTED → UNDER_REVIEW`, `SUBMITTED → RESOLVED`, `UNDER_REVIEW → RESOLVED`. `RESOLVED` is final (`409 request_resolved`); any other move is `409 invalid_status_transition`. Recorded in the audit log.",
+        "tags": [
+          "Admin — Support"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportStatusPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/dashboard/summary": {
+      "get": {
+        "operationId": "apps_audit_api_admin_dashboard_summary",
+        "summary": "Back-office dashboard counters (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummaryOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Counts across bookings, verifications, support, payments and payouts. `gross_revenue` sums `SUCCEEDED` customer payments by `paid_at` for today (platform local day), the last 7 and the last 30 days.",
+        "tags": [
+          "Admin — Dashboard"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/audit-log": {
+      "get": {
+        "operationId": "apps_audit_api_admin_list_audit_log",
+        "summary": "Read the admin audit log (superuser only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "actor_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Type"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Id"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEntryListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Append-only record of every administrative mutation, newest first. Filters: `actor_id`, `action` (e.g. `user.suspend`), `target_type` (model name, e.g. `Payment`), `target_id`, and an inclusive `from`/`to` date range.",
+        "tags": [
+          "Admin — Audit log"
+        ],
+        "security": [
+          {
+            "SuperuserJWTAuth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -3788,7 +6701,7 @@
         "type": "object"
       },
       "ErrorOut": {
-        "description": "نفس شكل الخطأ المستخدم في بقية النطاقات.",
+        "description": "نفس شكل الخطأ الموحّد في بقية النطاقات.",
         "properties": {
           "code": {
             "title": "Code",
@@ -4002,6 +6915,558 @@
           }
         },
         "title": "UserProfilePatch",
+        "type": "object"
+      },
+      "AdminLoginOut": {
+        "description": "state = \"authenticated\" → tokens موجودة (جهاز موثوق).\nstate = \"otp_required\"  → challenge_id + phone_hint؛ أكمل بـ /verify.",
+        "properties": {
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenPairOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "challenge_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenge Id"
+          },
+          "phone_hint": {
+            "default": "",
+            "title": "Phone Hint",
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Seconds"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "AdminLoginOut",
+        "type": "object"
+      },
+      "AdminLoginIn": {
+        "properties": {
+          "identifier": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Identifier",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "device_token": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Token"
+          }
+        },
+        "required": [
+          "identifier",
+          "password"
+        ],
+        "title": "AdminLoginIn",
+        "type": "object"
+      },
+      "AdminVerifyOut": {
+        "properties": {
+          "tokens": {
+            "$ref": "#/components/schemas/TokenPairOut"
+          },
+          "device_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Token"
+          },
+          "device_expires_in_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Expires In Days"
+          },
+          "must_change_password": {
+            "default": false,
+            "title": "Must Change Password",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tokens"
+        ],
+        "title": "AdminVerifyOut",
+        "type": "object"
+      },
+      "AdminVerifyIn": {
+        "properties": {
+          "challenge_id": {
+            "format": "uuid",
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 12,
+            "minLength": 4,
+            "title": "Code",
+            "type": "string"
+          },
+          "remember_device": {
+            "default": false,
+            "title": "Remember Device",
+            "type": "boolean"
+          },
+          "device_label": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Device Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "code"
+        ],
+        "title": "AdminVerifyIn",
+        "type": "object"
+      },
+      "AdminResendIn": {
+        "properties": {
+          "challenge_id": {
+            "format": "uuid",
+            "title": "Challenge Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_id"
+        ],
+        "title": "AdminResendIn",
+        "type": "object"
+      },
+      "AdminMeOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "full_name": {
+            "default": "",
+            "title": "Full Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
+          "password_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Changed At"
+          },
+          "last_login": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login"
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "status",
+          "is_superuser",
+          "must_change_password"
+        ],
+        "title": "AdminMeOut",
+        "type": "object"
+      },
+      "PasswordChangeIn": {
+        "properties": {
+          "current_password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChangeIn",
+        "type": "object"
+      },
+      "TrustedDeviceOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "TrustedDeviceOut",
+        "type": "object"
+      },
+      "AdminAccountListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAccountOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminAccountListOut",
+        "type": "object"
+      },
+      "AdminAccountOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "full_name": {
+            "default": "",
+            "title": "Full Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
+          "password_changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Changed At"
+          },
+          "last_login": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login"
+          },
+          "failed_login_attempts": {
+            "default": 0,
+            "title": "Failed Login Attempts",
+            "type": "integer"
+          },
+          "locked_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Until"
+          },
+          "date_joined": {
+            "format": "date-time",
+            "title": "Date Joined",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "status",
+          "is_superuser",
+          "must_change_password",
+          "date_joined"
+        ],
+        "title": "AdminAccountOut",
+        "type": "object"
+      },
+      "AdminAccountCreatedOut": {
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/AdminAccountOut"
+          },
+          "temporary_password": {
+            "title": "Temporary Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin",
+          "temporary_password"
+        ],
+        "title": "AdminAccountCreatedOut",
+        "type": "object"
+      },
+      "AdminAccountCreateIn": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "title": "Email",
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 32,
+            "minLength": 8,
+            "title": "Phone",
+            "type": "string"
+          },
+          "full_name": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "is_superuser": {
+            "default": false,
+            "title": "Is Superuser",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "phone"
+        ],
+        "title": "AdminAccountCreateIn",
+        "type": "object"
+      },
+      "AdminAccountPatch": {
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "is_superuser": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Superuser"
+          }
+        },
+        "title": "AdminAccountPatch",
         "type": "object"
       },
       "AddressOut": {
@@ -4249,7 +7714,7 @@
         "type": "object"
       },
       "AustralianState": {
-        "description": "الولايات والأقاليم الأسترالية السبعة (نسخة محلية — راجع docstring).",
+        "description": "الولايات والأقاليم الأسترالية السبعة.",
         "enum": [
           "NSW",
           "VIC",
@@ -5224,6 +8689,42 @@
         "title": "InsuranceDocumentIn",
         "type": "object"
       },
+      "ContractorVerificationsOut": {
+        "description": "السجل الكامل لتحقق مقاول واحد — كل الحالات، الأحدث أولًا.",
+        "properties": {
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "business_registrations": {
+            "items": {
+              "$ref": "#/components/schemas/BusinessRegistrationOut"
+            },
+            "title": "Business Registrations",
+            "type": "array"
+          },
+          "insurance_documents": {
+            "items": {
+              "$ref": "#/components/schemas/InsuranceDocumentOut"
+            },
+            "title": "Insurance Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contractor_id",
+          "eligible",
+          "business_registrations",
+          "insurance_documents"
+        ],
+        "title": "ContractorVerificationsOut",
+        "type": "object"
+      },
       "PendingVerificationsOut": {
         "description": "ما ينتظر المراجعة — النوعان منفصلان لا مدمجان في قائمة واحدة.",
         "properties": {
@@ -5435,8 +8936,12 @@
         "type": "object"
       },
       "PaymentSummaryOut": {
-        "description": "ملخص الدفع داخل الحجز — للعرض وحده.\n\n📌 سبب الوجود: شاشة الحجز تعرض حالة الدفع ومبلغه، وكانت تحتاج نداءً\n   ثانيًا لكل حجز (/bookings/{id}/payment). في شاشة القائمة كان ذلك\n   نداءً لكل صف.\n\n🔒 لا provider_reference ولا failure_reason هنا — والحذف هيكلي لا\n   مشروط: الشكل الذي لا يُعرِّف الحقل لا يستطيع كشفه مهما فعل\n   المُسلسِل. (نفس درس §43 الموثّق في payments/api/schemas.py.)\n\n⚠️ ملخص لا بديل: GET /api/bookings/{id}/payment يبقى مسار التفاصيل\n   بلا تغيير، وهو وحده ما يكشف provider_reference للإدارة.",
         "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -5456,12 +8961,63 @@
           "method": {
             "title": "Method",
             "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "provider_error_code": {
+            "title": "Provider Error Code",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
           }
         },
         "required": [
+          "id",
           "status",
           "amount",
-          "method"
+          "method",
+          "attempt_number",
+          "provider_error_code",
+          "created_at"
         ],
         "title": "PaymentSummaryOut",
         "type": "object"
@@ -7173,10 +10729,3349 @@
         ],
         "title": "SupportRequestIn",
         "type": "object"
+      },
+      "ConfirmedRole": {
+        "enum": [
+          "CUSTOMER",
+          "CONTRACTOR",
+          "ADMIN"
+        ],
+        "title": "ConfirmedRole",
+        "type": "string"
+      },
+      "UserFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfirmedRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_contractor": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Contractor"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "joined_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joined From"
+          },
+          "joined_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joined To"
+          }
+        },
+        "title": "UserFilters",
+        "type": "object"
+      },
+      "UserStatus": {
+        "description": "حالة الحساب على مستوى دورة حياته (منفصلة عن is_active التقني).",
+        "enum": [
+          "ACTIVE",
+          "INACTIVE",
+          "SUSPENDED"
+        ],
+        "title": "UserStatus",
+        "type": "string"
+      },
+      "AdminUserListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminUserListOut",
+        "type": "object"
+      },
+      "AdminUserOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_verified": {
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "is_contractor": {
+            "title": "Is Contractor",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "date_joined": {
+            "format": "date-time",
+            "title": "Date Joined",
+            "type": "string"
+          },
+          "last_login": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login"
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "email_verified",
+          "full_name",
+          "role",
+          "roles",
+          "is_contractor",
+          "status",
+          "is_active",
+          "is_superuser",
+          "date_joined"
+        ],
+        "title": "AdminUserOut",
+        "type": "object"
+      },
+      "AdminUserDetailOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_verified": {
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "is_contractor": {
+            "title": "Is Contractor",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "date_joined": {
+            "format": "date-time",
+            "title": "Date Joined",
+            "type": "string"
+          },
+          "last_login": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login"
+          },
+          "contractor_status": {
+            "title": "Contractor Status",
+            "type": "string"
+          },
+          "contractor_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Profile Id"
+          },
+          "bookings_count": {
+            "title": "Bookings Count",
+            "type": "integer"
+          },
+          "properties_count": {
+            "title": "Properties Count",
+            "type": "integer"
+          },
+          "social_providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Social Providers",
+            "type": "array"
+          },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "email_verified",
+          "full_name",
+          "role",
+          "roles",
+          "is_contractor",
+          "status",
+          "is_active",
+          "is_superuser",
+          "date_joined",
+          "contractor_status",
+          "bookings_count",
+          "properties_count",
+          "social_providers",
+          "must_change_password",
+          "updated_at"
+        ],
+        "title": "AdminUserDetailOut",
+        "type": "object"
+      },
+      "SuspendIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SuspendIn",
+        "type": "object"
+      },
+      "PropertyFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AustralianState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          }
+        },
+        "title": "PropertyFilters",
+        "type": "object"
+      },
+      "AdminAddressOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "street_address": {
+            "title": "Street Address",
+            "type": "string"
+          },
+          "suburb": {
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "postcode": {
+            "title": "Postcode",
+            "type": "string"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "required": [
+          "id",
+          "street_address",
+          "suburb",
+          "state",
+          "postcode",
+          "country"
+        ],
+        "title": "AdminAddressOut",
+        "type": "object"
+      },
+      "AdminPropertyListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPropertyOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminPropertyListOut",
+        "type": "object"
+      },
+      "AdminPropertyOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_phone": {
+            "title": "Owner Phone",
+            "type": "string"
+          },
+          "owner_name": {
+            "title": "Owner Name",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "property_type": {
+            "title": "Property Type",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminAddressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "owner_phone",
+          "owner_name",
+          "label",
+          "property_type",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPropertyOut",
+        "type": "object"
+      },
+      "AdminPropertyDetailOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_phone": {
+            "title": "Owner Phone",
+            "type": "string"
+          },
+          "owner_name": {
+            "title": "Owner Name",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "property_type": {
+            "title": "Property Type",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminAddressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "bookings_count": {
+            "title": "Bookings Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "owner_phone",
+          "owner_name",
+          "label",
+          "property_type",
+          "is_active",
+          "created_at",
+          "updated_at",
+          "bookings_count"
+        ],
+        "title": "AdminPropertyDetailOut",
+        "type": "object"
+      },
+      "BookingFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "created_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created From"
+          },
+          "created_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created To"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookingStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dispatch_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DispatchStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "contractor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Id"
+          },
+          "scheduled_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled From"
+          },
+          "scheduled_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled To"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "public_reference contains",
+            "title": "Q"
+          }
+        },
+        "title": "BookingFilters",
+        "type": "object"
+      },
+      "BookingStatus": {
+        "description": "حالة الحجز (§36.1).\n\n⚠️ ثلاث قيم فقط في هذه المرحلة — لا تُضاف قيم أخرى استباقًا\n   (IN_PROGRESS / COMPLETED وما شابه) قبل أن تُحسم دورة حياة العمل.\n\nPENDING   : أُنشئ، ولا مقاول مُسنَدًا بعد ولا سعر مكشوفًا.\nCONFIRMED : قَبِل مقاولٌ العرض، فكُشف السعر وثُبِّت (§36.1).\nCANCELLED : أُلغي.",
+        "enum": [
+          "PENDING",
+          "CONFIRMED",
+          "CANCELLED"
+        ],
+        "title": "BookingStatus",
+        "type": "string"
+      },
+      "DispatchStatus": {
+        "description": "تقدّم البحث عن مقاول — مقروء للعميل.\n\n📌 سبب الوجود: الحجز يبقى PENDING سواء كان البحث جاريًا أو انتهى بلا\n   مرشَّح، فلم يكن العميل يستطيع التمييز بين \"ما زلنا نبحث\" و\"لا يوجد\n   عامل متاح\". الحالتان كانتا متطابقتين تمامًا في الرد.\n\n⚠️ حقل عرض لا قرار: لا يغيّر status ولا يُلغي حجزًا ولا يُطلق إعادة\n   محاولة. القرار المفتوح #16 يبقى مفتوحًا كما هو.\n\nSEARCHING          : عرض نشط لدى مقاول، أو بحث لم يبدأ بعد.\nNO_CONTRACTOR      : جُرِّب كل مرشَّح مؤهَّل ولم يبقَ أحد.\nASSIGNED           : قَبِل مقاول — البحث انتهى.",
+        "enum": [
+          "SEARCHING",
+          "NO_CONTRACTOR",
+          "ASSIGNED"
+        ],
+        "title": "DispatchStatus",
+        "type": "string"
+      },
+      "AdminBookingListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminBookingOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminBookingListOut",
+        "type": "object"
+      },
+      "AdminBookingOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "dispatch_status": {
+            "title": "Dispatch Status",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "customer_phone": {
+            "title": "Customer Phone",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "suburb": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suburb"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "assigned_contractor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractorSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total"
+          },
+          "computed_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Price"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "public_reference",
+          "status",
+          "dispatch_status",
+          "customer_id",
+          "customer_phone",
+          "property_id",
+          "currency",
+          "requested_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminBookingOut",
+        "type": "object"
+      },
+      "ContractorSummaryOut": {
+        "properties": {
+          "profile_id": {
+            "format": "uuid",
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "business_name": {
+            "title": "Business Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "user_id",
+          "business_name"
+        ],
+        "title": "ContractorSummaryOut",
+        "type": "object"
+      },
+      "AdminBookingDetailOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "dispatch_status": {
+            "title": "Dispatch Status",
+            "type": "string"
+          },
+          "dispatch_round": {
+            "title": "Dispatch Round",
+            "type": "integer"
+          },
+          "last_dispatch_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Dispatch Attempt At"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/PersonSummaryOut"
+          },
+          "property": {
+            "$ref": "#/components/schemas/PropertySummaryOut"
+          },
+          "service_lines": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceLineOut"
+            },
+            "title": "Service Lines",
+            "type": "array"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total"
+          },
+          "computed_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Price"
+          },
+          "pricing_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Version"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "access_notes": {
+            "title": "Access Notes",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "customer_timezone": {
+            "title": "Customer Timezone",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "assigned_contractor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractorSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dispatch_offers": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchOfferOut"
+            },
+            "title": "Dispatch Offers",
+            "type": "array"
+          },
+          "payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "public_reference",
+          "status",
+          "dispatch_status",
+          "dispatch_round",
+          "customer",
+          "property",
+          "service_lines",
+          "currency",
+          "access_notes",
+          "customer_timezone",
+          "requested_at",
+          "dispatch_offers",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminBookingDetailOut",
+        "type": "object"
+      },
+      "DispatchOfferOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "dispatch_round": {
+            "title": "Dispatch Round",
+            "type": "integer"
+          },
+          "contractor": {
+            "$ref": "#/components/schemas/ContractorSummaryOut"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "distance_source": {
+            "title": "Distance Source",
+            "type": "string"
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
+          "total_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount"
+          },
+          "contractor_earnings": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Earnings"
+          },
+          "travel_fee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Travel Fee"
+          },
+          "services_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Services Total"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "pricing_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Version"
+          },
+          "offered_at": {
+            "format": "date-time",
+            "title": "Offered At",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_round",
+          "contractor",
+          "status",
+          "distance_source",
+          "currency",
+          "offered_at",
+          "expires_at"
+        ],
+        "title": "DispatchOfferOut",
+        "type": "object"
+      },
+      "JobSummaryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "marked_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked Done At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "JobSummaryOut",
+        "type": "object"
+      },
+      "PayoutSummaryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "contractor_user_id": {
+            "format": "uuid",
+            "title": "Contractor User Id",
+            "type": "string"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "amount",
+          "contractor_user_id",
+          "created_at"
+        ],
+        "title": "PayoutSummaryOut",
+        "type": "object"
+      },
+      "PersonSummaryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "full_name",
+          "status"
+        ],
+        "title": "PersonSummaryOut",
+        "type": "object"
+      },
+      "PropertySummaryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "property_type": {
+            "title": "Property Type",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminAddressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "property_type",
+          "is_active"
+        ],
+        "title": "PropertySummaryOut",
+        "type": "object"
+      },
+      "QuoteSummaryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "services_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Services Total"
+          },
+          "maximum_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Maximum Total"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "pricing_version": {
+            "title": "Pricing Version",
+            "type": "integer"
+          },
+          "service_snapshot": {
+            "title": "Service Snapshot"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "services_total",
+          "maximum_total",
+          "currency",
+          "pricing_version",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "QuoteSummaryOut",
+        "type": "object"
+      },
+      "ServiceLineOut": {
+        "properties": {
+          "service_type_id": {
+            "format": "uuid",
+            "title": "Service Type Id",
+            "type": "string"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          },
+          "room_count": {
+            "title": "Room Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "service_type_id",
+          "service_name",
+          "room_count"
+        ],
+        "title": "ServiceLineOut",
+        "type": "object"
+      },
+      "JobFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "created_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created From"
+          },
+          "created_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created To"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contractor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Id"
+          }
+        },
+        "title": "JobFilters",
+        "type": "object"
+      },
+      "JobStatus": {
+        "description": "حالة تنفيذ المهمة (§36.3).\n\n⚠️ أربع حالات — لا CANCELLED ولا غيرها. راجع docstring الملف.\n\nASSIGNED                       : قَبِل المقاول، ولم يبدأ التنفيذ بعد.\nIN_PROGRESS                    : المقاول أعلن بدء العمل.\nAWAITING_CUSTOMER_CONFIRMATION : المقاول أعلن الإنجاز، بانتظار العميل.\nCOMPLETED                      : العميل أكّد الإنجاز.\n\n📌 ASSIGNED أُضيفت لأن القبول والبدء كانا لحظة واحدة، فلم يكن للعميل\n   أي طريقة ليعرف أن مقاولًا قَبِل لكنه لم يصل بعد. الفصل يعطي أيضًا\n   تطبيق المقاول لحظة \"أنا في الطريق / أبدأ الآن\" التي لم تكن موجودة.",
+        "enum": [
+          "ASSIGNED",
+          "IN_PROGRESS",
+          "AWAITING_CUSTOMER_CONFIRMATION",
+          "COMPLETED"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "AdminJobListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminJobOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminJobListOut",
+        "type": "object"
+      },
+      "AdminJobOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "contractor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractorSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "marked_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked Done At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "customer_id",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminJobOut",
+        "type": "object"
+      },
+      "AdminJobDetailOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "contractor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractorSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "marked_done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked Done At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/AdminJobPhotoOut"
+            },
+            "title": "Photos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "customer_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "photos"
+        ],
+        "title": "AdminJobDetailOut",
+        "type": "object"
+      },
+      "AdminJobPhotoOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "photo_type": {
+            "title": "Photo Type",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "storage_key": {
+            "title": "Storage Key",
+            "type": "string"
+          },
+          "uploaded_by_id": {
+            "format": "uuid",
+            "title": "Uploaded By Id",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "photo_type",
+          "url",
+          "storage_key",
+          "uploaded_by_id",
+          "uploaded_at"
+        ],
+        "title": "AdminJobPhotoOut",
+        "type": "object"
+      },
+      "PaymentFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "created_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created From"
+          },
+          "created_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created To"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "needs_reconciliation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Reconciliation"
+          }
+        },
+        "title": "PaymentFilters",
+        "type": "object"
+      },
+      "PaymentStatus": {
+        "description": "حالة الشحن المباشر (§36.4، §13).\n\n⚠️ لا حالات تفويض/حجز (HELD، AUTHORIZED، CAPTURED): الـescrow مسحوب\n   من التصميم، وإضافتها تُحيي نموذجًا مُلغى — راجع docstring الملف.\n\nNOT_CHARGED     : لم يقبل مقاول بعد، فلا محاولة شحن.\nPROCESSING      : محاولة الشحن جارية لدى المزوّد.\nREQUIRES_ACTION : البنك يطلب مصادقة العميل (3-D Secure).\nSUCCEEDED       : تأكد الشحن.\nFAILED          : فشلت آخر محاولة.\nREFUNDED        : استُرد المبلغ فعليًا.\n\n⚠️ REFUNDED معرَّفة ولا يصل إليها أي مسار اليوم: الاسترداد عملية\n   حقيقية لدى المزوّد وسياسته غير محسومة. لا تُستعمل لتلوين حالة\n   بلا استرداد فعلي (§13).\n\n📌 PENDING مُبقاة للتوافق مع الصفوف القائمة وحدها — المسارات الجديدة\n   تبدأ NOT_CHARGED. حذفها كان سيكسر حجوزات مسجَّلة.",
+        "enum": [
+          "NOT_CHARGED",
+          "PENDING",
+          "PROCESSING",
+          "REQUIRES_ACTION",
+          "SUCCEEDED",
+          "FAILED",
+          "REFUNDED"
+        ],
+        "title": "PaymentStatus",
+        "type": "string"
+      },
+      "AdminPaymentListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPaymentOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminPaymentListOut",
+        "type": "object"
+      },
+      "AdminPaymentOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "provider_error_code": {
+            "title": "Provider Error Code",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "boolean"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "customer_id",
+          "amount",
+          "method",
+          "status",
+          "attempt_number",
+          "provider_error_code",
+          "needs_reconciliation",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPaymentOut",
+        "type": "object"
+      },
+      "AdminPaymentDetailOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "provider_error_code": {
+            "title": "Provider Error Code",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "boolean"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "method_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Summary"
+          },
+          "has_pending_action": {
+            "title": "Has Pending Action",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "customer_id",
+          "amount",
+          "method",
+          "status",
+          "attempt_number",
+          "provider_error_code",
+          "needs_reconciliation",
+          "created_at",
+          "updated_at",
+          "has_pending_action"
+        ],
+        "title": "AdminPaymentDetailOut",
+        "type": "object"
+      },
+      "PaymentReconcileOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "provider_error_code": {
+            "title": "Provider Error Code",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "boolean"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "method_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Summary"
+          },
+          "has_pending_action": {
+            "title": "Has Pending Action",
+            "type": "boolean"
+          },
+          "booking_confirmed": {
+            "title": "Booking Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "customer_id",
+          "amount",
+          "method",
+          "status",
+          "attempt_number",
+          "provider_error_code",
+          "needs_reconciliation",
+          "created_at",
+          "updated_at",
+          "has_pending_action",
+          "booking_confirmed"
+        ],
+        "title": "PaymentReconcileOut",
+        "type": "object"
+      },
+      "ReconcileIn": {
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/ReconcileOutcome"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "note": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "note"
+        ],
+        "title": "ReconcileIn",
+        "type": "object"
+      },
+      "ReconcileOutcome": {
+        "enum": [
+          "SUCCEEDED",
+          "FAILED"
+        ],
+        "title": "ReconcileOutcome",
+        "type": "string"
+      },
+      "PayoutFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "created_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created From"
+          },
+          "created_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created To"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contractor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contractor Id"
+          },
+          "needs_reconciliation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Reconciliation"
+          }
+        },
+        "title": "PayoutFilters",
+        "type": "object"
+      },
+      "PayoutStatus": {
+        "description": "حالة الدفع للمقاول.\n\n⚠️ ثلاث حالات فقط. لا BATCHED ولا SCHEDULED ولا QUEUED — الدفع فوري\n   بقرار محسوم، وأي حالة تُلمّح إلى تأجيل أو تجميع تخالفه.",
+        "enum": [
+          "PENDING",
+          "SUCCEEDED",
+          "FAILED"
+        ],
+        "title": "PayoutStatus",
+        "type": "string"
+      },
+      "AdminPayoutListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminPayoutOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminPayoutListOut",
+        "type": "object"
+      },
+      "AdminPayoutOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "contractor_user_id": {
+            "format": "uuid",
+            "title": "Contractor User Id",
+            "type": "string"
+          },
+          "contractor_phone": {
+            "title": "Contractor Phone",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "public_reference",
+          "contractor_user_id",
+          "contractor_phone",
+          "amount",
+          "status",
+          "needs_reconciliation",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminPayoutOut",
+        "type": "object"
+      },
+      "SupportFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "created_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created From"
+          },
+          "created_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created To"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "message contains",
+            "title": "Q"
+          }
+        },
+        "title": "SupportFilters",
+        "type": "object"
+      },
+      "SupportStatus": {
+        "description": "حالة معالجة الطلب.\n\n⚠️ ثلاث قيم فقط. لا CLOSED ولا REOPENED ولا WAITING_CUSTOMER: كلها\n   تفترض دورة محادثة غير موجودة. RESOLVED نهائية في هذه المرحلة.",
+        "enum": [
+          "SUBMITTED",
+          "UNDER_REVIEW",
+          "RESOLVED"
+        ],
+        "title": "SupportStatus",
+        "type": "string"
+      },
+      "AdminSupportRequestListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSupportRequestOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminSupportRequestListOut",
+        "type": "object"
+      },
+      "AdminSupportRequestOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "user_phone": {
+            "title": "User Phone",
+            "type": "string"
+          },
+          "user_name": {
+            "title": "User Name",
+            "type": "string"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "booking_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Reference"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "user_phone",
+          "user_name",
+          "category",
+          "message",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminSupportRequestOut",
+        "type": "object"
+      },
+      "SupportStatusPatch": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SupportStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "SupportStatusPatch",
+        "type": "object"
+      },
+      "BookingCountsOut": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "by_dispatch_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Dispatch Status",
+            "type": "object"
+          },
+          "created_today": {
+            "title": "Created Today",
+            "type": "integer"
+          },
+          "created_last_7_days": {
+            "title": "Created Last 7 Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "by_status",
+          "by_dispatch_status",
+          "created_today",
+          "created_last_7_days"
+        ],
+        "title": "BookingCountsOut",
+        "type": "object"
+      },
+      "DashboardSummaryOut": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "bookings": {
+            "$ref": "#/components/schemas/BookingCountsOut"
+          },
+          "pending_verifications": {
+            "$ref": "#/components/schemas/PendingVerificationsCountOut"
+          },
+          "open_support_requests": {
+            "title": "Open Support Requests",
+            "type": "integer"
+          },
+          "payments": {
+            "$ref": "#/components/schemas/PaymentCountsOut"
+          },
+          "payouts": {
+            "$ref": "#/components/schemas/PayoutCountsOut"
+          },
+          "gross_revenue": {
+            "$ref": "#/components/schemas/RevenueOut"
+          },
+          "contractors_available_now": {
+            "title": "Contractors Available Now",
+            "type": "integer"
+          },
+          "total_customers": {
+            "title": "Total Customers",
+            "type": "integer"
+          },
+          "total_contractors": {
+            "title": "Total Contractors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "bookings",
+          "pending_verifications",
+          "open_support_requests",
+          "payments",
+          "payouts",
+          "gross_revenue",
+          "contractors_available_now",
+          "total_customers",
+          "total_contractors"
+        ],
+        "title": "DashboardSummaryOut",
+        "type": "object"
+      },
+      "PaymentCountsOut": {
+        "properties": {
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "integer"
+          },
+          "failed_last_30_days": {
+            "title": "Failed Last 30 Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "needs_reconciliation",
+          "failed_last_30_days"
+        ],
+        "title": "PaymentCountsOut",
+        "type": "object"
+      },
+      "PayoutCountsOut": {
+        "properties": {
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "needs_reconciliation": {
+            "title": "Needs Reconciliation",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "failed",
+          "needs_reconciliation"
+        ],
+        "title": "PayoutCountsOut",
+        "type": "object"
+      },
+      "PendingVerificationsCountOut": {
+        "properties": {
+          "business_registrations": {
+            "title": "Business Registrations",
+            "type": "integer"
+          },
+          "insurance_documents": {
+            "title": "Insurance Documents",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "business_registrations",
+          "insurance_documents",
+          "total"
+        ],
+        "title": "PendingVerificationsCountOut",
+        "type": "object"
+      },
+      "RevenueOut": {
+        "properties": {
+          "today": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Today"
+          },
+          "last_7_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Last 7 Days"
+          },
+          "last_30_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Last 30 Days"
+          }
+        },
+        "required": [
+          "today",
+          "last_7_days",
+          "last_30_days"
+        ],
+        "title": "RevenueOut",
+        "type": "object"
+      },
+      "AuditFilters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Type"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "title": "AuditFilters",
+        "type": "object"
+      },
+      "AuditEntryListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AuditEntryListOut",
+        "type": "object"
+      },
+      "AuditEntryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_label": {
+            "title": "Actor Label",
+            "type": "string"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "details": {
+            "title": "Details"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actor_label",
+          "action",
+          "target_type",
+          "created_at"
+        ],
+        "title": "AuditEntryOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
       "ActiveUserJWTAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "AdminJWTAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "SuperuserJWTAuth": {
         "type": "http",
         "scheme": "bearer"
       }
@@ -7231,6 +14126,42 @@
     {
       "name": "Support",
       "description": "Support requests raised from the app. One-way in this version: no replies and no attachments."
+    },
+    {
+      "name": "Admin — Users",
+      "description": "Back-office: user accounts, suspension (ADMIN)."
+    },
+    {
+      "name": "Admin — Properties",
+      "description": "Back-office: all properties (ADMIN, read-only)."
+    },
+    {
+      "name": "Admin — Bookings",
+      "description": "Back-office: bookings with full dispatch history (ADMIN, read-only)."
+    },
+    {
+      "name": "Admin — Jobs",
+      "description": "Back-office: jobs and proof photos (ADMIN, read-only)."
+    },
+    {
+      "name": "Admin — Payments",
+      "description": "Back-office: customer payments (ADMIN); reconciliation (SUPERUSER)."
+    },
+    {
+      "name": "Admin — Payouts",
+      "description": "Back-office: contractor payouts (ADMIN); reconciliation (SUPERUSER)."
+    },
+    {
+      "name": "Admin — Support",
+      "description": "Back-office: support requests and their status (ADMIN)."
+    },
+    {
+      "name": "Admin — Dashboard",
+      "description": "Back-office: summary counters (ADMIN)."
+    },
+    {
+      "name": "Admin — Audit log",
+      "description": "Back-office: administrative audit trail (SUPERUSER)."
     },
     {
       "name": "System",

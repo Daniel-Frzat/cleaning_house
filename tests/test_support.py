@@ -346,13 +346,16 @@ def test_model_rejects_a_foreign_booking(customer, other_customer):
 
 
 def test_no_status_change_endpoint():
-    """⚠️ تغيير الحالة من لوحة الإدارة وحدها في هذه المرحلة."""
+    """
+    ⚠️ لا تغيير للحالة من مسارات المستخدم. الإدارة وحدها تغيّرها — من لوحة
+       Django أو من /api/admin/support-requests (AdminJWTAuth).
+    """
     from config.urls import api
 
     paths = api.get_openapi_schema()["paths"]
 
     for path, methods in paths.items():
-        if "support-requests" in path:
+        if "support-requests" in path and not path.startswith("/api/admin/"):
             assert set(methods) <= {"get", "post"}, f"{path} exposes {sorted(methods)}"
 
 

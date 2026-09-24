@@ -14,12 +14,10 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.db.models import Count, Q
 from django.template.response import TemplateResponse
 
 from apps.audit.admin import EMPTY, BackOfficeMixin, ReadOnlyAdminMixin
-from apps.audit.services.audit import record
 
 from .models import BusinessRegistration, ContractorProfile, InsuranceDocument, VerificationStatus
 from .services import verification as verification_service
@@ -194,7 +192,6 @@ class ReviewableDocumentAdmin(BackOfficeMixin, admin.ModelAdmin):
 
     # يضبطها كل صنف فرعي
     review_function = None
-    audit_domain = None
 
     list_filter = ("status", "created_at", "reviewed_at")
     date_hierarchy = "created_at"
@@ -236,15 +233,9 @@ class ReviewableDocumentAdmin(BackOfficeMixin, admin.ModelAdmin):
         done, failed = 0, []
         for document in queryset:
             try:
-                with transaction.atomic():
-                    reviewed = review(request.user, document.pk, status, reason)
-                    record(
-                        request.user,
-                        f"{self.audit_domain}.{verb}",
-                        target=reviewed,
-                        details={"status": status, "reason": reviewed.rejection_reason or ""},
-                        request=request,
-                    )
+                # 📌 خدمة المراجعة تسجّل أثر التدقيق بنفسها — مصدر واحد لكل
+                #    المسارات (اللوحة والـAPI)، فلا يُسجَّل مرتين من هنا.
+                review(request.user, document.pk, status, reason, request=request)
                 done += 1
             except (
                 verification_service.VerificationError,
@@ -297,7 +288,6 @@ class ReviewableDocumentAdmin(BackOfficeMixin, admin.ModelAdmin):
 @admin.register(BusinessRegistration)
 class BusinessRegistrationAdmin(ReviewableDocumentAdmin):
     review_function = staticmethod(verification_service.review_business_registration)
-    audit_domain = "business_registration"
 
     list_display = ("business_name", "abn", "contractor_link", "status_display", "reviewer_link", "reviewed_at", "created_at")
     search_fields = ("business_name", "abn", "contractor__business_name", "contractor__user__phone")
@@ -314,7 +304,6 @@ class BusinessRegistrationAdmin(ReviewableDocumentAdmin):
 @admin.register(InsuranceDocument)
 class InsuranceDocumentAdmin(ReviewableDocumentAdmin):
     review_function = staticmethod(verification_service.review_insurance_document)
-    audit_domain = "insurance_document"
 
     list_display = (
         "document_reference",

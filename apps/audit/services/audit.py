@@ -46,9 +46,17 @@ def record(actor, action, target=None, details=None, request=None, ip=None):
     return entry
 
 
-def list_entries(actor=None, action=None, target_type=None, target_id=None):
-    """قراءة السجل للإدارة — الأحدث أولًا، بمرشِّحات اختيارية."""
-    qs = AuditLog.objects.select_related("actor")
+def list_entries(
+    actor=None, action=None, target_type=None, target_id=None, date_from=None, date_to=None
+):
+    """
+    قراءة السجل للإدارة — الأحدث أولًا، بمرشِّحات اختيارية.
+
+    date_from/date_to تاريخان شاملان للطرفين بالتقويم المحلي للمنصة.
+    """
+    from .backoffice import filter_date_range
+
+    qs = AuditLog.objects.select_related("actor").order_by("-created_at")
     if actor is not None:
         qs = qs.filter(actor_id=actor)
     if action:
@@ -57,4 +65,4 @@ def list_entries(actor=None, action=None, target_type=None, target_id=None):
         qs = qs.filter(target_type=target_type)
     if target_id:
         qs = qs.filter(target_id=str(target_id))
-    return qs
+    return filter_date_range(qs, "created_at", date_from, date_to)

@@ -17,10 +17,18 @@ import logging
 from django.db import transaction
 
 from apps.accounts.roles import ConfirmedRole
+from apps.audit.services.audit import record
 
 from ..models import PricingConfig, ServiceType
 
 logger = logging.getLogger(__name__)
+
+
+def _audit_value(value):
+    """قيم JSON آمنة لسجل التدقيق — Decimal نصًا لا float (لا فقد دقة)."""
+    if isinstance(value, (bool, int, str)) or value is None:
+        return value
+    return str(value)
 
 
 class CatalogError(Exception):
@@ -73,7 +81,9 @@ def assert_is_admin(user):
 # ServiceType — عمليات
 # ------------------------------------------------------------
 @transaction.atomic
-def create_service_type(user, name, room_price, base_price, description="", is_active=True):
+def create_service_type(
+    user, name, room_price, base_price, description="", is_active=True, request=None
+):
     """ينشئ نوع خدمة جديدًا في الكتالوج."""
     assert_is_admin(user)
 
@@ -86,6 +96,19 @@ def create_service_type(user, name, room_price, base_price, description="", is_a
     )
     service.full_clean()
     service.save()
+
+    record(
+        user,
+        "service_type.create",
+        target=service,
+        details={
+            "name": service.name,
+            "room_price": _audit_value(service.room_price),
+            "base_price": _audit_value(service.base_price),
+            "is_active": service.is_active,
+        },
+        request=request,
+    )
 
     logger.info(
         "ServiceType created (service_id=%s, name=%s, by=%s)", service.id, name, user.id
@@ -115,7 +138,7 @@ def list_service_types(user):
 
 
 @transaction.atomic
-def update_service_type(user, service_id, **fields):
+def update_service_type(user, service_id, request=None, **fields):
     """
     يعدّل حقول نوع خدمة.
 
@@ -124,13 +147,25 @@ def update_service_type(user, service_id, **fields):
     """
     service = get_service_type(user, service_id)
 
+    changes = {}
     for key, value in fields.items():
         if key not in UPDATABLE_FIELDS:
             raise CatalogError(f"Field '{key}' cannot be updated here.")
+        before = getattr(service, key)
         setattr(service, key, value)
+        if before != value:
+            changes[key] = {"from": _audit_value(before), "to": _audit_value(value)}
 
     service.full_clean()
     service.save()
+
+    record(
+        user,
+        "service_type.update",
+        target=service,
+        details={"changes": changes},
+        request=request,
+    )
 
     logger.info(
         "ServiceType updated (service_id=%s, fields=%s, by=%s)",
@@ -142,7 +177,7 @@ def update_service_type(user, service_id, **fields):
 
 
 @transaction.atomic
-def deactivate_service_type(user, service_id):
+def deactivate_service_type(user, service_id, request=None):
     """
     تعطيل ناعم (is_active=False) — لا حذف فعلي.
 
@@ -150,8 +185,17 @@ def deactivate_service_type(user, service_id):
     """
     service = get_service_type(user, service_id)
 
+    was_active = service.is_active
     service.is_active = False
     service.save(update_fields=["is_active", "updated_at"])
+
+    record(
+        user,
+        "service_type.deactivate",
+        target=service,
+        details={"was_active": was_active},
+        request=request,
+    )
 
     logger.info("ServiceType deactivated (service_id=%s, by=%s)", service.id, user.id)
     return service
@@ -214,13 +258,24 @@ def get_pricing_config(user):
 
 
 @transaction.atomic
-def update_pricing_config(user, price_per_km):
+def update_pricing_config(user, price_per_km, request=None):
     """يحدّث سعر الكيلومتر العام — قيمة واحدة للنظام كله."""
     config = get_pricing_config(user)
 
+    before = config.price_per_km
     config.price_per_km = price_per_km
     config.full_clean()
     config.save()
+
+    record(
+        user,
+        "pricing_config.update",
+        target=config,
+        details={
+            "price_per_km": {"from": _audit_value(before), "to": _audit_value(price_per_km)}
+        },
+        request=request,
+    )
 
     logger.info(
         "PricingConfig updated (price_per_km=%s, by=%s)", config.price_per_km, user.id

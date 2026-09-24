@@ -35,23 +35,9 @@ from .roles import ConfirmedRole
 # ============================================================
 # أدوات إبطال الجلسات — تُستعمل من الأفعال وإعادة تعيين كلمة السر
 # ============================================================
-def blacklist_refresh_tokens(user):
-    """يضيف كل توكن refresh سارٍ للمستخدم إلى القائمة السوداء. يعيد العدد."""
-    outstanding = OutstandingToken.objects.filter(
-        user=user, expires_at__gt=timezone.now(), blacklistedtoken__isnull=True
-    )
-    count = 0
-    for token in outstanding:
-        _, created = BlacklistedToken.objects.get_or_create(token=token)
-        count += int(created)
-    return count
-
-
-def revoke_trusted_devices(user):
-    """يُبطل كل جهاز موثوق سارٍ (revoked_at) — لا حذف، فيبقى الأثر."""
-    return TrustedDevice.objects.filter(user=user, revoked_at__isnull=True).update(
-        revoked_at=timezone.now()
-    )
+# المصدر الوحيد لإبطال الجلسات — نفس ما يستعمله الـAPI
+from .services.sessions import revoke_refresh_tokens as blacklist_refresh_tokens  # noqa: E402
+from .services.sessions import revoke_trusted_devices  # noqa: E402
 
 
 def can_manage_account(actor, target):

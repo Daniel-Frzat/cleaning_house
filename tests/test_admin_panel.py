@@ -333,7 +333,9 @@ def test_approve_action_goes_through_service_and_audits(su_client, superuser, wo
     assert registration.status == VerificationStatus.VERIFIED
     assert registration.reviewed_by == superuser
     assert registration.reviewed_at is not None
-    entry = AuditLog.objects.get(action="business_registration.approve")
+    # أثر التدقيق تكتبه خدمة المراجعة نفسها (مصدر واحد للّوحة والـAPI)
+    entry = AuditLog.objects.get(action="business_registration.review")
+    assert entry.details["to"] == VerificationStatus.VERIFIED
     assert entry.actor == superuser
     assert entry.target_id == str(registration.pk)
 
@@ -358,7 +360,7 @@ def test_reject_action_requires_a_reason(su_client, superuser, world):
     assert blank.status_code == 200
     insurance.refresh_from_db()
     assert insurance.status == VerificationStatus.PENDING
-    assert not AuditLog.objects.filter(action="insurance_document.reject").exists()
+    assert not AuditLog.objects.filter(action="insurance_document.review").exists()
 
     done = su_client.post(
         url,
@@ -374,8 +376,9 @@ def test_reject_action_requires_a_reason(su_client, superuser, world):
     assert insurance.status == VerificationStatus.REJECTED
     assert insurance.rejection_reason == "Policy number unreadable"
     assert insurance.reviewed_by == superuser
-    entry = AuditLog.objects.get(action="insurance_document.reject")
-    assert entry.details["reason"] == "Policy number unreadable"
+    entry = AuditLog.objects.get(action="insurance_document.review")
+    assert entry.details["to"] == VerificationStatus.REJECTED
+    assert entry.details["rejection_reason"] == "Policy number unreadable"
 
 
 @pytest.mark.django_db
