@@ -101,7 +101,7 @@ def make_contractor(admin, phone="+61400330002", coords=("-33.878800",
         latitude=Decimal(coords[0]), longitude=Decimal(coords[1]),
         availability_status=AvailabilityStatus.AVAILABLE)
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Co",
+        contractor=profile, abn="51824753556", business_name="Co",
         status=VerificationStatus.VERIFIED, reviewed_by=admin,
         reviewed_at=timezone.now())
     InsuranceDocument.objects.create(

@@ -61,6 +61,35 @@ class InvalidReviewStatusError(VerificationError):
     code = "invalid_review_status"
 
 
+class AlreadyReviewedError(VerificationError):
+    """
+    السجل رُوجع مسبقًا — القرار نهائي.
+
+    🔒 قلب VERIFIED إلى REJECTED (أو العكس) كان يمحو المراجِع الأول
+       بلا أثر. التغيير يكون بتقديم جديد من المقاول ثم مراجعته.
+    """
+
+    code = "already_reviewed"
+
+
+class SelfReviewError(VerificationError):
+    """المراجِع هو صاحب المستند."""
+
+    code = "self_review_forbidden"
+
+
+class ExpiredDocumentError(VerificationError):
+    """وثيقة تأمين منتهية — لا تُقدَّم ولا تُعتمد."""
+
+    code = "document_expired"
+
+
+class SubmissionPendingError(VerificationError):
+    """تقديم سابق من النوع نفسه ما زال قيد المراجعة."""
+
+    code = "submission_pending"
+
+
 # الحالات التي تُنهي المراجعة. PENDING ليست قرارًا — لا يُعاد إليها سجل.
 TERMINAL_REVIEW_STATUSES = {
     VerificationStatus.VERIFIED,
@@ -76,10 +105,12 @@ def submit_business_registration(user, abn, business_name):
     """
     يقدّم تسجيل نشاط جديدًا — يبدأ PENDING دائمًا.
 
-    ⚠️ التعدد مسموح عمدًا: إعادة التقديم بعد رفض، أو تحديث بيانات. لا
-       قيد يمنع وجود عدة سجلات لنفس المقاول.
+    ⚠️ التعدد مسموح عمدًا: إعادة التقديم بعد رفض، أو تحديث بيانات —
+       لكن تقديمًا واحدًا قيد المراجعة في كل لحظة، حتى لا تُغرق طابور
+       المراجعة بنسخ متكررة.
     """
     profile = get_own_profile(user)
+    _assert_no_pending(BusinessRegistration, profile)
 
     registration = BusinessRegistration(
         contractor=profile,
@@ -104,8 +135,12 @@ def submit_insurance_document(user, document_reference, expiry_date):
     يقدّم وثيقة تأمين جديدة — تبدأ PENDING دائمًا.
 
     ⚠️ document_reference نص وليس ملفًا مرفوعًا (Infra §7).
+    🔒 وثيقة منتهية لا تُقدَّم: اعتمادها لا يمنح أهلية أصلًا.
     """
     profile = get_own_profile(user)
+    _assert_no_pending(InsuranceDocument, profile)
+    if expiry_date < timezone.localdate():
+        raise ExpiredDocumentError("The insurance document has already expired.")
 
     document = InsuranceDocument(
         contractor=profile,
@@ -120,6 +155,13 @@ def submit_insurance_document(user, document_reference, expiry_date):
         "Insurance document submitted (id=%s, contractor_id=%s)", document.id, profile.id
     )
     return document
+
+
+def _assert_no_pending(model, profile):
+    if model.objects.filter(contractor=profile, status=VerificationStatus.PENDING).exists():
+        raise SubmissionPendingError(
+            "A previous submission is still under review. Wait for its decision."
+        )
 
 
 def list_own_business_registrations(user):
@@ -160,7 +202,9 @@ def _review(user, instance, status, rejection_reason):
     """
     منطق المراجعة المشترك بين النوعين.
 
-    🔒 يفرض: الدور ADMIN، الحالة نهائية، والسبب موجود عند الرفض.
+    🔒 يفرض: الدور ADMIN، الحالة نهائية، والسبب موجود عند الرفض، والسجل
+       ما زال PENDING (المستدعي قفله)، والمراجِع ليس صاحب المستند، ولا
+       اعتماد لوثيقة تأمين منتهية.
     """
     assert_is_admin(user)
 
@@ -168,6 +212,21 @@ def _review(user, instance, status, rejection_reason):
         raise InvalidReviewStatusError(
             "Review status must be VERIFIED or REJECTED."
         )
+
+    if instance.status != VerificationStatus.PENDING:
+        raise AlreadyReviewedError(
+            f"This submission was already {instance.status.lower()}; decisions are final."
+        )
+
+    if instance.contractor.user_id == user.id:
+        raise SelfReviewError("You cannot review your own submission.")
+
+    if (
+        status == VerificationStatus.VERIFIED
+        and getattr(instance, "expiry_date", None) is not None
+        and instance.expiry_date < timezone.localdate()
+    ):
+        raise ExpiredDocumentError("An expired insurance document cannot be approved.")
 
     reason = (rejection_reason or "").strip()
 
@@ -200,7 +259,13 @@ def review_business_registration(user, registration_id, status, rejection_reason
     """يعتمد أو يرفض تسجيل نشاط — ADMIN فقط."""
     assert_is_admin(user)
 
-    registration = BusinessRegistration.objects.filter(pk=registration_id).first()
+    # 🔒 قفل: مراجعان متزامنان لا يمرّان معًا على PENDING
+    registration = (
+        BusinessRegistration.objects.select_for_update()
+        .select_related("contractor")
+        .filter(pk=registration_id)
+        .first()
+    )
     if registration is None:
         raise VerificationNotFoundError("Business registration not found.")
 
@@ -212,7 +277,12 @@ def review_insurance_document(user, document_id, status, rejection_reason=None):
     """يعتمد أو يرفض وثيقة تأمين — ADMIN فقط."""
     assert_is_admin(user)
 
-    document = InsuranceDocument.objects.filter(pk=document_id).first()
+    document = (
+        InsuranceDocument.objects.select_for_update()
+        .select_related("contractor")
+        .filter(pk=document_id)
+        .first()
+    )
     if document is None:
         raise VerificationNotFoundError("Insurance document not found.")
 
@@ -240,6 +310,16 @@ def latest_insurance_document(contractor_profile):
     )
 
 
+def _latest_reviewed(model, contractor_profile):
+    """أحدث سجل صدر فيه قرار — PENDING لا يُحسب."""
+    return (
+        model.objects.filter(contractor=contractor_profile)
+        .exclude(status=VerificationStatus.PENDING)
+        .order_by("-created_at")
+        .first()
+    )
+
+
 def is_contractor_eligible(contractor_profile) -> bool:
     """
     أهلية تشغيلية محسوبة لحظيًا (Change Set §6).
@@ -253,17 +333,19 @@ def is_contractor_eligible(contractor_profile) -> bool:
        التالي لانتهاء التأمين ما لم تُحدّثها مهمة خلفية — وتلك المهمة بند
        مفتوح صراحةً (Infra §5). الحساب اللحظي يجعل الانتهاء يسري من تلقائه.
 
-    ⚠️ "الأحدث" يُحسم بـcreated_at وحده: سجل مرفوض أحدث يُبطل الأهلية حتى
-       لو وُجد سجل معتمد أقدم — وهو السلوك الصحيح، فالأحدث يعكس الوضع الحالي.
+    ⚠️ "الأحدث" = أحدث سجل **صدر فيه قرار** (بـcreated_at): سجل مرفوض أحدث
+       يُبطل الأهلية حتى لو وُجد معتمد أقدم — فالأحدث يعكس الوضع الحالي.
+       أما التقديم المعلّق (تجديد تأمين قبل انتهائه مثلًا) فلا يُسقط أهلية
+       قائمة: المقاول الذي جدّد مبكرًا لا يُعاقَب بالتوقف حتى تُراجَع وثيقته.
     """
     if contractor_profile is None:
         return False
 
-    registration = latest_business_registration(contractor_profile)
+    registration = _latest_reviewed(BusinessRegistration, contractor_profile)
     if registration is None or registration.status != VerificationStatus.VERIFIED:
         return False
 
-    insurance = latest_insurance_document(contractor_profile)
+    insurance = _latest_reviewed(InsuranceDocument, contractor_profile)
     if insurance is None or insurance.status != VerificationStatus.VERIFIED:
         return False
 

@@ -20,7 +20,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import profile as svc
 from ..services import verification as vsvc
@@ -38,7 +38,7 @@ from .schemas import (
     ReviewPatch,
 )
 
-router = Router(tags=["Admin — Contractors"], auth=JWTAuth())
+router = Router(tags=["Admin — Contractors"], auth=ActiveUserJWTAuth())
 
 
 def _error(status, code, detail):
@@ -131,6 +131,10 @@ def _review_error(exc):
         return _error(400, exc.code, str(exc))
     if isinstance(exc, vsvc.InvalidReviewStatusError):
         return _error(422, exc.code, str(exc))
+    if isinstance(exc, vsvc.SelfReviewError):
+        return _error(403, exc.code, str(exc))
+    if isinstance(exc, (vsvc.AlreadyReviewedError, vsvc.ExpiredDocumentError)):
+        return _error(409, exc.code, str(exc))
     return None
 
 
@@ -182,6 +186,7 @@ def list_pending_verifications(request):
         400: ErrorOut,
         403: ErrorOut,
         404: ErrorOut,
+        409: ErrorOut,
         422: ErrorOut,
     },
     summary="Approve or reject a business registration (admin only)",
@@ -220,7 +225,13 @@ def review_business_registration(request, registration_id: uuid.UUID, payload: R
         return _error(403, exc.code, str(exc))
     except vsvc.VerificationNotFoundError:
         return _error(404, "verification_not_found", "Business registration not found.")
-    except (vsvc.MissingRejectionReasonError, vsvc.InvalidReviewStatusError) as exc:
+    except (
+        vsvc.MissingRejectionReasonError,
+        vsvc.InvalidReviewStatusError,
+        vsvc.SelfReviewError,
+        vsvc.AlreadyReviewedError,
+        vsvc.ExpiredDocumentError,
+    ) as exc:
         return _review_error(exc)
     except ValidationError as exc:
         return _error(422, "validation_error", "; ".join(exc.messages))
@@ -238,6 +249,7 @@ def review_business_registration(request, registration_id: uuid.UUID, payload: R
         400: ErrorOut,
         403: ErrorOut,
         404: ErrorOut,
+        409: ErrorOut,
         422: ErrorOut,
     },
     summary="Approve or reject an insurance document (admin only)",
@@ -273,7 +285,13 @@ def review_insurance_document(request, document_id: uuid.UUID, payload: ReviewPa
         return _error(403, exc.code, str(exc))
     except vsvc.VerificationNotFoundError:
         return _error(404, "verification_not_found", "Insurance document not found.")
-    except (vsvc.MissingRejectionReasonError, vsvc.InvalidReviewStatusError) as exc:
+    except (
+        vsvc.MissingRejectionReasonError,
+        vsvc.InvalidReviewStatusError,
+        vsvc.SelfReviewError,
+        vsvc.AlreadyReviewedError,
+        vsvc.ExpiredDocumentError,
+    ) as exc:
         return _review_error(exc)
     except ValidationError as exc:
         return _error(422, "validation_error", "; ".join(exc.messages))

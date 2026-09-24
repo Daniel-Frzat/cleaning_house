@@ -39,7 +39,7 @@
             }
           },
           "429": {
-            "description": "A code was requested too recently. `retry_after_seconds` says how long to wait before asking again.",
+            "description": "Too many codes requested — cooldown (`otp_resend_cooldown`) or daily/hourly cap (`otp_rate_limited`). `retry_after_seconds` says how long to wait.",
             "content": {
               "application/json": {
                 "schema": {
@@ -49,7 +49,17 @@
             }
           },
           "400": {
-            "description": "The code could not be sent — invalid phone number or SMS provider failure.",
+            "description": "The phone number is not a valid international number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The SMS provider is unavailable or not configured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -59,7 +69,7 @@
             }
           }
         },
-        "description": "**Who may call:** anyone — this endpoint is public and needs no token.\n\nSends a one-time password by SMS to the given phone number and returns how long it stays valid.\n\n**Side effects:** an OTP is generated and handed to the configured SMS provider. The response never contains the code, and it is deliberately identical whether or not an account exists for the number, so it cannot be used to discover registered users.\n\n**Note:** no SMS provider ships with this build, so delivery fails until one is configured.",
+        "description": "**Who may call:** anyone — this endpoint is public and needs no token.\n\nSends a one-time password by SMS to the given phone number and returns how long it stays valid.\n\n**Side effects:** an OTP is generated and handed to the configured SMS provider. The response never contains the code, and it is deliberately identical whether or not an account exists for the number, so it cannot be used to discover registered users.\n\n**Limits:** one code per number per cooldown period, a daily cap per number, and an hourly cap per client IP.\n\n**Test numbers:** numbers listed in the server's `OTP_TEST_NUMBERS` receive no SMS and accept their fixed configured code. Every other number is unaffected.\n\n**Note:** no SMS provider ships with this build, so delivery to real numbers fails with `503` until one is configured.",
         "tags": [
           "Auth"
         ],
@@ -211,6 +221,75 @@
         }
       }
     },
+    "/api/auth/token/refresh": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_refresh_token",
+        "summary": "Refresh the access token",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The refresh token is invalid, expired or already used, or the account is no longer active. Log in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone holding a valid `refresh` token — no access token is needed, since this is how an expired one is replaced.\n\nReturns a new `access` **and a new `refresh`** token. The submitted refresh token is revoked immediately (rotation): store the new one and discard the old. Reusing an old refresh token returns `401`.\n\nClaims (role, status) are rebuilt from the account's current state. A suspended or deactivated account cannot refresh.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_logout",
+        "summary": "Log out",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "description": "**Who may call:** anyone holding a `refresh` token — no access token is needed, so logout works even after the access token expired.\n\nRevokes the refresh token so it can no longer be used. The current access token stays valid until its short lifetime ends; the client should delete both tokens locally.\n\nIdempotent: an already revoked, expired or malformed token also returns `204`.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/api/auth/me": {
       "get": {
         "operationId": "apps_accounts_api_auth_me",
@@ -234,7 +313,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -274,7 +353,7 @@
             }
           }
         },
-        "description": "**Who may call:** any authenticated user, on their **own** account only — the account is taken from the token and no user id is accepted.\n\nPartial update: only the fields present in the body are changed. Sending `email` as an empty string clears it.\n\n**Only `full_name` and `email` can be changed here.** `phone` is the login identifier and would need OTP verification of the new number; `role` and `status` are privilege fields managed by an administrator. Neither is accepted, and sending one is rejected rather than ignored.\n\n**Side effects:** none beyond persisting the two fields. Email is unique across accounts.",
+        "description": "**Who may call:** any authenticated user, on their **own** account only — the account is taken from the token and no user id is accepted.\n\nPartial update: only the fields present in the body are changed. Sending `email` as an empty string clears it.\n\n**Only `full_name` and `email` can be changed here.** `phone` is the login identifier and would need OTP verification of the new number; `role` and `status` are privilege fields managed by an administrator. Neither is accepted, and sending one is rejected rather than ignored.\n\n**Side effects:** none beyond persisting the two fields. Email is unique across accounts. Changing the email marks it unverified, so it is never used to link an Apple/Google login to this account.",
         "tags": [
           "Auth"
         ],
@@ -290,7 +369,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -348,7 +427,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -388,7 +467,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -447,7 +526,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -497,6 +576,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The submitted property or address fields failed validation.",
             "content": {
@@ -524,7 +613,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -573,15 +662,25 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n**Soft delete:** the row is kept and `is_active` is set to `false`. Nothing is erased, because past bookings still reference this property. The deactivated property is returned in the response.\n\n**Side effects:** the property disappears from `GET /api/properties` and can no longer be used for new bookings.",
+        "description": "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n**Soft delete:** the row is kept and `is_active` is set to `false`. Nothing is erased, because past bookings still reference this property. The deactivated property is returned in the response.\n\n**Side effects:** the property disappears from `GET /api/properties` and can no longer be used for new bookings.\n\nRefused with `409 property_has_active_bookings` while the property has a `PENDING` booking, or a `CONFIRMED` one whose job is not completed. Changing the address is refused while a contractor is tied to it (a live offer, or a confirmed booking not yet completed), and changing the state is refused while any booking is `PENDING`.",
         "tags": [
           "Properties"
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -639,7 +738,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -679,7 +778,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -738,7 +837,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -815,7 +914,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -872,7 +971,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -910,7 +1009,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -966,7 +1065,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -998,7 +1097,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1047,7 +1146,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1115,7 +1214,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -1161,7 +1260,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -1227,7 +1326,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1295,7 +1394,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1336,6 +1435,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The ABN or business name failed validation.",
             "content": {
@@ -1363,7 +1472,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -1413,7 +1522,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1454,6 +1563,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The document reference or expiry date failed validation.",
             "content": {
@@ -1481,7 +1600,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
@@ -1531,7 +1650,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1573,7 +1692,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1632,7 +1751,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1670,7 +1789,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1732,6 +1851,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "`status` is not a valid review decision, or validation failed.",
             "content": {
@@ -1759,7 +1888,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1821,6 +1950,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "`status` is not a valid review decision, or validation failed.",
             "content": {
@@ -1848,7 +1987,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -1899,6 +2038,16 @@
               }
             }
           },
+          "409": {
+            "description": "The property has been removed (`property_inactive`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The booking failed validation.",
             "content": {
@@ -1910,7 +2059,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and `scheduled_at` must be in the future and within business hours (07:00-19:00) in the property's local timezone.\n\n`scheduled_at` is required (ISO 8601). Sent without an offset it is read in the timezone derived from the property's state; sent with an explicit offset it is honoured as given. Either way it is stored in UTC and returned as both `scheduled_at` (UTC) and `scheduled_at_local`, so the client never has to convert.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
+        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and `scheduled_at` must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes away, and within business hours (07:00-19:00) in the property's local timezone. The property must not have been removed.\n\n`scheduled_at` is required (ISO 8601). Sent without an offset it is read in the timezone derived from the property's state; sent with an explicit offset it is honoured as given. Either way it is stored in UTC and returned as both `scheduled_at` (UTC) and `scheduled_at_local`, so the client never has to convert.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
         "tags": [
           "Bookings"
         ],
@@ -1926,14 +2075,38 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
       "get": {
         "operationId": "apps_bookings_api_bookings_list_bookings",
         "summary": "List own bookings",
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -1960,13 +2133,13 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only — the list is always scoped to the caller's own bookings, newest first.\n\nEach booking carries its visit time as both `scheduled_at` (UTC) and `scheduled_at_local`, alongside the `customer_timezone` used for the conversion.\n\n`computed_price` and `assigned_contractor_id` are populated only for bookings that have reached `CONFIRMED`; on every other booking they are `null`.\n\n**Side effects:** none — read-only.",
+        "description": "**Who may call:** `CUSTOMER` only — the list is always scoped to the caller's own bookings, newest first.\n\nEach booking carries its visit time as both `scheduled_at` (UTC) and `scheduled_at_local`, alongside the `customer_timezone` used for the conversion.\n\n`computed_price` and `assigned_contractor_id` are populated only for bookings that have reached `CONFIRMED`; on every other booking they are `null`.\n\n**Paging:** `limit` (default 100, max 200) and `offset` query parameters; the response is still a plain array.\n\n**Side effects:** none — read-only.",
         "tags": [
           "Bookings"
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2025,7 +2198,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2108,7 +2281,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n**Preconditions:** the booking must still be `PENDING`, its `dispatch_status` must be `NO_CONTRACTOR`, it must have no assigned contractor and no successful payment. Any other state returns `409` — rescheduling after a contractor has been assigned or the booking confirmed is not available yet, pending the cancellation and refund policy.\n\n`scheduled_at` follows the same rules as booking creation: it must be in the future and between 07:00 and 19:00 local time. `timezone` is optional — when omitted the booking's stored timezone (derived from the property address) is used, which is almost always what you want.\n\n**Side effects:** the booking's previous dispatch offers are **deleted**, `dispatch_status` returns to `SEARCHING`, and a fresh dispatch round starts after the change commits. Clearing the old offers is what makes the new round meaningful: a contractor is never offered the same booking twice, so without it every eligible contractor would still be excluded and the search would end immediately. A contractor who declined the old time is therefore eligible for the new one.\n\nFinding no contractor again is not an error: the booking simply returns to `NO_CONTRACTOR` and can be rescheduled again.",
+        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n**Preconditions:** the booking must still be `PENDING`, its `dispatch_status` must be `NO_CONTRACTOR`, it must have no assigned contractor and no successful payment. Any other state returns `409` — rescheduling after a contractor has been assigned or the booking confirmed is not available yet, pending the cancellation and refund policy.\n\n`scheduled_at` follows the same rules as booking creation: it must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` away, and between 07:00 and 19:00 local time. The timezone is always the one derived from the property address; `timezone` is accepted only for backwards compatibility and must equal it (otherwise `400 timezone_not_allowed`).\n\n**Side effects:** the booking's previous dispatch offers are **deleted**, `dispatch_status` returns to `SEARCHING`, and a fresh dispatch round starts after the change commits. Clearing the old offers is what makes the new round meaningful: a contractor is never offered the same booking twice, so without it every eligible contractor would still be excluded and the search would end immediately. A contractor who declined the old time is therefore eligible for the new one.\n\nFinding no contractor again is not an error: the booking simply returns to `NO_CONTRACTOR` and can be rescheduled again.",
         "tags": [
           "Bookings"
         ],
@@ -2124,7 +2297,119 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/offers": {
+      "get": {
+        "operationId": "apps_bookings_api_offers_list_offers",
+        "summary": "List my dispatch offers (contractor only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_closed",
+            "schema": {
+              "default": false,
+              "title": "Include Closed",
+              "type": "boolean"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OfferDetailOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only. Returns offers addressed to the caller, newest first.\n\nBy default only offers that can still be answered are returned (`PENDING` and not expired) — this is the inbox the app polls. Pass `include_closed=true` for the full history.\n\nEach offer shows the visit time, suburb/state/postcode, property type and requested services — enough to decide. The street address and access notes are revealed only after acceptance. No price is shown: it is calculated and frozen at acceptance.",
+        "tags": [
+          "Contractor Offers"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/offers/{offer_id}": {
+      "get": {
+        "operationId": "apps_bookings_api_offers_retrieve_offer",
+        "summary": "Get one of my dispatch offers (contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "offer_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Offer Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Same shape as the list.",
+        "tags": [
+          "Contractor Offers"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2177,7 +2462,7 @@
             }
           },
           "409": {
-            "description": "The offer was already answered or has expired.",
+            "description": "The offer was already answered or has expired, the booking no longer needs a contractor, the visit time has passed, or the booking can no longer be priced.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2197,13 +2482,13 @@
             }
           }
         },
-        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Another contractor's offer returns `403`.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired.\n\n**This is the pivotal moment of the booking lifecycle.** On success:\n\n1. The price is calculated and **frozen** onto the booking. It is never recalculated afterwards, even if catalog prices change.\n2. The booking moves to `CONFIRMED`, the contractor is assigned, and the price becomes visible to the customer — this is the first moment it is.\n3. The customer is charged directly (there is no escrow).\n4. The job is created and starts `IN_PROGRESS`.\n\nThe distance used for pricing is the one recorded on **this offer**, not a freshly measured one, so moving the contractor's profile between offer and acceptance does not change the price.\n\nSteps 3 and 4 run after the confirmation is committed and are isolated from it: if the charge or the job creation fails, the booking stays validly confirmed and the failure is recorded rather than returned as an error here.\n\n`next_offer` is always `null` in this response — the cascade stops at acceptance.",
+        "description": "**Who may call:** `CONTRACTOR` only, and only the contractor the offer was addressed to. Another contractor's offer returns `403`.\n\n**Preconditions:** the offer must still be actionable — neither already answered nor expired — the booking must still be waiting for a contractor, and the visit time must not have passed. Concurrent responses are serialised: only one acceptance can ever succeed.\n\n**This is the pivotal moment of the booking lifecycle.** On success:\n\n1. The price is calculated and **frozen** onto the booking. It is never recalculated afterwards, even if catalog prices change.\n2. The booking moves to `CONFIRMED`, the contractor is assigned, and the price becomes visible to the customer — this is the first moment it is.\n3. The customer is charged directly (there is no escrow).\n4. The job is created in `ASSIGNED` (the contractor starts it on arrival).\n\nThe distance used for pricing is the one recorded on **this offer**, not a freshly measured one, so moving the contractor's profile between offer and acceptance does not change the price.\n\nSteps 3 and 4 run after the confirmation is committed and are isolated from it: if the charge or the job creation fails, the booking stays validly confirmed and the failure is recorded rather than returned as an error here.\n\n`next_offer` is always `null` in this response — the cascade stops at acceptance.",
         "tags": [
           "Contractor Offers"
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2282,7 +2567,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2339,7 +2624,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2388,7 +2673,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2457,7 +2742,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2506,7 +2791,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2548,7 +2833,7 @@
             }
           },
           "400": {
-            "description": "`photo_type` is not `BEFORE`/`AFTER`, or the uploaded file is empty.",
+            "description": "`photo_type` is not `BEFORE`/`AFTER`, the file is empty, too large, not a supported image, or the job already has the maximum number of photos.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2588,7 +2873,7 @@
             }
           }
         },
-        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`, and the file must not be empty.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** no storage provider ships with this build, so uploads fail until one is configured.",
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC image (checked from its content, not the declared type), at most `JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most `JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** no storage provider ships with this build, so uploads fail until one is configured.",
         "tags": [
           "Contractor Jobs"
         ],
@@ -2615,7 +2900,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2694,7 +2979,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2773,7 +3058,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2872,7 +3157,7 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2929,7 +3214,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -2997,14 +3282,38 @@
         },
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       },
       "get": {
         "operationId": "apps_support_api_support_list_support_requests",
         "summary": "List own support requests (all of them for an admin)",
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -3031,13 +3340,13 @@
             }
           }
         },
-        "description": "**Who may call:** any authenticated user. The list is scoped to the caller's own requests, newest first; an `ADMIN` receives every request from every user.\n\n**Side effects:** none — read-only.",
+        "description": "**Who may call:** any authenticated user. The list is scoped to the caller's own requests, newest first; an `ADMIN` receives every request from every user.\n\n**Paging:** `limit` (default 100, max 200) and `offset` query parameters; the response is still a plain array.\n\n**Side effects:** none — read-only.",
         "tags": [
           "Support"
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -3096,7 +3405,7 @@
         ],
         "security": [
           {
-            "JWTAuth": []
+            "ActiveUserJWTAuth": []
           }
         ]
       }
@@ -3293,6 +3602,20 @@
           "token"
         ],
         "title": "SocialLoginIn",
+        "type": "object"
+      },
+      "RefreshIn": {
+        "properties": {
+          "refresh": {
+            "minLength": 1,
+            "title": "Refresh",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh"
+        ],
+        "title": "RefreshIn",
         "type": "object"
       },
       "UserProfilePatch": {
@@ -4876,7 +5199,7 @@
         "type": "object"
       },
       "BookingRescheduleIn": {
-        "description": "إعادة جدولة حجز لم يجد مقاولًا.\n\n📌 timezone اختياري: حين يُترك فارغًا تُستعمل منطقة الحجز المخزَّنة\n   (المشتقة من عنوان العقار)، وهي الحالة الغالبة — فالعقار لم يتغيّر.\n   يُقبل صراحةً لمن يريد إرسال منطقة مختلفة عن المخزَّنة.\n\n⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد\n   وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.",
+        "description": "إعادة جدولة حجز لم يجد مقاولًا.\n\n🔒 timezone للتوافق فقط: المنطقة مشتقة من عنوان العقار دائمًا، وأي\n   قيمة مختلفة تُرفض (كانت تتيح تجاوز ساعات العمل أو 500).\n\n⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد\n   وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.",
         "properties": {
           "scheduled_at": {
             "format": "date-time",
@@ -4899,6 +5222,158 @@
           "scheduled_at"
         ],
         "title": "BookingRescheduleIn",
+        "type": "object"
+      },
+      "OfferDetailOut": {
+        "description": "العرض كما يراه المقاول قبل الرد — ما يكفي ليقرر.\n\n🔒 قبل القبول: الضاحية والولاية والرمز البريدي فقط، بلا عنوان الشارع\n   ولا ملاحظات الوصول — تُكشف للمقاول المُسنَد بعد القبول وحده.\n⚠️ بلا سعر (§36.1): السعر يُحسب ويُجمَّد عند القبول.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "contractor_id": {
+            "format": "uuid",
+            "title": "Contractor Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "offered_at": {
+            "format": "date-time",
+            "title": "Offered At",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "scheduled_at_local": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At Local"
+          },
+          "customer_timezone": {
+            "default": "",
+            "title": "Customer Timezone",
+            "type": "string"
+          },
+          "suburb": {
+            "default": "",
+            "title": "Suburb",
+            "type": "string"
+          },
+          "state": {
+            "default": "",
+            "title": "State",
+            "type": "string"
+          },
+          "postcode": {
+            "default": "",
+            "title": "Postcode",
+            "type": "string"
+          },
+          "property_type": {
+            "default": "",
+            "title": "Property Type",
+            "type": "string"
+          },
+          "services": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OfferServiceOut"
+            },
+            "title": "Services",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "contractor_id",
+          "status",
+          "offered_at",
+          "expires_at"
+        ],
+        "title": "OfferDetailOut",
+        "type": "object"
+      },
+      "OfferServiceOut": {
+        "properties": {
+          "service_type_id": {
+            "format": "uuid",
+            "title": "Service Type Id",
+            "type": "string"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          },
+          "room_count": {
+            "title": "Room Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "service_type_id",
+          "service_name",
+          "room_count"
+        ],
+        "title": "OfferServiceOut",
         "type": "object"
       },
       "OfferOut": {
@@ -5737,7 +6212,7 @@
       }
     },
     "securitySchemes": {
-      "JWTAuth": {
+      "ActiveUserJWTAuth": {
         "type": "http",
         "scheme": "bearer"
       }

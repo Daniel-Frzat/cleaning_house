@@ -5,9 +5,13 @@ Social Login Service — Identity Domain (Phase 1)
 
 تسلسل الحل (resolution order) — مهم ألا يُغيَّر دون قرار صريح:
   1) البحث بـ(provider, provider_user_id) → الهوية معروفة مسبقًا.
-  2) وإلا: البحث بالبريد الذي أبلغ عنه المزوّد → ربط بحساب قائم
-     (مستخدم سجّل سابقًا عبر الهاتف).
-  3) وإلا: إنشاء User جديد بدور CUSTOMER.
+  2) وإلا: البحث بالبريد الذي أبلغ عنه المزوّد → ربط بحساب قائم —
+     🔒 فقط إذا أكّد المزوّد البريد **و** كان بريد الحساب القائم مُثبت
+     الملكية (email_verified). البريد المُدخَل يدويًا عبر PATCH /auth/me
+     لا يُربط به أبدًا: وإلا يضع المهاجم بريد الضحية في حسابه مسبقًا،
+     فتدخل الضحية بـGoogle إلى حساب المهاجم (account pre-hijacking).
+  3) وإلا: إنشاء User جديد بدور CUSTOMER. إن كان البريد مأخوذًا بحساب
+     آخر يُنشأ الحساب بلا بريد (يبقى البريد على SocialAccount فقط).
 
 ⚠️ قرار محسوم: التسجيل الذاتي عبر Social Login ينشئ CUSTOMER فقط.
    أدوار CONTRACTOR/ADMIN تتطلب مسارات تحقق منفصلة لم تُبنَ بعد،
@@ -17,6 +21,7 @@ Social Login Service — Identity Domain (Phase 1)
    مسؤولية الـAdapter، ويُضبط عبر settings.SOCIAL_AUTH_ADAPTER.
 """
 
+import hashlib
 import logging
 
 from django.db import IntegrityError, transaction
@@ -39,6 +44,12 @@ class UnsupportedProviderError(SocialLoginError):
     code = "unsupported_provider"
 
 
+class ProviderAlreadyLinkedError(SocialLoginError):
+    """الحساب المطابق مرتبط مسبقًا بهوية أخرى لدى المزوّد نفسه."""
+
+    code = "provider_already_linked"
+
+
 class InactiveUserError(SocialLoginError):
     """الحساب موجود لكنه معطّل/موقوف — لا يُمنح دخول."""
 
@@ -52,8 +63,13 @@ def _placeholder_phone(provider, provider_user_id):
 
     الشكل مقصود أن يكون غير صالح كرقم هاتف حقيقي، حتى لا يُخلط بينه وبين
     رقم مُتحقَّق منه عبر OTP.
+
+    ⚠️ hash لا اقتطاع: الحقل 32 حرفًا، واقتطاع sub الخاص بـGoogle (21
+       رقمًا) كان يُبقي 18 رقمًا فقط، فيتصادم مستخدمان يشتركان في البادئة.
     """
-    return f"social:{provider.lower()}:{provider_user_id}"[:32]
+    prefix = f"social:{provider.lower()}:"
+    digest = hashlib.sha256(provider_user_id.encode()).hexdigest()
+    return prefix + digest[: 32 - len(prefix)]
 
 
 def _find_by_email(email):
@@ -61,6 +77,20 @@ def _find_by_email(email):
     if not email:
         return None
     return User.objects.filter(email__iexact=email.strip()).first()
+
+
+def _find_linkable_by_email(profile):
+    """
+    الحساب القائم الذي يجوز ربط الهوية به عبر البريد — أو None.
+
+    🔒 شرطان معًا: المزوّد أكّد البريد، والحساب القائم أثبت ملكيته.
+    """
+    if not profile.email or not profile.email_verified:
+        return None
+    user = _find_by_email(profile.email)
+    if user is not None and user.email_verified:
+        return user
+    return None
 
 
 @transaction.atomic
@@ -109,15 +139,20 @@ def link_or_create_user(profile):
         logger.info("Social login matched existing identity (social_id=%s)", existing.id)
         return existing.user, existing, False
 
-    # ---- 2) مستخدم قائم بنفس البريد ----
-    user = _find_by_email(profile.email)
+    # ---- 2) مستخدم قائم بنفس البريد (مُثبت الملكية من الطرفين) ----
+    user = _find_linkable_by_email(profile)
     created = False
 
     # ---- 3) إنشاء مستخدم جديد بدور CUSTOMER ----
     if user is None:
+        # البريد يُنسخ على الحساب فقط إن لم يكن لحساب آخر (الحقل فريد)
+        email = profile.email or None
+        if email and _find_by_email(email) is not None:
+            email = None
         user = User.objects.create_user(
             phone=_placeholder_phone(provider, provider_user_id),
-            email=profile.email or None,
+            email=email,
+            email_verified=bool(email and profile.email_verified),
             full_name=profile.full_name or "",
             # قرار محسوم: التسجيل الذاتي عبر Social Login = CUSTOMER فقط
             role=ConfirmedRole.CUSTOMER,
@@ -129,18 +164,28 @@ def link_or_create_user(profile):
 
     # الربط — القيد الفريد هو خط الدفاع الأخير ضد الازدواج المتزامن
     try:
-        social = SocialAccount.objects.create(
-            user=user,
-            provider=provider,
-            provider_user_id=provider_user_id,
-            email=profile.email or None,
-            raw_profile=profile.raw or {},
-        )
+        # savepoint: بدونه يُفسد IntegrityError المعاملة الخارجية على
+        # PostgreSQL فيفشل الاستعلام التالي نفسه.
+        with transaction.atomic():
+            social = SocialAccount.objects.create(
+                user=user,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                email=profile.email or None,
+                raw_profile=profile.raw or {},
+            )
     except IntegrityError:
-        # سباق: أُنشئ نفس الربط في معاملة متزامنة → نستخدم الموجود
-        social = SocialAccount.objects.select_related("user").get(
-            provider=provider, provider_user_id=provider_user_id
+        # (أ) سباق: أُنشئ نفس الربط في معاملة متزامنة → نستخدم الموجود
+        social = (
+            SocialAccount.objects.select_related("user")
+            .filter(provider=provider, provider_user_id=provider_user_id)
+            .first()
         )
+        if social is None:
+            # (ب) الحساب مرتبط مسبقًا بهوية أخرى لدى المزوّد نفسه
+            raise ProviderAlreadyLinkedError(
+                "This account is already linked to another identity at this provider."
+            )
         return social.user, social, False
 
     logger.info("Social account linked (social_id=%s, created_user=%s)", social.id, created)

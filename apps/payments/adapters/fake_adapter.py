@@ -42,7 +42,7 @@ class FakePaymentAdapter(BasePaymentProviderAdapter):
                 "تنفيذ حقيقي، أو فعّل PAYMENTS_ALLOW_FAKE_ADAPTER=True صراحةً."
             )
 
-    def charge(self, amount, method, idempotency_key):
+    def charge(self, amount, method, idempotency_key, currency="AUD", customer_reference=None):
         """
         ⚠️ لا شبكة ولا مزوّد. النتيجة تُشتق من المبلغ وحده.
         """

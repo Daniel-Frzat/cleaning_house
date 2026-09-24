@@ -95,7 +95,8 @@ def report_location(user, job_id, latitude, longitude, recorded_at, accuracy_m=N
        إلى الأبد لو اعتُمد وقت الجهاز، والقبول الصامت يخفي جهازًا
        معطوبًا. السماح بهامش دقيقة واحدة لانحراف الساعات الطبيعي.
     """
-    job = get_job_for_contractor(user, job_id)
+    # قفل: موقع يتسابق مع "بدء العمل" لا يُكتب بعد إغلاق النافذة
+    job = get_job_for_contractor(user, job_id, lock=True)
 
     if not job.is_tracking_window_open():
         raise TrackingWindowClosedError(

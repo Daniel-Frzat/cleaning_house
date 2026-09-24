@@ -22,6 +22,26 @@ from apps.accounts.roles import ConfirmedRole
 
 from ..models import AvailabilityStatus, ContractorProfile
 
+
+def _clean_profile(profile):
+    """
+    full_clean + اتساق الرمز البريدي/الولاية (نفس قاعدة PropertyAddress).
+
+    ⚠️ هنا لا في models.py: نموذج المقاول لا يستورد من apps.properties عمدًا
+       (راجع docstring النموذج). الحقلان اختياريان (ملف قيد الإكمال)،
+       فالفحص حين يوجد الاثنان.
+    """
+    from django.core.exceptions import ValidationError
+
+    from apps.properties.services.postcodes import postcode_state_error
+
+    profile.full_clean()
+    if profile.postcode and profile.state:
+        error = postcode_state_error(profile.postcode, profile.state)
+        if error:
+            raise ValidationError({"postcode": error})
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -159,7 +179,7 @@ def create_profile(user, **fields):
         )
 
     profile = ContractorProfile(user=user, **fields)
-    profile.full_clean()
+    _clean_profile(profile)
     profile.save()
 
     # 📌 منح صلاحية العامل مع إنشاء الملف — في المعاملة نفسها، فلا يبقى
@@ -216,7 +236,7 @@ def update_profile(user, **fields):
     for key, value in fields.items():
         setattr(profile, key, value)
 
-    profile.full_clean()
+    _clean_profile(profile)
     profile.save()
 
     logger.info(

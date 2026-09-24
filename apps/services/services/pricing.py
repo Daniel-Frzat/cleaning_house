@@ -175,7 +175,7 @@ def _parse_selections(service_selections):
     return parsed
 
 
-def _load_services(parsed_selections):
+def _load_services(parsed_selections, allow_inactive=False):
     """
     يجلب كل الخدمات المشار إليها باستعلام واحد، ويرفض المجهول والمعطّل.
 
@@ -196,7 +196,7 @@ def _load_services(parsed_selections):
         if service is None:
             raise UnknownServiceError(f"Service type {service_type_id} not found.")
 
-        if not service.is_active:
+        if not service.is_active and not allow_inactive:
             # 🔒 لا تسعير لخدمة مسحوبة من التداول
             logger.warning(
                 "Pricing attempted for inactive service (service_id=%s)", service.id
@@ -221,7 +221,10 @@ def _read_price_per_km():
     config = PricingConfig.objects.filter(pk=PricingConfig.SINGLETON_PK).first()
 
     # غياب الصف = النظام لم يُضبط بعد؛ الصفر هو نفسه الافتراض في الـModel.
-    return config.price_per_km if config else Decimal("0")
+    if config is None:
+        logger.warning("PricingConfig row missing — distance is priced at 0 per km")
+        return Decimal("0")
+    return config.price_per_km
 
 
 # ------------------------------------------------------------
@@ -251,10 +254,25 @@ def calculate_price(
     ⚠️ القيمة المُعادة لقطة لحظية غير محفوظة. تعديل الإدارة للأسعار بعدها
        يغيّر نتيجة الاستدعاء التالي — تثبيت السعر شأن Booking Domain.
     """
+    return _calculate(service_selections, distance_km, allow_inactive=False)
+
+
+def calculate_price_for_existing_booking(service_selections, distance_km):
+    """
+    calculate_price لحجز قائم — يقبل خدمة عُطّلت بعد إنشائه.
+
+    📌 التعطيل يمنع الحجوزات الجديدة ولا يُبطل حجزًا قائمًا. بدون هذا يفشل
+       قبول العرض لكل مقاول في التتابع ويدور الحجز حتى NO_CONTRACTOR بلا
+       ذنب من العميل. تُستدعى عند قبول العرض وحده.
+    """
+    return _calculate(service_selections, distance_km, allow_inactive=True)
+
+
+def _calculate(service_selections, distance_km, allow_inactive):
     # كل التحقق أولًا: لا حساب جزئي على مدخلات غير صالحة.
     parsed = _parse_selections(service_selections)
     distance = _validate_distance(distance_km)
-    services = _load_services(parsed)
+    services = _load_services(parsed, allow_inactive=allow_inactive)
 
     # مجموع الخدمات — تراكمي لكل خدمة مختارة (§36.2)
     services_total = Decimal("0")

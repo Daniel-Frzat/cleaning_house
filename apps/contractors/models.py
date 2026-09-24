@@ -169,6 +169,21 @@ class VerificationStatus(models.TextChoices):
     REJECTED = "REJECTED", "Rejected"
 
 
+def validate_abn_checksum(value):
+    """
+    خوارزمية التحقق الرسمية لـABN (Australian Business Register):
+    اطرح 1 من الخانة الأولى، اضرب كل خانة بوزنها، والمجموع يقبل القسمة
+    على 89. تلتقط الأخطاء المطبعية — لا تثبت أن الرقم مسجَّل فعلًا.
+    """
+    if not (isinstance(value, str) and value.isdigit() and len(value) == 11):
+        return  # الشكل مسؤولية ABN_VALIDATOR
+    weights = (10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19)
+    digits = [int(c) for c in value]
+    digits[0] -= 1
+    if sum(d * w for d, w in zip(digits, weights)) % 89 != 0:
+        raise ValidationError("ABN is not valid (checksum failed).")
+
+
 # ABN أسترالي: 11 رقمًا بالضبط.
 # ⚠️ فحص شكلي فقط — لا يتحقق من خانة التدقيق (checksum) ولا من وجود
 #    الرقم في السجل الحكومي. التحقق الفعلي قرار مؤجَّل (§6).
@@ -249,8 +264,8 @@ class BusinessRegistration(ReviewableDocument):
 
     abn = models.CharField(
         max_length=11,
-        validators=[ABN_VALIDATOR],
-        help_text="11-digit ABN. Format validation only — not a registry lookup.",
+        validators=[ABN_VALIDATOR, validate_abn_checksum],
+        help_text="11-digit ABN. Format and checksum validation only — not a registry lookup.",
     )
     business_name = models.CharField(max_length=255)
 

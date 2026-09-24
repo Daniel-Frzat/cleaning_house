@@ -255,7 +255,7 @@ def _make_eligible(worker, client, lat="-33.868800", lng="151.209300"):
     profile.availability_status = AvailabilityStatus.AVAILABLE
     profile.save(update_fields=["availability_status"])
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Sparkle Co",
+        contractor=profile, abn="51824753556", business_name="Sparkle Co",
         status=VerificationStatus.VERIFIED)
     InsuranceDocument.objects.create(
         contractor=profile, document_reference="POL-1",
@@ -333,7 +333,7 @@ def test_a_contractor_without_gps_is_never_offered_work(
     profile.availability_status = AvailabilityStatus.AVAILABLE
     profile.save(update_fields=["availability_status"])
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="X",
+        contractor=profile, abn="51824753556", business_name="X",
         status=VerificationStatus.VERIFIED)
     InsuranceDocument.objects.create(
         contractor=profile, document_reference="P",

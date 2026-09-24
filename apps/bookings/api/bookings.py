@@ -27,8 +27,8 @@ Bookings API — Booking Domain (Change Set §36.1، §20)
 import uuid
 
 from django.core.exceptions import ValidationError
-from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from ninja import Query, Router
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.properties.services import properties as properties_svc
 
@@ -37,7 +37,7 @@ from ..services import bookings as svc
 from ..services import scheduling as scheduling_svc
 from .schemas import BookingIn, BookingOut, BookingRescheduleIn, ErrorOut
 
-router = Router(tags=["Bookings"], auth=JWTAuth())
+router = Router(tags=["Bookings"], auth=ActiveUserJWTAuth())
 
 
 # ------------------------------------------------------------
@@ -149,15 +149,16 @@ def _serialize(booking):
 # ------------------------------------------------------------
 @router.post(
     "",
-    response={201: BookingOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    response={201: BookingOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Create a booking with its service selections (customer only)",
     description=(
         "**Who may call:** `CUSTOMER` only, and only against a property they "
         "own.\n\n"
         "**Preconditions:** at least one service selection, every selected "
         "service must be active in the catalog, and `scheduled_at` must be in "
-        "the future and within business hours (07:00-19:00) in the property's "
-        "local timezone.\n\n"
+        "the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes "
+        "away, and within business hours (07:00-19:00) in the property's local "
+        "timezone. The property must not have been removed.\n\n"
         "`scheduled_at` is required (ISO 8601). Sent without an offset it is "
         "read in the timezone derived from the property's state; sent with an "
         "explicit offset it is honoured as given. Either way it is stored in "
@@ -185,6 +186,7 @@ def _serialize(booking):
                 "description": "The caller is not a `CUSTOMER`, or the property belongs to someone else."
             },
             404: {"description": "No property with this id."},
+            409: {"description": "The property has been removed (`property_inactive`)."},
             422: {"description": "The booking failed validation."},
         }
     },
@@ -220,6 +222,8 @@ def create_booking(request, payload: BookingIn):
         return _error(403, exc.code, str(exc))
     except properties_svc.PropertyNotFoundError:
         return _error(404, "property_not_found", "Property not found.")
+    except svc.PropertyInactiveError as exc:
+        return _error(409, exc.code, str(exc))
     except (svc.EmptySelectionError, svc.InactiveServiceError) as exc:
         return _error(400, exc.code, str(exc))
     except (svc.UnknownServiceError, svc.InvalidRoomCountError) as exc:
@@ -248,11 +252,13 @@ def create_booking(request, payload: BookingIn):
         "`computed_price` and `assigned_contractor_id` are populated only for "
         "bookings that have reached `CONFIRMED`; on every other booking they are "
         "`null`.\n\n"
+        "**Paging:** `limit` (default 100, max 200) and `offset` query "
+        "parameters; the response is still a plain array.\n\n"
         "**Side effects:** none — read-only."
     ),
     openapi_extra={"responses": {403: {"description": "The caller is not a `CUSTOMER`."}}},
 )
-def list_bookings(request):
+def list_bookings(request, limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0)):
     try:
         bookings = svc.list_bookings(request.user)
     except svc.InvalidCustomerRoleError as exc:
@@ -260,7 +266,7 @@ def list_bookings(request):
     except svc.BookingPermissionError as exc:
         return _error(403, exc.code, str(exc))
 
-    return 200, [_serialize(b) for b in bookings]
+    return 200, [_serialize(b) for b in bookings[offset : offset + limit]]
 
 
 # ------------------------------------------------------------
@@ -327,9 +333,11 @@ def retrieve_booking(request, booking_id: uuid.UUID):
         "confirmed is not available yet, pending the cancellation and refund "
         "policy.\n\n"
         "`scheduled_at` follows the same rules as booking creation: it must be in "
-        "the future and between 07:00 and 19:00 local time. `timezone` is "
-        "optional — when omitted the booking's stored timezone (derived from the "
-        "property address) is used, which is almost always what you want.\n\n"
+        "the future, at least `BOOKING_MIN_LEAD_MINUTES` away, and between 07:00 "
+        "and 19:00 local time. The timezone is always the one derived from the "
+        "property address; `timezone` is accepted only for backwards "
+        "compatibility and must equal it (otherwise `400 timezone_not_allowed`)."
+        "\n\n"
         "**Side effects:** the booking's previous dispatch offers are **deleted**, "
         "`dispatch_status` returns to `SEARCHING`, and a fresh dispatch round "
         "starts after the change commits. Clearing the old offers is what makes "

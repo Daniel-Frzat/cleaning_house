@@ -52,7 +52,12 @@ class BasePaymentProviderAdapter(ABC):
 
     @abstractmethod
     def charge(
-        self, amount: Decimal, method: str, idempotency_key: str
+        self,
+        amount: Decimal,
+        method: str,
+        idempotency_key: str,
+        currency: str = "AUD",
+        customer_reference: str = None,
     ) -> PaymentChargeResult:
         """
         يشحن المبلغ مباشرة (direct charge — لا تفويض ولا حجز).
@@ -62,6 +67,12 @@ class BasePaymentProviderAdapter(ABC):
             method: إحدى قيم PaymentMethod.
             idempotency_key: مفتاح ثابت مشتق من الحجز — إعادة الاستدعاء
                 بالمفتاح نفسه يجب ألا تُنتج شحنًا مزدوجًا (Infra §14/§16).
+            currency: رمز ISO 4217 — "AUD" دائمًا في هذا السوق.
+            customer_reference: معرّف العميل الداخلي. التنفيذ الحقيقي يربطه
+                بعميل المزوّد ووسيلة الدفع المحفوظة (قرار مفتوح مع المزوّد).
+
+        ⚠️ استثناء يُرفع من هنا يعني "النتيجة مجهولة": الدفعة تبقى PENDING
+           للمطابقة. الرفض المعروف (بطاقة مرفوضة) يُعاد success=False.
 
         Returns:
             PaymentChargeResult

@@ -27,7 +27,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
@@ -35,7 +35,7 @@ from ..services import properties as svc
 from ..services import serviceability as serviceability_svc
 from .schemas import ErrorOut, PropertyIn, PropertyOut, PropertyPatch
 
-router = Router(tags=["Properties"], auth=JWTAuth())
+router = Router(tags=["Properties"], auth=ActiveUserJWTAuth())
 
 
 # ------------------------------------------------------------
@@ -219,7 +219,7 @@ def retrieve_property(request, property_id: uuid.UUID):
 # ------------------------------------------------------------
 @router.patch(
     "/{property_id}",
-    response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Update own property and/or its address",
     description=(
         "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n"
@@ -255,16 +255,16 @@ def update_property(request, property_id: uuid.UUID, payload: PropertyPatch):
                 svc.get_property(request.user, property_id)
 
             if address_data:
-                # الحقول غير المُرسلة تبقى كما هي
-                address_fields = {
-                    k: v for k, v in address_data.items() if v is not None
-                }
-                if address_fields:
-                    svc.update_address(request.user, property_id, **address_fields)
+                # exclude_unset: الحقول غير المُرسلة غائبة أصلًا فتبقى كما هي.
+                # null صريح يمسح الحقل الاختياري (الإحداثيات مثلًا)، وعلى
+                # الحقل الإلزامي يرفضه full_clean بـ422.
+                svc.update_address(request.user, property_id, **address_data)
 
             prop = svc.get_property(request.user, property_id)
     except (svc.PropertyPermissionError, svc.PropertyNotFoundError):
         return _not_found()
+    except svc.PropertyHasActiveBookingsError as exc:
+        return _error(409, exc.code, str(exc))
     except ValidationError as exc:
         return _validation_error(exc)
     except svc.PropertyError as exc:
@@ -278,7 +278,7 @@ def update_property(request, property_id: uuid.UUID, payload: PropertyPatch):
 # ------------------------------------------------------------
 @router.delete(
     "/{property_id}",
-    response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut},
+    response={200: PropertyOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
     summary="Deactivate own property (soft delete)",
     description=(
         "**Who may call:** `CUSTOMER` only, and only for a property they own.\n\n"
@@ -286,7 +286,12 @@ def update_property(request, property_id: uuid.UUID, payload: PropertyPatch):
         "Nothing is erased, because past bookings still reference this property. "
         "The deactivated property is returned in the response.\n\n"
         "**Side effects:** the property disappears from `GET /api/properties` and "
-        "can no longer be used for new bookings."
+        "can no longer be used for new bookings.\n\n"
+        "Refused with `409 property_has_active_bookings` while the property has "
+        "a `PENDING` booking, or a `CONFIRMED` one whose job is not completed. "
+        "Changing the address is refused while a contractor is tied to it (a "
+        "live offer, or a confirmed booking not yet completed), and changing the "
+        "state is refused while any booking is `PENDING`."
     ),
     openapi_extra={
         "responses": {
@@ -308,6 +313,8 @@ def delete_property(request, property_id: uuid.UUID):
         prop = svc.deactivate_property(request.user, property_id)
     except (svc.PropertyPermissionError, svc.PropertyNotFoundError):
         return _not_found()
+    except svc.PropertyHasActiveBookingsError as exc:
+        return _error(409, exc.code, str(exc))
 
     prop.refresh_from_db()
     return 200, _serialize(prop)

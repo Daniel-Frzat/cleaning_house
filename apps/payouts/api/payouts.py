@@ -25,14 +25,14 @@ import uuid
 from typing import Union
 
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
 from ..services import payouts as svc
 from .schemas import ErrorOut, PayoutAdminOut, PayoutOut
 
-router = Router(tags=["Payouts"], auth=JWTAuth())
+router = Router(tags=["Payouts"], auth=ActiveUserJWTAuth())
 
 
 def _error(status, code, detail):

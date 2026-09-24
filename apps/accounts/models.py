@@ -14,6 +14,7 @@ Accounts Models — Identity Domain (Phase 1 — Step 1)
 import uuid
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -105,6 +106,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         null=True,
         help_text="Optional. Must be unique if provided.",
     )
+    # 🔒 هل ثبتت ملكية البريد؟ يصبح True فقط حين يأتي البريد من مزوّد دخول
+    #    اجتماعي أكّد التحقق منه. أي تعديل يدوي عبر PATCH /auth/me يعيده False.
+    #    Social Login لا يربط هوية خارجية بحساب قائم عبر البريد إلا إذا كان
+    #    هذا True — وإلا أمكن لمهاجم وضع بريد الضحية في حسابه مسبقًا ثم
+    #    استلام دخولها الاجتماعي (account pre-hijacking).
+    email_verified = models.BooleanField(default=False)
     full_name = models.CharField(max_length=255, blank=True)
 
     role = models.CharField(
@@ -172,6 +179,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         # يمنع تخزين "" في حقل unique قد يتكرر عبر عدة حسابات.
         if not self.email:
             self.email = None
+            self.email_verified = False
+        # 🔒 ADMIN حصري: لا يُجمع مع صفة العامل (راجع has_contractor_access).
+        if self.role == ConfirmedRole.ADMIN and self.is_contractor:
+            raise ValidationError(
+                {"is_contractor": "An ADMIN account cannot also be a contractor."}
+            )
 
     # ------------------------------------------------------------
     # الصلاحيات — المصدر الوحيد لكل فحوص الوصول
@@ -194,6 +207,9 @@ class User(AbstractBaseUser, PermissionsMixin):
            الردّ على العروض)، بينما قبول عمل فعلي يتطلب اعتمادًا إداريًا
            للوثيقتين — شرط منفصل تمامًا.
         """
+        # 🔒 ADMIN حصري حتى لو بقي is_contractor=True من قبل الترقية.
+        if self.has_admin_access():
+            return False
         return self.role == ConfirmedRole.CONTRACTOR or self.is_contractor
 
     def has_admin_access(self):
@@ -276,6 +292,8 @@ class OTPVerification(models.Model):
     max_attempts = models.PositiveSmallIntegerField(
         help_text="Snapshot of the policy value at creation time.",
     )
+    # عنوان من طلب الرمز — يُستخدم للحد من الطلبات لكل IP (SMS pumping).
+    requested_ip = models.GenericIPAddressField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -286,6 +304,7 @@ class OTPVerification(models.Model):
         indexes = [
             models.Index(fields=["phone", "purpose", "status"]),
             models.Index(fields=["-created_at"]),
+            models.Index(fields=["requested_ip", "created_at"]),
         ]
 
     def __str__(self):

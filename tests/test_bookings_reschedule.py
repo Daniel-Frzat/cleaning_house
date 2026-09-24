@@ -98,7 +98,7 @@ def make_contractor(phone, coords=NEAR, available=True, eligible=True):
         )
         BusinessRegistration.objects.create(
             contractor=profile,
-            abn="12345678901",
+            abn="51824753556",
             business_name="Co",
             status=VerificationStatus.VERIFIED,
             reviewed_by=admin,

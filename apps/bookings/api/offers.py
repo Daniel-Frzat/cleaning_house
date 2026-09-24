@@ -2,6 +2,8 @@
 Offer Response API — Booking Domain (Change Set §36.1، §36.6)
 
 نقاط النهاية (محمية بـJWT، وكلها CONTRACTOR فقط):
+    GET  /api/contractor/offers                عروضه القابلة للرد (أو كلها)
+    GET  /api/contractor/offers/{id}           تفاصيل عرض موجَّه إليه
     POST /api/contractor/offers/{id}/accept    قبول عرض موجَّه إليه
     POST /api/contractor/offers/{id}/decline   رفضه (يُطلق التتابع)
 
@@ -18,12 +20,13 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import offers as svc
-from .schemas import ErrorOut, OfferOut, OfferResponseOut
+from ..services.scheduling import to_local
+from .schemas import ErrorOut, OfferDetailOut, OfferOut, OfferResponseOut
 
-router = Router(tags=["Contractor Offers"], auth=JWTAuth())
+router = Router(tags=["Contractor Offers"], auth=ActiveUserJWTAuth())
 
 
 def _error(status, code, detail):
@@ -47,6 +50,30 @@ def _serialize_offer(offer):
     }
 
 
+def _serialize_offer_detail(offer):
+    booking = offer.booking
+    prop = booking.property
+    address = getattr(prop, "address", None)
+    return {
+        **_serialize_offer(offer),
+        "scheduled_at": booking.scheduled_at,
+        "scheduled_at_local": to_local(booking.scheduled_at, booking.customer_timezone),
+        "customer_timezone": booking.customer_timezone,
+        "suburb": getattr(address, "suburb", ""),
+        "state": getattr(address, "state", ""),
+        "postcode": getattr(address, "postcode", ""),
+        "property_type": prop.property_type,
+        "services": [
+            {
+                "service_type_id": sel.service_type_id,
+                "service_name": sel.service_type.name,
+                "room_count": sel.room_count,
+            }
+            for sel in booking.service_selections.all()
+        ],
+    }
+
+
 def _handle_offer_errors(exc):
     """يوحّد تحويل أخطاء العروض إلى ردود HTTP."""
     if isinstance(exc, svc.InvalidContractorRoleError):
@@ -59,10 +86,61 @@ def _handle_offer_errors(exc):
         return _error(403, exc.code, str(exc))
     if isinstance(exc, svc.OfferNotFoundError):
         return _error(404, exc.code, "Offer not found.")
-    if isinstance(exc, svc.OfferNotActionableError):
+    if isinstance(exc, (svc.OfferNotActionableError, svc.BookingNotPriceableError)):
         # 409: تعارض مع حالة المورد الحالية — ليس خطأ في صيغة الطلب
         return _error(409, exc.code, str(exc))
     return None
+
+
+# ------------------------------------------------------------
+# GET /contractor/offers
+# ------------------------------------------------------------
+@router.get(
+    "/offers",
+    response={200: list[OfferDetailOut], 403: ErrorOut},
+    summary="List my dispatch offers (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only. Returns offers addressed to the "
+        "caller, newest first.\n\n"
+        "By default only offers that can still be answered are returned "
+        "(`PENDING` and not expired) — this is the inbox the app polls. Pass "
+        "`include_closed=true` for the full history.\n\n"
+        "Each offer shows the visit time, suburb/state/postcode, property type "
+        "and requested services — enough to decide. The street address and "
+        "access notes are revealed only after acceptance. No price is shown: it "
+        "is calculated and frozen at acceptance."
+    ),
+)
+def list_offers(request, include_closed: bool = False):
+    try:
+        offers = svc.list_offers_for_contractor(request.user, only_pending=not include_closed)
+    except (svc.InvalidContractorRoleError, svc.OfferPermissionError) as exc:
+        return _handle_offer_errors(exc)
+    return 200, [_serialize_offer_detail(o) for o in offers]
+
+
+# ------------------------------------------------------------
+# GET /contractor/offers/{id}
+# ------------------------------------------------------------
+@router.get(
+    "/offers/{offer_id}",
+    response={200: OfferDetailOut, 403: ErrorOut, 404: ErrorOut},
+    summary="Get one of my dispatch offers (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, and only the contractor the offer "
+        "was addressed to. Same shape as the list."
+    ),
+)
+def retrieve_offer(request, offer_id: uuid.UUID):
+    try:
+        offer = svc.get_offer_for_contractor(request.user, offer_id)
+    except (
+        svc.InvalidContractorRoleError,
+        svc.OfferPermissionError,
+        svc.OfferNotFoundError,
+    ) as exc:
+        return _handle_offer_errors(exc)
+    return 200, _serialize_offer_detail(offer)
 
 
 # ------------------------------------------------------------
@@ -76,14 +154,17 @@ def _handle_offer_errors(exc):
         "**Who may call:** `CONTRACTOR` only, and only the contractor the offer "
         "was addressed to. Another contractor's offer returns `403`.\n\n"
         "**Preconditions:** the offer must still be actionable — neither already "
-        "answered nor expired.\n\n"
+        "answered nor expired — the booking must still be waiting for a "
+        "contractor, and the visit time must not have passed. Concurrent "
+        "responses are serialised: only one acceptance can ever succeed.\n\n"
         "**This is the pivotal moment of the booking lifecycle.** On success:\n\n"
         "1. The price is calculated and **frozen** onto the booking. It is never "
         "recalculated afterwards, even if catalog prices change.\n"
         "2. The booking moves to `CONFIRMED`, the contractor is assigned, and the "
         "price becomes visible to the customer — this is the first moment it is.\n"
         "3. The customer is charged directly (there is no escrow).\n"
-        "4. The job is created and starts `IN_PROGRESS`.\n\n"
+        "4. The job is created in `ASSIGNED` (the contractor starts it on "
+        "arrival).\n\n"
         "The distance used for pricing is the one recorded on **this offer**, not "
         "a freshly measured one, so moving the contractor's profile between offer "
         "and acceptance does not change the price.\n\n"
@@ -100,7 +181,13 @@ def _handle_offer_errors(exc):
                 "description": "The caller is not a `CONTRACTOR`, the offer is addressed to someone else, or the caller is the booking's own customer (a user cannot take their own booking)."
             },
             404: {"description": "No offer with this id."},
-            409: {"description": "The offer was already answered or has expired."},
+            409: {
+                "description": (
+                    "The offer was already answered or has expired, the booking "
+                    "no longer needs a contractor, the visit time has passed, or "
+                    "the booking can no longer be priced."
+                )
+            },
             422: {"description": "The offer could not be accepted — validation failed."},
         }
     },
@@ -118,6 +205,7 @@ def accept_offer(request, offer_id: uuid.UUID):
         svc.SelfAssignmentError,
         svc.OfferNotFoundError,
         svc.OfferNotActionableError,
+        svc.BookingNotPriceableError,
     ) as exc:
         return _handle_offer_errors(exc)
     except ValidationError as exc:

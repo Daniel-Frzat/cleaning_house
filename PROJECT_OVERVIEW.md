@@ -4,9 +4,9 @@ A technical reference for the backend as a whole: what it is, how it is built, t
 decisions that shape it, and what is deliberately missing.
 
 **Audience:** engineers joining the project, and anyone deciding what to build next.
-For client integration use [API_INTEGRATION_GUIDE.md](API_INTEGRATION_GUIDE.md)
-(mobile/web) and [DEVELOPER_HANDBOOK.md](DEVELOPER_HANDBOOK.md) (data model, error
-catalogue, deployment).
+For client integration use the live API reference at `/api/docs` or the
+checked-in [openapi.json](openapi.json) (regenerate it with
+`python manage.py export_openapi`).
 
 ---
 

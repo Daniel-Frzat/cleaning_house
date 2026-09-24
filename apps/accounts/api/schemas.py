@@ -32,6 +32,10 @@ class SocialLoginIn(Schema):
     token: str = Field(..., min_length=1)
 
 
+class RefreshIn(Schema):
+    refresh: str = Field(..., min_length=1)
+
+
 # ------------------------------------------------------------
 # الاستجابات
 # ------------------------------------------------------------
@@ -113,4 +117,4 @@ class ErrorOut(Schema):
     code: str
     detail: str
     # يُستخدم فقط مع أخطاء التهدئة/الحد
-    retry_after_seconds: int = None
+    retry_after_seconds: Optional[int] = None

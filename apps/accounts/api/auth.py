@@ -5,6 +5,8 @@ Auth API — Identity Domain (Phase 1)
     POST /api/auth/otp/request        طلب رمز تحقق
     POST /api/auth/otp/verify         تحقق + إصدار JWT
     POST /api/auth/social/{provider}  دخول اجتماعي (Apple/Google) + إصدار JWT
+    POST /api/auth/token/refresh      تجديد التوكن (تدوير refresh)
+    POST /api/auth/logout             تسجيل خروج (إبطال refresh)
     GET  /api/auth/me                 بيانات المستخدم الحالي (محمي بـJWT)
 
 ⚠️ لا يوجد تسجيل دخول بكلمة مرور — نموذج المصادقة المعتمد هو
@@ -19,7 +21,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from ninja import Router
 from ninja.errors import HttpError
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from adapters.social_auth import SocialAuthError
 from apps.contractors.services.verification import get_contractor_status
@@ -34,6 +36,7 @@ MODE_CONTRACTOR = "CONTRACTOR"
 from ..services import identity as identity_service
 from ..services import otp as otp_service
 from ..services import social as social_service
+from ..services import tokens as token_service
 from ..services.tokens import issue_tokens_for_user
 from .schemas import (
     AuthOut,
@@ -41,7 +44,9 @@ from .schemas import (
     OTPRequestIn,
     OTPRequestOut,
     OTPVerifyIn,
+    RefreshIn,
     SocialLoginIn,
+    TokenPairOut,
     UserOut,
     UserProfilePatch,
 )
@@ -55,6 +60,26 @@ def _error(status, code, detail, retry_after_seconds=None):
     if retry_after_seconds is not None:
         payload["retry_after_seconds"] = retry_after_seconds
     return status, payload
+
+
+def _client_ip(request):
+    """
+    IP العميل الحقيقي لحدود طلب OTP.
+
+    خلف بروكسي، REMOTE_ADDR هو البروكسي نفسه. كل بروكسي موثوق يضيف عنوان
+    من اتصل به إلى آخر X-Forwarded-For، فنأخذ العنصر رقم N من النهاية حيث
+    N = NUM_TRUSTED_PROXIES. ما قبله أضافه العميل وقد يكون مزوّرًا.
+    """
+    trusted = getattr(settings, "NUM_TRUSTED_PROXIES", 0)
+    if trusted > 0:
+        forwarded = [
+            p.strip()
+            for p in request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")
+            if p.strip()
+        ]
+        if len(forwarded) >= trusted:
+            return forwarded[-trusted]
+    return request.META.get("REMOTE_ADDR") or None
 
 
 def _serialize_user(user):
@@ -105,7 +130,7 @@ def _auth_response(user):
 # ------------------------------------------------------------
 @router.post(
     "/otp/request",
-    response={200: OTPRequestOut, 429: ErrorOut, 400: ErrorOut},
+    response={200: OTPRequestOut, 429: ErrorOut, 400: ErrorOut, 503: ErrorOut},
     auth=None,
     summary="Request an OTP code",
     description=(
@@ -116,20 +141,25 @@ def _auth_response(user):
         "provider. The response never contains the code, and it is deliberately "
         "identical whether or not an account exists for the number, so it cannot "
         "be used to discover registered users.\n\n"
-        "**Note:** no SMS provider ships with this build, so delivery fails until "
-        "one is configured."
+        "**Limits:** one code per number per cooldown period, a daily cap per "
+        "number, and an hourly cap per client IP.\n\n"
+        "**Test numbers:** numbers listed in the server's `OTP_TEST_NUMBERS` "
+        "receive no SMS and accept their fixed configured code. Every other "
+        "number is unaffected.\n\n"
+        "**Note:** no SMS provider ships with this build, so delivery to real "
+        "numbers fails with `503` until one is configured."
     ),
     openapi_extra={
         "responses": {
-            400: {
-                "description": "The code could not be sent — invalid phone number or SMS provider failure."
-            },
+            400: {"description": "The phone number is not a valid international number."},
             429: {
                 "description": (
-                    "A code was requested too recently. `retry_after_seconds` says "
-                    "how long to wait before asking again."
+                    "Too many codes requested — cooldown (`otp_resend_cooldown`) "
+                    "or daily/hourly cap (`otp_rate_limited`). "
+                    "`retry_after_seconds` says how long to wait."
                 )
             },
+            503: {"description": "The SMS provider is unavailable or not configured."},
         }
     },
 )
@@ -143,7 +173,7 @@ def request_otp(request, payload: OTPRequestIn):
     خدمة OTP — لا سياسة منفصلة هنا.
     """
     try:
-        otp_service.generate_and_send(payload.phone)
+        otp_service.generate_and_send(payload.phone, ip=_client_ip(request))
     except otp_service.OTPResendCooldownError as exc:
         return _error(
             429,
@@ -151,6 +181,17 @@ def request_otp(request, payload: OTPRequestIn):
             "Please wait before requesting another code.",
             retry_after_seconds=exc.retry_after_seconds,
         )
+    except otp_service.OTPRateLimitError as exc:
+        return _error(
+            429,
+            exc.code,
+            "Too many verification codes requested.",
+            retry_after_seconds=exc.retry_after_seconds,
+        )
+    except otp_service.OTPInvalidPhoneError as exc:
+        return _error(400, exc.code, "Invalid phone number.")
+    except otp_service.OTPDeliveryError as exc:
+        return _error(503, exc.code, "Could not send verification code. Try again later.")
     except otp_service.OTPError as exc:
         return _error(400, exc.code, "Could not send verification code.")
 
@@ -194,7 +235,7 @@ def verify_otp(request, payload: OTPVerifyIn):
     بنفس قاعدة الدخول الاجتماعي.
     """
     try:
-        otp_service.verify(payload.phone, payload.code)
+        otp = otp_service.verify(payload.phone, payload.code)
     except otp_service.OTPMaxAttemptsError as exc:
         return _error(429, exc.code, "Too many incorrect attempts.")
     except otp_service.OTPExpiredError as exc:
@@ -205,7 +246,8 @@ def verify_otp(request, payload: OTPVerifyIn):
         return _error(400, exc.code, "Verification failed.")
 
     try:
-        user, _created = identity_service.get_or_create_user_by_phone(payload.phone)
+        # otp.phone هو الشكل القانوني للرقم — نفسه الذي يُخزَّن على الحساب
+        user, _created = identity_service.get_or_create_user_by_phone(otp.phone)
     except identity_service.InactiveUserError as exc:
         return _error(403, exc.code, "This account is not active.")
 
@@ -263,12 +305,71 @@ def social_login(request, provider: str, payload: SocialLoginIn):
 
 
 # ------------------------------------------------------------
+# POST /auth/token/refresh
+# ------------------------------------------------------------
+@router.post(
+    "/token/refresh",
+    response={200: TokenPairOut, 401: ErrorOut},
+    auth=None,
+    summary="Refresh the access token",
+    description=(
+        "**Who may call:** anyone holding a valid `refresh` token — no access "
+        "token is needed, since this is how an expired one is replaced.\n\n"
+        "Returns a new `access` **and a new `refresh`** token. The submitted "
+        "refresh token is revoked immediately (rotation): store the new one "
+        "and discard the old. Reusing an old refresh token returns `401`.\n\n"
+        "Claims (role, status) are rebuilt from the account's current state. "
+        "A suspended or deactivated account cannot refresh."
+    ),
+    openapi_extra={
+        "responses": {
+            401: {
+                "description": (
+                    "The refresh token is invalid, expired or already used, or "
+                    "the account is no longer active. Log in again."
+                )
+            },
+        }
+    },
+)
+def refresh_token(request, payload: RefreshIn):
+    try:
+        tokens = token_service.refresh_tokens(payload.refresh)
+    except token_service.TokenRefreshError as exc:
+        return _error(401, exc.code, str(exc))
+    return 200, tokens
+
+
+# ------------------------------------------------------------
+# POST /auth/logout
+# ------------------------------------------------------------
+@router.post(
+    "/logout",
+    response={204: None},
+    auth=None,
+    summary="Log out",
+    description=(
+        "**Who may call:** anyone holding a `refresh` token — no access token "
+        "is needed, so logout works even after the access token expired.\n\n"
+        "Revokes the refresh token so it can no longer be used. The current "
+        "access token stays valid until its short lifetime ends; the client "
+        "should delete both tokens locally.\n\n"
+        "Idempotent: an already revoked, expired or malformed token also "
+        "returns `204`."
+    ),
+)
+def logout(request, payload: RefreshIn):
+    token_service.revoke_refresh_token(payload.refresh)
+    return 204, None
+
+
+# ------------------------------------------------------------
 # GET /auth/me
 # ------------------------------------------------------------
 @router.get(
     "/me",
     response={200: UserOut},
-    auth=JWTAuth(),
+    auth=ActiveUserJWTAuth(),
     summary="Current authenticated user",
     description=(
         "**Who may call:** any authenticated user, in any role.\n\n"
@@ -295,7 +396,7 @@ def me(request):
 @router.patch(
     "/me",
     response={200: UserOut, 409: ErrorOut, 422: ErrorOut},
-    auth=JWTAuth(),
+    auth=ActiveUserJWTAuth(),
     summary="Update own name and email",
     description=(
         "**Who may call:** any authenticated user, on their **own** account "
@@ -309,7 +410,8 @@ def me(request):
         "administrator. Neither is accepted, and sending one is rejected "
         "rather than ignored.\n\n"
         "**Side effects:** none beyond persisting the two fields. Email is "
-        "unique across accounts."
+        "unique across accounts. Changing the email marks it unverified, so it "
+        "is never used to link an Apple/Google login to this account."
     ),
     openapi_extra={
         "responses": {

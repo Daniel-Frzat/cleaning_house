@@ -29,7 +29,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import catalog as svc
 from .schemas import (
@@ -41,7 +41,7 @@ from .schemas import (
     ServiceTypePatch,
 )
 
-router = Router(tags=["Admin — Service Catalog"], auth=JWTAuth())
+router = Router(tags=["Admin — Service Catalog"], auth=ActiveUserJWTAuth())
 
 
 # ------------------------------------------------------------

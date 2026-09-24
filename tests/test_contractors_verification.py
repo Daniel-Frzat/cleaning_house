@@ -25,7 +25,7 @@ from apps.contractors.models import (
 )
 from apps.contractors.services import verification as vsvc
 
-VALID_ABN = "12345678901"
+VALID_ABN = "51824753556"
 VALID_REGISTRATION = {"abn": VALID_ABN, "business_name": "Sparkle Co"}
 
 
@@ -151,16 +151,24 @@ def test_invalid_abn_is_rejected(client, contractor_a, bad_abn):
 
 
 @pytest.mark.django_db
-def test_abn_validation_is_format_only_not_a_registry_lookup(client, contractor_a):
+def test_abn_checksum_is_enforced_but_not_a_registry_lookup(client, contractor_a):
     """
-    ⚠️ 11 رقمًا يكفي — لا فحص checksum ولا استعلام سجل حكومي (§6).
-       رقم غير حقيقي تمامًا يُقبل شكلًا، والمراجعة البشرية هي الحَكَم.
+    📌 checksum الرسمي يلتقط الأخطاء المطبعية، لكنه لا يستعلم السجل
+       الحكومي (§6): رقم صحيح الحساب يُقبل PENDING والمراجعة البشرية هي الحَكَم.
     """
-    body = submit_registration(
-        client, contractor_a, {**VALID_REGISTRATION, "abn": "00000000000"}
+    r = post(
+        client,
+        "/api/contractor/business-registration",
+        {**VALID_REGISTRATION, "abn": "12345678901"},
+        **auth(contractor_a),
     )
+    assert r.status_code == 422, r.content
+    assert "checksum" in r.json()["detail"]
 
-    assert body["abn"] == "00000000000"
+    body = submit_registration(
+        client, contractor_a, {**VALID_REGISTRATION, "abn": "53004085616"}
+    )
+    assert body["abn"] == "53004085616"
     assert body["status"] == VerificationStatus.PENDING
 
 
@@ -184,15 +192,91 @@ def test_insurance_submission_starts_pending(client, contractor_a):
 
 
 @pytest.mark.django_db
-def test_multiple_submissions_allowed_over_time(client, contractor_a):
-    """إعادة التقديم بعد رفض، وتجديد التأمين — التعدد مسموح عمدًا."""
-    submit_registration(client, contractor_a)
-    submit_registration(client, contractor_a, {**VALID_REGISTRATION, "abn": "99999999999"})
-    submit_insurance(client, contractor_a)
+def test_multiple_submissions_allowed_over_time(client, contractor_a, admin_user):
+    """إعادة التقديم بعد قرار، وتجديد التأمين — التعدد مسموح، واحد معلّق في كل لحظة."""
+    first = submit_registration(client, contractor_a)
+    vsvc.review_business_registration(
+        admin_user, first["id"], VerificationStatus.REJECTED, "Name mismatch."
+    )
+    submit_registration(client, contractor_a, {**VALID_REGISTRATION, "abn": "53004085616"})
+    ins = submit_insurance(client, contractor_a)
+    vsvc.review_insurance_document(admin_user, ins["id"], VerificationStatus.VERIFIED)
     submit_insurance(client, contractor_a)
 
     assert BusinessRegistration.objects.filter(contractor=profile_of(contractor_a)).count() == 2
     assert InsuranceDocument.objects.filter(contractor=profile_of(contractor_a)).count() == 2
+
+
+@pytest.mark.django_db
+def test_second_submission_while_one_is_pending_is_refused(client, contractor_a):
+    submit_registration(client, contractor_a)
+    r = post(
+        client,
+        "/api/contractor/business-registration",
+        VALID_REGISTRATION,
+        **auth(contractor_a),
+    )
+    assert r.status_code == 409
+    assert r.json()["code"] == "submission_pending"
+
+
+@pytest.mark.django_db
+def test_expired_insurance_cannot_be_submitted(client, contractor_a):
+    r = post(
+        client,
+        "/api/contractor/insurance",
+        {"document_reference": "OLD", "expiry_date": str(today() - timedelta(days=1))},
+        **auth(contractor_a),
+    )
+    assert r.status_code == 422
+    assert r.json()["code"] == "document_expired"
+
+
+@pytest.mark.django_db
+def test_review_decision_is_final(db, contractor_a, admin_user):
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    _verify(admin_user, "reg", reg)
+    with pytest.raises(vsvc.AlreadyReviewedError):
+        vsvc.review_business_registration(
+            admin_user, reg.id, VerificationStatus.REJECTED, "Changed my mind."
+        )
+
+
+@pytest.mark.django_db
+def test_admin_cannot_review_own_submission(db, admin_user):
+    """ADMIN لا يحمل صفة العامل، لكن صفًّا قديمًا قد يربط ملفًا بحسابه."""
+    from apps.contractors.models import ContractorProfile
+
+    profile = ContractorProfile.objects.create(user=admin_user, business_name="Self")
+    reg = BusinessRegistration.objects.create(
+        contractor=profile, abn=VALID_ABN, business_name="Self",
+        status=VerificationStatus.PENDING,
+    )
+    with pytest.raises(vsvc.SelfReviewError):
+        vsvc.review_business_registration(admin_user, reg.id, VerificationStatus.VERIFIED)
+
+
+@pytest.mark.django_db
+def test_expired_insurance_cannot_be_approved(db, contractor_a, admin_user):
+    ins = InsuranceDocument.objects.create(
+        contractor=profile_of(contractor_a), document_reference="OLD",
+        expiry_date=today() - timedelta(days=1), status=VerificationStatus.PENDING,
+    )
+    with pytest.raises(vsvc.ExpiredDocumentError):
+        vsvc.review_insurance_document(admin_user, ins.id, VerificationStatus.VERIFIED)
+
+
+@pytest.mark.django_db
+def test_pending_renewal_does_not_revoke_eligibility(db, contractor_a, admin_user):
+    """المقاول الذي جدّد تأمينه مبكرًا لا يتوقف حتى تُراجَع الوثيقة الجديدة."""
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    _verify(admin_user, "reg", reg)
+    ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=10))
+    _verify(admin_user, "ins", ins)
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
+
+    vsvc.submit_insurance_document(contractor_a, "POL-2", today() + timedelta(days=375))
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
 
 @pytest.mark.django_db
@@ -324,9 +408,10 @@ def test_admin_rejects_with_reason(client, contractor_a, admin_user):
 
 
 @pytest.mark.django_db
-def test_admin_approves_and_rejects_insurance(client, contractor_a, admin_user):
+def test_admin_approves_and_rejects_insurance(client, contractor_a, contractor_b, admin_user):
+    # تقديم معلّق واحد لكل مقاول — فالوثيقتان لمقاولَين
     approved = submit_insurance(client, contractor_a)
-    rejected = submit_insurance(client, contractor_a)
+    rejected = submit_insurance(client, contractor_b)
 
     ok = patch(
         client, f"/api/admin/insurance/{approved['id']}", {"status": "VERIFIED"}, **auth(admin_user)
@@ -346,7 +431,7 @@ def test_admin_approves_and_rejects_insurance(client, contractor_a, admin_user):
 def test_admin_lists_pending_of_both_kinds(client, contractor_a, contractor_b, admin_user):
     submit_registration(client, contractor_a)
     submit_insurance(client, contractor_b)
-    reviewed = submit_registration(client, contractor_b, {**VALID_REGISTRATION, "abn": "99999999999"})
+    reviewed = submit_registration(client, contractor_b, {**VALID_REGISTRATION, "abn": "53004085616"})
     patch(
         client,
         f"/api/admin/business-registration/{reviewed['id']}",
@@ -398,8 +483,11 @@ def test_review_cannot_set_status_back_to_pending(client, contractor_a, admin_us
 
 
 @pytest.mark.django_db
-def test_approval_clears_any_previous_rejection_reason(client, contractor_a, admin_user):
-    """لا يبقى تعليل رفض على سجل صار معتمدًا."""
+def test_reviewed_submission_cannot_be_flipped(client, contractor_a, admin_user):
+    """
+    🔒 القرار نهائي: قلب REJECTED إلى VERIFIED كان يمحو المراجِع الأول وسببه
+       بلا أثر. التصحيح يكون بتقديم جديد من المقاول.
+    """
     reg = submit_registration(client, contractor_a)
     patch(
         client,
@@ -415,8 +503,11 @@ def test_approval_clears_any_previous_rejection_reason(client, contractor_a, adm
         **auth(admin_user),
     )
 
-    assert r.status_code == 200
-    assert r.json()["rejection_reason"] is None
+    assert r.status_code == 409
+    assert r.json()["code"] == "already_reviewed"
+    stored = BusinessRegistration.objects.get(pk=reg["id"])
+    assert stored.status == VerificationStatus.REJECTED
+    assert stored.rejection_reason == "Wrong ABN."
 
 
 # ============================================================
@@ -594,8 +685,11 @@ def test_eligible_false_when_insurance_verified_but_expired(db, contractor_a, ad
     """
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
-    ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() - timedelta(days=1))
-    _verify(admin_user, "ins", ins)
+    # اعتُمدت وهي سارية ثم انتهت — الإنشاء المباشر يحاكي مرور الزمن
+    InsuranceDocument.objects.create(
+        contractor=profile_of(contractor_a), document_reference="POL-1",
+        expiry_date=today() - timedelta(days=1), status=VerificationStatus.VERIFIED,
+    )
 
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
 
@@ -660,7 +754,7 @@ def test_latest_record_wins_newer_rejection_revokes_eligibility(
     _verify(admin_user, "ins", ins)
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
-    new = vsvc.submit_business_registration(contractor_a, "99999999999", "New")
+    new = vsvc.submit_business_registration(contractor_a, "53004085616", "New")
     vsvc.review_business_registration(
         admin_user, new.id, VerificationStatus.REJECTED, "Mismatch."
     )
@@ -673,8 +767,11 @@ def test_latest_record_wins_renewal_restores_eligibility(db, contractor_a, admin
     """تجديد التأمين بعد الانتهاء يعيد الأهلية."""
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
-    expired = vsvc.submit_insurance_document(contractor_a, "OLD", today() - timedelta(days=5))
-    _verify(admin_user, "ins", expired)
+    # اعتُمدت وهي سارية ثم انتهت — الإنشاء المباشر يحاكي مرور الزمن
+    InsuranceDocument.objects.create(
+        contractor=profile_of(contractor_a), document_reference="OLD",
+        expiry_date=today() - timedelta(days=5), status=VerificationStatus.VERIFIED,
+    )
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
 
     renewed = vsvc.submit_insurance_document(contractor_a, "NEW", today() + timedelta(days=365))

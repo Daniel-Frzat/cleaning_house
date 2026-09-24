@@ -11,10 +11,8 @@ PAYMENT_PROVIDER_ADAPTER_CLASS و SMS_ADAPTER.
 ⚠️ أي تنفيذ مستقبلي يجب أن يدعم Signed URLs (Security Architecture §23):
    الملفات لا تُقدَّم عبر روابط دائمة مكشوفة.
 
-⚠️ هذه الواجهة مستقلة عن adapters/storage/base.py من Phase 0: تلك أقدم
-   وبتوقيع مختلف (upload(file)، generate_signed_url) ولا مستورد لها.
-   المواصفة هنا تحدّد توقيعًا مختلفًا صراحةً، فلم تُعدَّل تلك حتى لا
-   يتغيّر ملف Phase 0 دون طلب.
+📌 هذه هي واجهة التخزين الوحيدة. واجهة Phase 0 القديمة
+   (adapters/storage/base.py) حُذفت: لم يكن لها مستورد، وتوقيعها مختلف.
 """
 
 from abc import ABC, abstractmethod

@@ -28,9 +28,18 @@ DATABASES = build_databases()
 #    من الشبكة يومًا، فالترويسة تصبح قابلة للانتحال ويجب مراجعة هذا.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# بروكسي Railway واحد يضيف IP العميل إلى X-Forwarded-For.
+NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", default=1, cast=int)
+
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+
+# ملفات Admin الساكنة مضغوطة ومُعنونة بالبصمة (WhiteNoise).
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}

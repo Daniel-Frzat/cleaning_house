@@ -19,13 +19,13 @@ Support API — Support Domain (MVP)
 import uuid
 
 from django.core.exceptions import ValidationError
-from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from ninja import Query, Router
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import support as svc
 from .schemas import ErrorOut, SupportRequestIn, SupportRequestOut
 
-router = Router(tags=["Support"], auth=JWTAuth())
+router = Router(tags=["Support"], auth=ActiveUserJWTAuth())
 
 
 # ------------------------------------------------------------
@@ -139,17 +139,21 @@ def create_support_request(request, payload: SupportRequestIn):
         "**Who may call:** any authenticated user. The list is scoped to the "
         "caller's own requests, newest first; an `ADMIN` receives every "
         "request from every user.\n\n"
+        "**Paging:** `limit` (default 100, max 200) and `offset` query "
+        "parameters; the response is still a plain array.\n\n"
         "**Side effects:** none — read-only."
     ),
     openapi_extra={"responses": {403: {"description": "No valid token was supplied."}}},
 )
-def list_support_requests(request):
+def list_support_requests(
+    request, limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0)
+):
     try:
         requests = svc.list_support_requests(request.user)
     except svc.SupportPermissionError as exc:
         return _error(403, exc.code, str(exc))
 
-    return 200, [_serialize(r) for r in requests]
+    return 200, [_serialize(r) for r in requests[offset : offset + limit]]
 
 
 # ------------------------------------------------------------

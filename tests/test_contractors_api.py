@@ -212,15 +212,32 @@ def test_invalid_state_is_rejected(client, contractor_a):
 
 
 @pytest.mark.django_db
+def test_contractor_postcode_must_match_state(client, db):
+    user = make_user("+61400004299")
+    r = post(
+        client,
+        "/api/contractor/profile",
+        {**VALID_PROFILE, "state": "VIC", "postcode": "2042"},
+        **auth(user),
+    )
+    assert r.status_code == 422, r.content
+
+
+@pytest.mark.django_db
 def test_all_australian_states_accepted(client, db):
     from apps.contractors.models import AustralianState
 
+    # رمز بريدي من الولاية نفسها — الرمز المتناقض مرفوض
+    postcodes = {
+        "NSW": "2000", "VIC": "3000", "QLD": "4000", "SA": "5000",
+        "WA": "6000", "TAS": "7000", "NT": "0800", "ACT": "2600",
+    }
     for i, state in enumerate(AustralianState.values):
         user = make_user(f"+6140000420{i}")
         r = post(
             client,
             "/api/contractor/profile",
-            {**VALID_PROFILE, "state": state},
+            {**VALID_PROFILE, "state": state, "postcode": postcodes[state]},
             **auth(user),
         )
         assert r.status_code == 201, (state, r.content)

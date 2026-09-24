@@ -23,7 +23,7 @@ Contractor Profile API (self-service) — Contractors Domain
 
 from django.core.exceptions import ValidationError
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import profile as svc
 from ..services import verification as vsvc
@@ -39,7 +39,7 @@ from .schemas import (
     InsuranceDocumentOut,
 )
 
-router = Router(tags=["Contractor Profile"], auth=JWTAuth())
+router = Router(tags=["Contractor Profile"], auth=ActiveUserJWTAuth())
 
 
 # ------------------------------------------------------------
@@ -314,6 +314,10 @@ def _verification_error(exc):
         return _error(403, exc.code, str(exc))
     if isinstance(exc, vsvc.ContractorProfileNotFoundError):
         return _not_found()
+    if isinstance(exc, vsvc.SubmissionPendingError):
+        return _error(409, exc.code, str(exc))
+    if isinstance(exc, vsvc.ExpiredDocumentError):
+        return _error(422, exc.code, str(exc))
     return None
 
 
@@ -322,7 +326,7 @@ def _verification_error(exc):
 # ------------------------------------------------------------
 @router.post(
     "/business-registration",
-    response={201: BusinessRegistrationOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    response={201: BusinessRegistrationOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Submit own business registration (contractor only)",
     description=(
         "**Who may call:** `CONTRACTOR` only, for themselves — the submission is "
@@ -355,6 +359,7 @@ def submit_business_registration(request, payload: BusinessRegistrationIn):
         vsvc.InvalidContractorRoleError,
         vsvc.ContractorProfilePermissionError,
         vsvc.ContractorProfileNotFoundError,
+        vsvc.SubmissionPendingError,
     ) as exc:
         return _verification_error(exc)
     except ValidationError as exc:
@@ -404,7 +409,7 @@ def list_business_registrations(request):
 # ------------------------------------------------------------
 @router.post(
     "/insurance",
-    response={201: InsuranceDocumentOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    response={201: InsuranceDocumentOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
     summary="Submit own insurance document (contractor only)",
     description=(
         "**Who may call:** `CONTRACTOR` only, for themselves.\n\n"
@@ -438,6 +443,8 @@ def submit_insurance(request, payload: InsuranceDocumentIn):
         vsvc.InvalidContractorRoleError,
         vsvc.ContractorProfilePermissionError,
         vsvc.ContractorProfileNotFoundError,
+        vsvc.SubmissionPendingError,
+        vsvc.ExpiredDocumentError,
     ) as exc:
         return _verification_error(exc)
     except ValidationError as exc:

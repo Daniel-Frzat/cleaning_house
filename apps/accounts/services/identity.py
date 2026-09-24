@@ -35,9 +35,16 @@ def get_or_create_user_by_phone(phone):
     user = User.objects.filter(phone=phone).first()
 
     if user is None:
-        user = User.objects.create_user(phone=phone, role=ConfirmedRole.CUSTOMER)
-        logger.info("User created after first OTP verification (user_id=%s)", user.id)
-        return user, True
+        try:
+            # savepoint: تحققان متزامنان لرقم جديد قد يصلان معًا إلى هنا
+            with transaction.atomic():
+                user = User.objects.create_user(phone=phone, role=ConfirmedRole.CUSTOMER)
+        except IntegrityError:
+            # الطلب المتزامن أنشأ الحساب قبلنا — نستخدمه
+            user = User.objects.get(phone=phone)
+        else:
+            logger.info("User created after first OTP verification (user_id=%s)", user.id)
+            return user, True
 
     assert_user_can_login(user)
     return user, False
@@ -107,12 +114,15 @@ def update_own_profile(user, **fields):
             if taken:
                 raise EmailAlreadyUsedError("This email is already in use.")
 
+        if normalized != user.email:
+            # 🔒 بريد مُدخَل يدويًا غير مُثبت الملكية — راجع User.email_verified
+            user.email_verified = False
         user.email = normalized
 
     user.full_clean(exclude=["password", "last_login"])
 
     try:
-        user.save(update_fields=["full_name", "email", "updated_at"])
+        user.save(update_fields=["full_name", "email", "email_verified", "updated_at"])
     except IntegrityError as exc:
         # سباق: سجّل حساب آخر البريد نفسه بين الفحص أعلاه والحفظ
         raise EmailAlreadyUsedError("This email is already in use.") from exc

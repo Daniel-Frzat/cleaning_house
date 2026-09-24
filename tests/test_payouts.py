@@ -11,6 +11,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import JPEG_BYTES, mark_paid
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client
@@ -105,6 +107,8 @@ def make_booking(customer, service_type, profile, price=Decimal("215.00")):
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service_type, room_count=3
     )
+    # الدفع للمقاول مشروط بنجاح دفع العميل
+    mark_paid(booking)
     return booking
 
 
@@ -587,10 +591,10 @@ def test_confirming_job_triggers_payout(
     # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
     job = jobs_svc.start_job(job, contractor_user)
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"b", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.AFTER, b"a", "image/jpeg"
+        contractor_user, job.id, PhotoType.AFTER, JPEG_BYTES, "image/jpeg"
     )
     jobs_svc.mark_job_done(job, contractor_user)
 
@@ -615,10 +619,10 @@ def test_no_payout_before_confirmation(
     # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
     job = jobs_svc.start_job(job, contractor_user)
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"b", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.AFTER, b"a", "image/jpeg"
+        contractor_user, job.id, PhotoType.AFTER, JPEG_BYTES, "image/jpeg"
     )
 
     with django_capture_on_commit_callbacks(execute=True):

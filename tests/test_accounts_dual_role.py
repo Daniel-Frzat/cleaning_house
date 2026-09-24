@@ -69,7 +69,7 @@ def customer(db):
 def approve_docs(profile, *, registration=VerificationStatus.VERIFIED,
                  insurance=VerificationStatus.VERIFIED, expired=False):
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Sparkle Co",
+        contractor=profile, abn="51824753556", business_name="Sparkle Co",
         status=registration,
         rejection_reason="no" if registration == VerificationStatus.REJECTED else None,
     )

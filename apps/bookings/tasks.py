@@ -19,8 +19,8 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
-from .models import DispatchOffer, DispatchOfferStatus
-from .services.dispatch import assign_next_contractor
+from .models import Booking, BookingStatus, DispatchOffer, DispatchOfferStatus
+from .services.dispatch import assign_next_contractor, redispatch_stranded_bookings
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +61,18 @@ def expire_pending_offers():
 
     created = 0
     for booking in bookings_to_cascade:
-        # نفس تتابع الرفض تمامًا (§36.6)
-        if assign_next_contractor(booking) is not None:
-            created += 1
+        # 🔒 كل حجز معزول: استثناء في أحدها لا يترك البقية عالقة في
+        #    SEARCHING بلا عرض. ما يفلت هنا تلتقطه redispatch_stranded_bookings.
+        try:
+            # نفس تتابع الرفض تمامًا (§36.6)
+            if assign_next_contractor(booking) is not None:
+                created += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("Cascade after expiry failed (booking_id=%s)", booking.id)
+
+    # شبكة أمان: حجوزات SEARCHING بلا عرض حيّ (عامل تعطل بين المرحلتين،
+    # أو hook إرسال ابتُلع استثناؤه بعد الإنشاء/إعادة الجدولة)
+    recovered = redispatch_stranded_bookings()
 
     if expired_ids:
         logger.info(
@@ -72,4 +81,49 @@ def expire_pending_offers():
             created,
         )
 
-    return {"expired": len(expired_ids), "created": created}
+    return {"expired": len(expired_ids), "created": created, "recovered": recovered}
+
+
+@shared_task(name="bookings.repair_confirmed_bookings")
+def repair_confirmed_bookings(stale_after_minutes=5):
+    """
+    يُكمل الآثار الجانبية التي لم تحدث بعد تأكيد الحجز أو إكمال المهمة.
+
+    الـhooks بعد الـcommit تبتلع استثناءاتها عمدًا (لا تُسقط طلبًا ناجحًا)،
+    فحجز قد يبقى CONFIRMED بلا مهمة أو بلا دفعة، ومهمة مكتملة بلا دفع
+    للمقاول. هذه المهمة تلتقطها:
+
+      1) CONFIRMED بلا Job          → create_job_for_booking
+      2) CONFIRMED بلا Payment      → charge_for_booking
+      3) Job COMPLETED + دفعة عميل SUCCEEDED + بلا Payout → release_payout
+
+    🔒 لا يعيد أي محاولة على سجل موجود (Payment/Payout بأي حالة): التكرارية
+       الصارمة محفوظة. السجل PENDING بعد خطأ مزوّد يحتاج مطابقة لا إعادة.
+    📌 stale_after_minutes: لا نلمس ما تغيّر للتو — hook قد يكون قيد التنفيذ.
+    """
+    from apps.jobs.services.jobs import create_job_for_booking
+    from apps.payments.services.payments import charge_for_booking
+    from apps.payouts.services.payouts import release_missing_payouts
+
+    cutoff = timezone.now() - timezone.timedelta(minutes=stale_after_minutes)
+    confirmed = Booking.objects.filter(status=BookingStatus.CONFIRMED, updated_at__lt=cutoff)
+    counts = {"jobs": 0, "charges": 0, "payouts": 0}
+
+    def attempt(kind, func, booking):
+        try:
+            func(booking)
+            counts[kind] += 1
+        except Exception:  # noqa: BLE001 — حجز واحد لا يوقف البقية
+            logger.exception("Repair %s failed (booking_id=%s)", kind, booking.id)
+
+    for booking in confirmed.filter(job__isnull=True):
+        attempt("jobs", create_job_for_booking, booking)
+
+    for booking in confirmed.filter(payment__isnull=True):
+        attempt("charges", charge_for_booking, booking)
+
+    counts["payouts"] = release_missing_payouts(completed_before=cutoff)
+
+    if any(counts.values()):
+        logger.warning("Repaired confirmed bookings: %s", counts)
+    return counts

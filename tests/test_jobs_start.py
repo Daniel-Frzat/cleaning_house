@@ -12,6 +12,8 @@ import datetime
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import JPEG_BYTES, mark_paid
 from django.test import Client
 from django.utils import timezone
 
@@ -92,6 +94,8 @@ def job(customer, contractor):
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service, room_count=3
     )
+    # بدء المهمة مشروط بنجاح دفع العميل
+    mark_paid(booking)
     return jobs_svc.create_job_for_booking(booking)
 
 
@@ -216,7 +220,7 @@ def test_photos_are_refused_before_the_job_starts(contractor, job):
     with pytest.raises(photos_svc.JobNotAcceptingPhotosError):
         photos_svc.upload_job_photo(
             user, job.id, photo_type=PhotoType.BEFORE,
-            file_bytes=b"x" * 16, content_type="image/jpeg",
+            file_bytes=JPEG_BYTES * 16, content_type="image/jpeg",
         )
 
 
@@ -227,7 +231,7 @@ def test_photos_are_accepted_once_started(contractor, job):
 
     photo = photos_svc.upload_job_photo(
         user, job.id, photo_type=PhotoType.BEFORE,
-        file_bytes=b"x" * 16, content_type="image/jpeg",
+        file_bytes=JPEG_BYTES * 16, content_type="image/jpeg",
     )
 
     assert photo.photo_type == PhotoType.BEFORE
@@ -256,7 +260,7 @@ def test_the_full_sequence(client, customer, contractor, job):
     for kind in (PhotoType.BEFORE, PhotoType.AFTER):
         photos_svc.upload_job_photo(
             user, job.id, photo_type=kind,
-            file_bytes=b"x" * 16, content_type="image/jpeg",
+            file_bytes=JPEG_BYTES * 16, content_type="image/jpeg",
         )
 
     jobs_svc.mark_job_done(job, user)

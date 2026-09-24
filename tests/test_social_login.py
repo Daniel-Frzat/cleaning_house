@@ -32,11 +32,13 @@ def make_profile(
     email="user@example.com",
     full_name="Social User",
     raw=None,
+    email_verified=True,
 ):
     return ProviderProfile(
         provider=provider,
         provider_user_id=provider_user_id,
         email=email,
+        email_verified=email_verified,
         full_name=full_name,
         raw=raw if raw is not None else {"sub": provider_user_id, "email": email},
     )
@@ -190,7 +192,10 @@ def test_same_provider_user_id_on_different_providers_are_distinct_identities():
 @pytest.mark.django_db
 def test_matching_email_links_to_existing_phone_registered_user():
     existing = User.objects.create_user(
-        phone="+96550007777", email="existing@example.com", full_name="Phone User"
+        phone="+96550007777",
+        email="existing@example.com",
+        email_verified=True,
+        full_name="Phone User",
     )
 
     profile = make_profile(provider_user_id="google-sub-777", email="existing@example.com")
@@ -213,7 +218,9 @@ def test_matching_email_links_to_existing_phone_registered_user():
 
 @pytest.mark.django_db
 def test_email_match_is_case_insensitive():
-    existing = User.objects.create_user(phone="+96550008888", email="Mixed@Example.com")
+    existing = User.objects.create_user(
+        phone="+96550008888", email="Mixed@Example.com", email_verified=True
+    )
     FakeSocialAuthAdapter.register_token(
         "tok-case", make_profile(provider_user_id="g-case", email="mixed@example.com")
     )
@@ -228,7 +235,10 @@ def test_email_match_is_case_insensitive():
 @pytest.mark.django_db
 def test_inactive_user_cannot_login_via_social():
     User.objects.create_user(
-        phone="+96550009999", email="suspended@example.com", status=UserStatus.SUSPENDED
+        phone="+96550009999",
+        email="suspended@example.com",
+        email_verified=True,
+        status=UserStatus.SUSPENDED,
     )
     FakeSocialAuthAdapter.register_token(
         "tok-susp", make_profile(provider_user_id="g-susp", email="suspended@example.com")
@@ -238,6 +248,95 @@ def test_inactive_user_cannot_login_via_social():
         social_service.login_with_provider(SocialProvider.GOOGLE, "tok-susp")
 
     assert SocialAccount.objects.count() == 0
+
+
+# ------------------------------------------------------------
+# 3b) لا ربط عبر بريد غير مُثبت الملكية (account pre-hijacking)
+# ------------------------------------------------------------
+@pytest.mark.django_db
+def test_unverified_local_email_is_never_linked():
+    """
+    مهاجم يضع بريد الضحية في حسابه عبر PATCH /auth/me (غير مُثبت). دخول
+    الضحية بـGoogle لا يجوز أن يصل إلى حساب المهاجم.
+    """
+    attacker = User.objects.create_user(phone="+96550006666", email="victim@example.com")
+    assert attacker.email_verified is False
+    FakeSocialAuthAdapter.register_token(
+        "tok-victim", make_profile(provider_user_id="g-victim", email="victim@example.com")
+    )
+
+    user, social, created = social_service.login_with_provider(SocialProvider.GOOGLE, "tok-victim")
+
+    assert created is True
+    assert user.id != attacker.id
+    assert social.user_id == user.id
+    # البريد مأخوذ بحساب آخر → الحساب الجديد بلا بريد، والبريد يبقى على الربط
+    assert user.email is None
+    assert social.email == "victim@example.com"
+
+
+@pytest.mark.django_db
+def test_provider_unverified_email_is_never_linked():
+    existing = User.objects.create_user(
+        phone="+96550005555", email="owner@example.com", email_verified=True
+    )
+    FakeSocialAuthAdapter.register_token(
+        "tok-unv",
+        make_profile(provider_user_id="g-unv", email="owner@example.com", email_verified=False),
+    )
+
+    user, _, created = social_service.login_with_provider(SocialProvider.GOOGLE, "tok-unv")
+
+    assert created is True
+    assert user.id != existing.id
+
+
+@pytest.mark.django_db
+def test_new_social_user_with_verified_email_is_marked_verified():
+    FakeSocialAuthAdapter.register_token(
+        "tok-new-v", make_profile(provider_user_id="g-new-v", email="fresh@example.com")
+    )
+    user, _, created = social_service.login_with_provider(SocialProvider.GOOGLE, "tok-new-v")
+    assert created is True
+    assert user.email == "fresh@example.com"
+    assert user.email_verified is True
+
+
+@pytest.mark.django_db
+def test_editing_email_resets_verification():
+    from apps.accounts.services import identity
+
+    user = User.objects.create_user(
+        phone="+96550004444", email="mine@example.com", email_verified=True
+    )
+    identity.update_own_profile(user, email="other@example.com")
+    user.refresh_from_db()
+    assert user.email_verified is False
+
+
+@pytest.mark.django_db
+def test_user_already_linked_to_another_identity_gets_clean_error():
+    """المستخدم المطابق بالبريد مرتبط مسبقًا بـsub آخر لدى Google → خطأ domain لا 500."""
+    existing = User.objects.create_user(
+        phone="+96550003333", email="linked@example.com", email_verified=True
+    )
+    SocialAccount.objects.create(
+        user=existing, provider=SocialProvider.GOOGLE, provider_user_id="g-original"
+    )
+    FakeSocialAuthAdapter.register_token(
+        "tok-second", make_profile(provider_user_id="g-second", email="linked@example.com")
+    )
+
+    with pytest.raises(social_service.ProviderAlreadyLinkedError):
+        social_service.login_with_provider(SocialProvider.GOOGLE, "tok-second")
+
+
+def test_placeholder_phone_does_not_collide_on_shared_prefix():
+    """sub الخاص بـGoogle 21 رقمًا — الاقتطاع القديم كان يُصادم البادئات المشتركة."""
+    a = social_service._placeholder_phone("GOOGLE", "123456789012345678901")
+    b = social_service._placeholder_phone("GOOGLE", "123456789012345678902")
+    assert a != b
+    assert len(a) <= 32 and len(b) <= 32
 
 
 # ============================================================

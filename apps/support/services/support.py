@@ -127,6 +127,19 @@ def create_support_request(user, category, message, booking_id=None):
     return support_request
 
 
+def booking_is_related_to(booking, user_id):
+    """
+    العميل صاحب الحجز، أو المقاول المُسنَد إليه.
+
+    📌 المقاول الذي يبلّغ عن مشكلة في مهمته (عنوان خاطئ، عميل غائب) يحتاج
+       ربطها بالحجز تمامًا كالعميل. أي طرف ثالث يُرفض.
+    """
+    if booking.customer_id == user_id:
+        return True
+    profile = booking.assigned_contractor
+    return profile is not None and profile.user_id == user_id
+
+
 def _resolve_booking(user, booking_id):
     """
     يعيد الحجز المملوك للمستخدم، أو None إن لم يُرسل معرّف.
@@ -141,8 +154,8 @@ def _resolve_booking(user, booking_id):
 
     booking = Booking.objects.filter(pk=booking_id).first()
 
-    # 🔒 غير موجود وغير مملوك → نفس الخطأ.
-    if booking is None or booking.customer_id != user.id:
+    # 🔒 غير موجود وغير مرتبط بالمستخدم → نفس الخطأ.
+    if booking is None or not booking_is_related_to(booking, user.id):
         logger.warning(
             "Support request referenced an inaccessible booking "
             "(user_id=%s, booking_id=%s)",

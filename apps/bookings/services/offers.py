@@ -17,10 +17,13 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
-from apps.accounts.roles import ConfirmedRole
-from apps.services.services.pricing import calculate_price
+from apps.services.services.pricing import (
+    PricingError,
+    calculate_price_for_existing_booking,
+)
 
 from ..models import (
+    Booking,
     BookingStatus,
     DispatchOffer,
     DispatchOfferStatus,
@@ -61,6 +64,12 @@ class OfferNotActionableError(OfferError):
     """
 
     code = "offer_not_actionable"
+
+
+class BookingNotPriceableError(OfferError):
+    """تعذّر تسعير الحجز — بيانات خدماته لم تعد صالحة."""
+
+    code = "booking_not_priceable"
 
 
 class SelfAssignmentError(OfferError):
@@ -111,6 +120,30 @@ def get_offer_for_contractor(user, offer_id):
     return offer
 
 
+def list_offers_for_contractor(user, only_pending=True):
+    """
+    عروض هذا المقاول — الأحدث أولًا.
+
+    📌 بدون هذه القائمة لا يعرف المقاول معرّف أي عرض (لا إشعارات بعد)،
+       فتنتهي كل العروض بلا رد ويتحول الإسناد كله إلى انتظار المهلة.
+
+    only_pending=True: العروض القابلة للرد الآن فقط (PENDING وغير منتهية).
+    """
+    assert_is_contractor(user)
+    profile = getattr(user, "contractor_profile", None)
+    if profile is None:
+        return DispatchOffer.objects.none()
+
+    qs = DispatchOffer.objects.filter(contractor=profile)
+    if only_pending:
+        qs = qs.filter(status=DispatchOfferStatus.PENDING, expires_at__gt=timezone.now())
+    return (
+        qs.select_related("booking__property__address")
+        .prefetch_related("booking__service_selections__service_type")
+        .order_by("-offered_at")
+    )
+
+
 def assert_not_own_booking(user, offer, *, action):
     """
     🔒 لا يردّ المستخدم على عرض يخص حجزه هو — قبولًا كان أو رفضًا.
@@ -133,6 +166,33 @@ def assert_not_own_booking(user, offer, *, action):
         raise SelfAssignmentError(f"You cannot {action} an offer on your own booking.")
 
 
+def _lock_for_response(offer):
+    """
+    🔒 يقفل الحجز ثم العرض داخل المعاملة الحالية، ويعيدهما طازجين.
+
+    الترتيب ثابت (الحجز أولًا) في كل المسارات — القبول والرفض والتتابع
+    وإعادة الجدولة — فلا يحدث deadlock، ولا يمر طلبان متزامنان على الحالة
+    القديمة نفسها: قبول من جهاز ورفض من آخر، أو قبول يتقاطع مع انتهاء
+    المهلة، يُسلسلان هنا والثاني يرى نتيجة الأول.
+    """
+    booking = Booking.objects.select_for_update().get(pk=offer.booking_id)
+    locked = DispatchOffer.objects.select_for_update().get(pk=offer.pk)
+    locked.booking = booking
+    return booking, locked
+
+
+def _assert_open_for_response(booking, offer, verb):
+    """العرض قابل للرد، والحجز ما زال ينتظر مقاولًا."""
+    if not offer.is_actionable():
+        raise OfferNotActionableError(
+            f"Offer is {offer.status.lower()} or expired and cannot be {verb}."
+        )
+    if booking.status != BookingStatus.PENDING:
+        raise OfferNotActionableError(
+            f"The booking is {booking.status.lower()} and no longer needs a contractor."
+        )
+
+
 def _selections_for_pricing(booking):
     """أسطر خدمات الحجز بالشكل الذي يتوقعه محرّك التسعير."""
     return [
@@ -147,17 +207,18 @@ def accept_offer(user, offer_id):
     يقبل العرض، فيُحسب السعر ويُثبَّت، ويُسنَد المقاول، ويصبح الحجز CONFIRMED.
 
     📌 هذه هي لحظة كشف السعر للعميل (§36.1) — ولا لحظة قبلها.
+
+    🔒 كل الفحوص تُعاد بعد القفل: السعر المجمّد والمقاول المُسنَد يُكتبان
+       مرة واحدة فقط، ولا يمكن لقبول ثانٍ أن يكتب فوقهما.
     """
     offer = get_offer_for_contractor(user, offer_id)
-
-    if not offer.is_actionable():
-        raise OfferNotActionableError(
-            f"Offer is {offer.status.lower()} or expired and cannot be accepted."
-        )
-
-    booking = offer.booking
-
     assert_not_own_booking(user, offer, action="accept")
+
+    booking, offer = _lock_for_response(offer)
+    _assert_open_for_response(booking, offer, "accepted")
+
+    if booking.scheduled_at is not None and booking.scheduled_at <= timezone.now():
+        raise OfferNotActionableError("The visit time has already passed.")
 
     # المسافة من العرض نفسه — لا إعادة حساب (راجع docstring الملف)
     distance_km = offer.distance_km
@@ -165,10 +226,15 @@ def accept_offer(user, offer_id):
         # لا ينبغي أن يحدث: العرض لا يُنشأ أصلًا بمسافة مجهولة
         raise OfferNotActionableError("Offer has no recorded distance.")
 
-    price = calculate_price(
-        service_selections=_selections_for_pricing(booking),
-        distance_km=distance_km,
-    )
+    try:
+        # خدمة عُطّلت بعد الحجز لا تُبطل حجزًا قائمًا
+        price = calculate_price_for_existing_booking(
+            service_selections=_selections_for_pricing(booking),
+            distance_km=distance_km,
+        )
+    except PricingError as exc:
+        logger.error("Booking could not be priced (booking_id=%s): %s", booking.id, exc)
+        raise BookingNotPriceableError("This booking can no longer be priced.") from exc
 
     offer.status = DispatchOfferStatus.ACCEPTED
     offer.responded_at = timezone.now()
@@ -203,7 +269,7 @@ def accept_offer(user, offer_id):
     # 📌 لحظة التأكيد تُطلق أثرين جانبيين، كلاهما بعد تثبيت المعاملة لا
     #    داخلها: فشل أيّهما لا يجوز أن يُلغي تأكيدًا صحيحًا.
     #      1) الشحن المباشر (§36.4)
-    #      2) إنشاء مهمة التنفيذ بحالة IN_PROGRESS (§20، §36.3)
+    #      2) إنشاء مهمة التنفيذ بحالة ASSIGNED (§20، §36.3)
     # robust=True: طبقة حماية من الإطار فوق try/except الداخلي في كل hook.
     #   العزل الحالي يعتمد على انضباط كل دالة؛ هذا يضمنه من الإطار أيضًا،
     #   فلو رُفع استثناء من خارج try/except بالخطأ لا يُسقط الـhook التالي.
@@ -219,7 +285,8 @@ def _charge_after_commit(booking):
 
     الاستثناءات تُبتلع وتُسجَّل: الحجز مؤكَّد فعلًا، وخطأ في طبقة الدفع
     يجب ألا يتحول إلى 500 على طلب قبول ناجح. الدفعة الفاشلة تبقى مسجَّلة
-    بحالة FAILED، والحجز كما هو.
+    بحالة FAILED، والحجز كما هو. حجز مؤكَّد بلا دفعة تلتقطه المهمة الدورية
+    bookings.repair_confirmed_bookings وتعيد المحاولة.
     """
     from apps.payments.services.payments import charge_for_booking
 
@@ -259,13 +326,10 @@ def decline_offer(user, offer_id):
        المفتوح #16، ولا سلوك بديل يُخترع هنا.
     """
     offer = get_offer_for_contractor(user, offer_id)
-
-    if not offer.is_actionable():
-        raise OfferNotActionableError(
-            f"Offer is {offer.status.lower()} or expired and cannot be declined."
-        )
-
     assert_not_own_booking(user, offer, action="decline")
+
+    booking, offer = _lock_for_response(offer)
+    _assert_open_for_response(booking, offer, "declined")
 
     offer.status = DispatchOfferStatus.DECLINED
     offer.responded_at = timezone.now()
@@ -279,6 +343,6 @@ def decline_offer(user, offer_id):
     )
 
     # التتابع التلقائي — نفس سلوك انتهاء المهلة (§36.6)
-    next_offer = assign_next_contractor(offer.booking)
+    next_offer = assign_next_contractor(booking)
 
     return offer, next_offer

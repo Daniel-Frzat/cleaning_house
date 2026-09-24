@@ -126,12 +126,20 @@ class SupportRequest(models.Model):
 
     def clean(self):
         """
-        🔒 الحجز المربوط يخصّ مقدّم الطلب.
+        🔒 RESOLVED نهائية: لا يُعاد فتح طلب محلول (ولا من لوحة الإدارة).
+        🔒 الحجز المربوط يخصّ مقدّم الطلب (عميلًا أو مقاولًا مُسنَدًا).
 
         يُفرض هنا لا في طبقة الخدمة وحدها: أي مسار كتابة يمرّ بـfull_clean
         (API، أمر إداري، shell) يُمنع من ربط حجز غريب.
         """
         super().clean()
+
+        if self.pk is not None and self.status != SupportStatus.RESOLVED:
+            previous = (
+                type(self).objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            )
+            if previous == SupportStatus.RESOLVED:
+                raise ValidationError({"status": "A resolved request cannot be reopened."})
 
         if self.booking_id is None:
             return
@@ -141,7 +149,9 @@ class SupportRequest(models.Model):
         if self.user_id is None:
             return
 
-        if self.booking.customer_id != self.user_id:
+        from .services.support import booking_is_related_to
+
+        if not booking_is_related_to(self.booking, self.user_id):
             raise ValidationError(
                 {"booking": "This booking does not belong to you."}
             )

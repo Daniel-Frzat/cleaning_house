@@ -1,11 +1,12 @@
 """
-Celery App — Phase 0 (Infra only)
+Celery App.
 
-⚠️ لا توجد هنا أي Tasks بمنطق أعمال فعلي.
-المهام الحقيقية (Dispatch expiry, Escrow checks, Notifications,
-Invoice triggers, Guarantee window, Insurance expiry) ستُضاف كل
-واحدة ضمن الـDomain الخاص بها في مرحلتها المحددة (راجع قسم 20
-من المرجع المعماري).
+المهام تعيش في tasks.py داخل كل Domain وتُكتشف تلقائيًا، وجدولها الدوري
+في CELERY_BEAT_SCHEDULE (config/settings/base.py):
+  - bookings.expire_pending_offers   كل دقيقة — انتهاء العروض + التتابع
+                                     + استعادة الحجوزات العالقة
+  - bookings.repair_confirmed_bookings كل 5 دقائق — مهمة/شحن/دفع للمقاول
+                                     لم تُنفَّذ بعد تأكيد الحجز
 """
 
 import os

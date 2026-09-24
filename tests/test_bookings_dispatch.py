@@ -106,7 +106,7 @@ def make_contractor(phone, coords=NEAR, available=True, eligible=True):
         )
         BusinessRegistration.objects.create(
             contractor=profile,
-            abn="12345678901",
+            abn="51824753556",
             business_name="Co",
             status=VerificationStatus.VERIFIED,
             reviewed_by=admin,
@@ -459,8 +459,8 @@ def test_expiry_task_is_idempotent(
     run2 = expire_pending_offers()
     count_after_second = DispatchOffer.objects.filter(booking=booking).count()
 
-    assert run1 == {"expired": 1, "created": 1}
-    assert run2 == {"expired": 0, "created": 0}, "second run must be a no-op"
+    assert run1 == {"expired": 1, "created": 1, "recovered": 0}
+    assert run2 == {"expired": 0, "created": 0, "recovered": 0}, "second run must be a no-op"
     assert count_after_first == count_after_second == 2
 
 
@@ -475,7 +475,7 @@ def test_expiry_task_ignores_unexpired_offers(
 
     result = expire_pending_offers()
 
-    assert result == {"expired": 0, "created": 0}
+    assert result == {"expired": 0, "created": 0, "recovered": 0}
     assert DispatchOffer.objects.get(booking=booking).status == DispatchOfferStatus.PENDING
 
 

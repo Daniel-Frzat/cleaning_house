@@ -27,7 +27,7 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from ninja import File, Router, UploadedFile
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
@@ -39,12 +39,12 @@ from .schemas import ErrorOut, JobLocationIn, JobOut, JobPhotoOut, JobTrackingOu
 # ------------------------------------------------------------
 # Router للمقاول (يُركَّب على /contractor)
 # ------------------------------------------------------------
-contractor_router = Router(tags=["Contractor Jobs"], auth=JWTAuth())
+contractor_router = Router(tags=["Contractor Jobs"], auth=ActiveUserJWTAuth())
 
 # ------------------------------------------------------------
 # Router لعرض المهمة عبر الحجز (يُركَّب على /bookings)
 # ------------------------------------------------------------
-booking_router = Router(tags=["Jobs"], auth=JWTAuth())
+booking_router = Router(tags=["Jobs"], auth=ActiveUserJWTAuth())
 
 
 def _error(status, code, detail):
@@ -154,7 +154,10 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
         "else.\n\n"
         "**Preconditions:** the job must still be in progress — photos are "
         "refused with `409` once it has been marked done. `photo_type` must be "
-        "`BEFORE` or `AFTER`, and the file must not be empty.\n\n"
+        "`BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC "
+        "image (checked from its content, not the declared type), at most "
+        "`JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most "
+        "`JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\n"
         "Multipart upload. The bytes are handed to the configured storage "
         "provider and are not written by this endpoint.\n\n"
         "**Side effects:** the photo counts towards the proof required by "
@@ -167,7 +170,13 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
     ),
     openapi_extra={
         "responses": {
-            400: {"description": "`photo_type` is not `BEFORE`/`AFTER`, or the uploaded file is empty."},
+            400: {
+                "description": (
+                    "`photo_type` is not `BEFORE`/`AFTER`, the file is empty, too "
+                    "large, not a supported image, or the job already has the "
+                    "maximum number of photos."
+                )
+            },
             403: {"description": "The caller is not the contractor assigned to this job."},
             404: {"description": "No job with this id."},
             409: {"description": "The job is no longer accepting photos."},
@@ -185,6 +194,13 @@ def upload_photo(
 
     ⚠️ البايتات تُمرَّر إلى الـadapter ولا تُكتب هنا.
     """
+    # الحجم يُفحص قبل القراءة: ملف ضخم لا يُحمَّل كاملًا في الذاكرة
+    if file.size is not None and file.size > photos_svc.max_photo_bytes():
+        return _error(
+            400,
+            photos_svc.PhotoTooLargeError.code,
+            f"Photo exceeds the {photos_svc.max_photo_bytes() // (1024 * 1024)} MB limit.",
+        )
     try:
         photo = photos_svc.upload_job_photo(
             request.user,
@@ -301,7 +317,7 @@ def start_job(request, job_id: uuid.UUID):
         return _error(404, "job_not_found", "Job not found.")
     except jobs_svc.JobPermissionError as exc:
         return _error(403, exc.code, str(exc))
-    except jobs_svc.InvalidJobStatusError as exc:
+    except (jobs_svc.InvalidJobStatusError, jobs_svc.PaymentNotSettledError) as exc:
         # 409: تعارض مع حالة المورد الحالية
         return _error(409, exc.code, str(exc))
     except jobs_svc.JobError as exc:

@@ -22,12 +22,16 @@ class ProviderProfile:
                       هذا هو مفتاح الهوية، وليس البريد (البريد قد يتغير أو يُخفى).
     email:            كما أبلغ عنه المزوّد. قد يكون None (Apple Private Relay
                       أو مستخدم رفض مشاركة البريد).
+    email_verified:   هل أكّد المزوّد ملكية البريد (claim email_verified في
+                      OIDC). 🔒 التنفيذ الحقيقي يجب أن ينقله كما هو — الربط
+                      بحساب قائم عبر البريد يعتمد عليه.
     raw:              الحمولة الخام للتدقيق/التشخيص.
     """
 
     provider: str
     provider_user_id: str
     email: str = None
+    email_verified: bool = False
     full_name: str = ""
     raw: dict = field(default_factory=dict)
 

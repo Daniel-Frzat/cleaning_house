@@ -24,7 +24,7 @@ from apps.properties.services import properties as properties_svc
 from apps.services.models import ServiceType
 
 from ..models import Booking, BookingServiceSelection, BookingStatus, DispatchStatus
-from .scheduling import normalize_scheduled_at
+from .scheduling import TimezoneMismatchError, normalize_scheduled_at
 from .timezone import get_timezone_for_state
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,12 @@ class InvalidRoomCountError(BookingError):
     """عدد الغرف سالب أو ليس عددًا صحيحًا."""
 
     code = "invalid_room_count"
+
+
+class PropertyInactiveError(BookingError):
+    """العقار محذوف (soft delete) — لا حجوزات جديدة عليه."""
+
+    code = "property_inactive"
 
 
 class BookingNotReschedulableError(BookingError):
@@ -226,6 +232,10 @@ def create_booking(
     # يرفع PropertyPermissionError / PropertyNotFoundError عند الفشل
     prop = properties_svc.get_property(user, property_id)
 
+    # 🔒 DELETE على العقار يعده بألا يُستعمل لحجوزات جديدة
+    if not prop.is_active:
+        raise PropertyInactiveError("This property has been removed and cannot be booked.")
+
     # كل التحقق قبل أي كتابة
     resolved = _resolve_selections(service_selections)
 
@@ -359,13 +369,23 @@ def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
        لا تقرير أداء يعتمد عليه اليوم، وإبقاؤه كان يتطلب تغيير القيد
        ودالة الترشيح معًا — أثرٌ أوسع بكثير من الحاجة.
     """
-    booking = get_booking(user, booking_id)
+    get_booking(user, booking_id)  # الصلاحية والملكية (404 للغير)
+
+    # 🔒 قفل الصف: طلبا إعادة جدولة متزامنان كانا يمرّان معًا على الحالة
+    #    القديمة ويطلقان جولتي إسناد، فيتلقى مقاولان عرضين حيّين معًا.
+    booking = Booking.objects.select_for_update().get(pk=booking_id)
 
     _assert_reschedulable(booking)
 
-    # منطقة الحجز المخزَّنة هي الافتراضي: العقار لم يتغيّر، فمنطقته هي
-    # نفسها. القيمة الصريحة تُحترم لمن أرسلها.
-    effective_timezone = timezone_name or booking.customer_timezone
+    # 🔒 المنطقة الزمنية مشتقة من العنوان حصرًا، كما في الإنشاء. قبول
+    #    منطقة من العميل كان يتيح تجاوز ساعات العمل (منطقة أجنبية) أو 500
+    #    (اسم غير موجود). الحقل مقبول للتوافق فقط إن طابق المنطقة المشتقة.
+    effective_timezone = booking.customer_timezone
+    if timezone_name and timezone_name != effective_timezone:
+        raise TimezoneMismatchError(
+            f"The visit timezone is derived from the property address "
+            f"({effective_timezone}) and cannot be changed."
+        )
 
     # 🔒 نفس قواعد الإنشاء حرفيًا (ماضٍ / ساعات العمل) — تُعاد من
     #    scheduling.py ولا تُكرَّر هنا، فلا تفترق القاعدتان.

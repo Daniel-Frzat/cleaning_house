@@ -19,16 +19,17 @@ class UserAdmin(BaseUserAdmin):
     change_password_form = AdminPasswordChangeForm
     model = User
 
-    list_display = ("phone", "role", "status", "is_active")
-    list_filter = ("role", "status", "is_active", "is_staff", "is_superuser")
+    list_display = ("phone", "role", "is_contractor", "status", "is_active")
+    list_filter = ("role", "is_contractor", "status", "is_active", "is_staff", "is_superuser")
     search_fields = ("phone", "email", "full_name")
     ordering = ("-date_joined",)
     readonly_fields = ("id", "date_joined", "updated_at", "last_login")
 
     fieldsets = (
         (None, {"fields": ("id", "phone", "password")}),
-        ("Personal info", {"fields": ("full_name", "email")}),
-        ("Domain", {"fields": ("role", "status")}),
+        ("Personal info", {"fields": ("full_name", "email", "email_verified")}),
+        # is_contractor ظاهر حتى يمكن سحب صفة العامل، ويُرفض مع ADMIN
+        ("Domain", {"fields": ("role", "is_contractor", "status")}),
         (
             "Permissions",
             {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")},

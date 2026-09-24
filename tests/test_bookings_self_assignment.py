@@ -62,7 +62,7 @@ def make_eligible_contractor(user, lat="-33.868800", lng="151.209300"):
         availability_status=AvailabilityStatus.AVAILABLE,
     )
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Co",
+        contractor=profile, abn="51824753556", business_name="Co",
         status=VerificationStatus.VERIFIED,
     )
     InsuranceDocument.objects.create(

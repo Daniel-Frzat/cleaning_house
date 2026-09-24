@@ -16,6 +16,9 @@ class JobPhotoInline(admin.TabularInline):
     def has_add_permission(self, request, obj=None):
         return False
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
@@ -31,6 +34,7 @@ class JobAdmin(admin.ModelAdmin):
         "id",
         "booking",
         "status",
+        "started_at",
         "marked_done_at",
         "confirmed_at",
         "created_at",
@@ -40,6 +44,10 @@ class JobAdmin(admin.ModelAdmin):
     inlines = [JobPhotoInline]
 
     def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """🔒 الحذف يمحو صور الإثبات التي استند إليها تأكيد العميل."""
         return False
 
 
@@ -59,6 +67,10 @@ class JobPhotoAdmin(admin.ModelAdmin):
     raw_id_fields = ("job", "uploaded_by")
 
     def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """🔒 صور الإثبات لا تُحذف — تأكيد العميل استند إليها."""
         return False
 
 

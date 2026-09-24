@@ -8,6 +8,17 @@ OTP Service — Identity Domain (Phase 1)
   - الرمز يُولَّد بـsecrets (CSPRNG) وليس random.
   - المقارنة عبر constant-time comparison لتفادي timing attacks.
   - الرمز الخام يظهر فقط عبر DevConsoleSMSAdapter في بيئة التطوير.
+  - حد للطلبات لكل رقم في اليوم ولكل IP في الساعة (حماية من SMS pumping
+    ومن تجاوز حد المحاولات بطلب رموز جديدة متتالية).
+
+🧪 أرقام الاختبار (OTP_TEST_NUMBERS):
+    أرقام محددة صراحةً في الإعدادات برمز ثابت، لا تُرسل لها SMS. تسمح
+    بتجربة الدخول على سيرفر لا مزوّد SMS فيه بعد، دون فتح أي رقم آخر.
+    كل ما عداها (الانتهاء، المحاولات، التهدئة) يمر بالمسار نفسه تمامًا:
+    الرمز الثابت يُخزَّن hash مثل أي رمز، والتحقق لا يعرف أنه رقم اختبار.
+
+    ⚠️ لا يوجد خيار "اقبل أي رمز": كان يفتح كل الحسابات — بما فيها
+       ADMIN — لمن يعرف رقم الهاتف فقط.
 
 ⚠️ أرقام السياسة (expiry / max attempts / cooldown) تأتي من settings وهي
    defaults آمنة بانتظار تأكيد Product Owner — ليست قواعد عمل محسومة.
@@ -16,6 +27,7 @@ OTP Service — Identity Domain (Phase 1)
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 
 from django.conf import settings
@@ -60,6 +72,26 @@ class OTPMaxAttemptsError(OTPError):
     code = "otp_max_attempts"
 
 
+class OTPInvalidPhoneError(OTPError):
+    code = "invalid_phone"
+
+
+class OTPRateLimitError(OTPError):
+    """تجاوز الحد اليومي للرقم أو الحد الساعي للـIP."""
+
+    code = "otp_rate_limited"
+
+    def __init__(self, retry_after_seconds):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__("Too many verification codes requested.")
+
+
+class OTPDeliveryError(OTPError):
+    """مزوّد SMS غير مُهيّأ أو فشل الإرسال — الرمز لم يُحفظ."""
+
+    code = "otp_delivery_failed"
+
+
 class OTPInvalidCodeError(OTPError):
     code = "otp_invalid_code"
 
@@ -78,11 +110,38 @@ def _policy():
         "max_attempts": getattr(settings, "OTP_MAX_ATTEMPTS", 5),
         "cooldown_seconds": getattr(settings, "OTP_RESEND_COOLDOWN_SECONDS", 60),
         "code_length": getattr(settings, "OTP_CODE_LENGTH", 6),
+        "max_per_phone_per_day": getattr(settings, "OTP_MAX_REQUESTS_PER_PHONE_PER_DAY", 10),
+        "max_per_ip_per_hour": getattr(settings, "OTP_MAX_REQUESTS_PER_IP_PER_HOUR", 20),
     }
 
 
-def _normalize_phone(phone):
-    return phone.strip() if isinstance(phone, str) else phone
+# رقم دولي: + اختيارية ثم 8 إلى 15 رقمًا (حد E.164). الفراغات والشرطات
+# والأقواس تُزال قبل الفحص لأن المستخدمين يكتبون الرقم بأشكال مختلفة.
+_PHONE_RE = re.compile(r"^\+?[0-9]{8,15}$")
+_PHONE_SEPARATORS_RE = re.compile(r"[\s\-().]")
+
+
+def normalize_phone(phone):
+    """
+    الشكل القانوني للرقم: بلا فراغات ولا شرطات ولا أقواس.
+
+    يرفع OTPInvalidPhoneError إن لم يكن رقمًا صالحًا. الشكل نفسه يُستخدم
+    للتخزين وللبحث عن الحساب، فلا ينقسم الرقم الواحد إلى حسابين.
+    """
+    if not isinstance(phone, str):
+        raise OTPInvalidPhoneError("Invalid phone number.")
+    cleaned = _PHONE_SEPARATORS_RE.sub("", phone)
+    if not _PHONE_RE.match(cleaned):
+        raise OTPInvalidPhoneError("Invalid phone number.")
+    return cleaned
+
+
+_normalize_phone = normalize_phone
+
+
+def test_numbers():
+    """{phone: code} من OTP_TEST_NUMBERS. فارغ افتراضيًا."""
+    return getattr(settings, "OTP_TEST_NUMBERS", None) or {}
 
 
 def generate_code(length=None):
@@ -122,23 +181,15 @@ def _active_pending(phone, purpose):
 # ------------------------------------------------------------
 # API الخدمة
 # ------------------------------------------------------------
-@transaction.atomic
-def generate_and_send(phone, purpose=OTPPurpose.LOGIN):
+def _enforce_request_limits(phone, purpose, ip, policy, now):
     """
-    ينشئ رمزًا جديدًا، يخزّن hash فقط، ويرسله عبر SMS Adapter المُعرَّف
-    في settings.
+    حدود الطلب — تُفحص قبل أي كتابة.
 
-    يُبطل أي رمز PENDING سابق لنفس الرقم/الغرض (رمز واحد فعّال في كل لحظة).
-
-    يرفع OTPResendCooldownError إذا طُلب رمز جديد قبل انتهاء فترة التهدئة.
-
-    يعيد OTPVerification — بدون الرمز الخام إطلاقًا.
+    📌 التهدئة (60 ث) وحدها لا تكفي: كل رمز جديد يعيد رصيد المحاولات،
+       فيمكن تخمين ~7000 رمز يوميًا لرقم واحد. الحد اليومي يقفل ذلك.
+       حد الـIP يمنع استنزاف رصيد SMS بأرقام عشوائية (SMS pumping).
     """
-    phone = _normalize_phone(phone)
-    policy = _policy()
-    now = timezone.now()
-
-    # 1) فحص فترة التهدئة (Rate limiting — متطلب أمني إلزامي)
+    # 1) فترة التهدئة
     last = (
         OTPVerification.objects.filter(phone=phone, purpose=purpose)
         .order_by("-created_at")
@@ -150,13 +201,58 @@ def generate_and_send(phone, purpose=OTPPurpose.LOGIN):
             retry_after = int(policy["cooldown_seconds"] - elapsed)
             raise OTPResendCooldownError(max(retry_after, 1))
 
+    # 2) الحد اليومي للرقم
+    limit = policy["max_per_phone_per_day"]
+    if limit:
+        day_ago = now - timezone.timedelta(days=1)
+        recent = OTPVerification.objects.filter(
+            phone=phone, purpose=purpose, created_at__gte=day_ago
+        ).order_by("created_at")
+        if recent.count() >= limit:
+            reset_at = recent.first().created_at + timezone.timedelta(days=1)
+            raise OTPRateLimitError(max(int((reset_at - now).total_seconds()), 1))
+
+    # 3) الحد الساعي للـIP
+    limit = policy["max_per_ip_per_hour"]
+    if ip and limit:
+        hour_ago = now - timezone.timedelta(hours=1)
+        recent = OTPVerification.objects.filter(
+            requested_ip=ip, created_at__gte=hour_ago
+        ).order_by("created_at")
+        if recent.count() >= limit:
+            reset_at = recent.first().created_at + timezone.timedelta(hours=1)
+            raise OTPRateLimitError(max(int((reset_at - now).total_seconds()), 1))
+
+
+@transaction.atomic
+def generate_and_send(phone, purpose=OTPPurpose.LOGIN, ip=None):
+    """
+    ينشئ رمزًا جديدًا، يخزّن hash فقط، ويرسله عبر SMS Adapter المُعرَّف
+    في settings.
+
+    يُبطل أي رمز PENDING سابق لنفس الرقم/الغرض (رمز واحد فعّال في كل لحظة).
+
+    يرفع OTPResendCooldownError إذا طُلب رمز جديد قبل انتهاء فترة التهدئة،
+    و OTPRateLimitError عند تجاوز الحد اليومي/الساعي، و OTPDeliveryError
+    إذا تعذّر الإرسال (وعندها يتراجع حفظ الرمز كاملًا).
+
+    يعيد OTPVerification — بدون الرمز الخام إطلاقًا.
+    """
+    phone = _normalize_phone(phone)
+    policy = _policy()
+    now = timezone.now()
+
+    # 1) حدود الطلب (Rate limiting — متطلب أمني إلزامي)
+    _enforce_request_limits(phone, purpose, ip, policy, now)
+
     # 2) إبطال الرمز المعلّق السابق — الرمز القديم لا يعود صالحًا
     OTPVerification.objects.filter(
         phone=phone, purpose=purpose, status=OTPStatus.PENDING
     ).update(status=OTPStatus.EXPIRED)
 
     # 3) توليد وتخزين الـhash فقط
-    code = generate_code(policy["code_length"])
+    fixed_code = test_numbers().get(phone)
+    code = fixed_code or generate_code(policy["code_length"])
     otp = OTPVerification.objects.create(
         phone=phone,
         code_hash=hash_code(code, phone),
@@ -164,10 +260,22 @@ def generate_and_send(phone, purpose=OTPPurpose.LOGIN):
         status=OTPStatus.PENDING,
         expires_at=now + timezone.timedelta(seconds=policy["expiry_seconds"]),
         max_attempts=policy["max_attempts"],
+        requested_ip=ip,
     )
 
     # 4) الإرسال عبر الـAdapter (الرمز الخام يعيش هنا فقط، ولا يُسجَّل)
-    get_sms_adapter().send_otp(phone_number=phone, code=code)
+    if fixed_code:
+        # رقم اختبار: لا SMS. التحذير يجعل استخدامه ظاهرًا في السجلات.
+        logger.warning("OTP test number used (id=%s) — no SMS sent", otp.id)
+        return otp
+
+    try:
+        get_sms_adapter().send_otp(phone_number=phone, code=code)
+    except Exception as exc:
+        # مزوّد غير مُهيّأ (ImproperlyConfigured) أو فشل شبكة: خطأ domain
+        # يُرجع حفظ الرمز، بدل 500 مبهم للعميل.
+        logger.exception("OTP delivery failed (purpose=%s)", purpose)
+        raise OTPDeliveryError("Could not send verification code.") from exc
 
     # 🔒 لا يُسجَّل الرمز — فقط معرّف السجل
     logger.info("OTP generated (id=%s, purpose=%s)", otp.id, purpose)
@@ -193,7 +301,11 @@ def verify(phone, code, purpose=OTPPurpose.LOGIN):
     الحماية من التخمين (brute force). لذلك تُستخدم معاملات ذرّية قصيرة
     داخليًا فقط حول القراءة/الكتابة لكل خطوة.
     """
-    phone = _normalize_phone(phone)
+    try:
+        phone = _normalize_phone(phone)
+    except OTPInvalidPhoneError:
+        # رقم لا يمكن أن يملك رمزًا — نفس رد "لا رمز" حتى لا يُكشف شيء
+        raise OTPNotFoundError("No active verification code for this phone number.")
 
     # قفل السجل وتحديث الحالة داخل معاملة قصيرة، ثم رفع الاستثناء خارجها
     # حتى لا يتراجع التحديث.
@@ -223,9 +335,7 @@ def verify(phone, code, purpose=OTPPurpose.LOGIN):
             outcome = ("max_attempts", otp)
 
         # 3) مقارنة ثابتة الزمن
-        elif not getattr(settings, "OTP_ACCEPT_ANY_CODE", False) and not _verify_hash(
-            code, phone, otp.code_hash
-        ):
+        elif not _verify_hash(code, phone, otp.code_hash):
             otp.attempts_count += 1
             if otp.attempts_exhausted():
                 # استُنفدت المحاولات بهذه المحاولة الخاطئة → قفل نهائي

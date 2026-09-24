@@ -61,9 +61,8 @@ class BookingRescheduleIn(Schema):
     """
     إعادة جدولة حجز لم يجد مقاولًا.
 
-    📌 timezone اختياري: حين يُترك فارغًا تُستعمل منطقة الحجز المخزَّنة
-       (المشتقة من عنوان العقار)، وهي الحالة الغالبة — فالعقار لم يتغيّر.
-       يُقبل صراحةً لمن يريد إرسال منطقة مختلفة عن المخزَّنة.
+    🔒 timezone للتوافق فقط: المنطقة مشتقة من عنوان العقار دائمًا، وأي
+       قيمة مختلفة تُرفض (كانت تتيح تجاوز ساعات العمل أو 500).
 
     ⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد
        وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.
@@ -193,6 +192,31 @@ class OfferOut(Schema):
     offered_at: datetime
     responded_at: Optional[datetime] = None
     expires_at: datetime
+
+
+class OfferServiceOut(Schema):
+    service_type_id: uuid.UUID
+    service_name: str
+    room_count: int
+
+
+class OfferDetailOut(OfferOut):
+    """
+    العرض كما يراه المقاول قبل الرد — ما يكفي ليقرر.
+
+    🔒 قبل القبول: الضاحية والولاية والرمز البريدي فقط، بلا عنوان الشارع
+       ولا ملاحظات الوصول — تُكشف للمقاول المُسنَد بعد القبول وحده.
+    ⚠️ بلا سعر (§36.1): السعر يُحسب ويُجمَّد عند القبول.
+    """
+
+    scheduled_at: Optional[datetime] = None
+    scheduled_at_local: Optional[datetime] = None
+    customer_timezone: str = ""
+    suburb: str = ""
+    state: str = ""
+    postcode: str = ""
+    property_type: str = ""
+    services: list[OfferServiceOut] = []
 
 
 class OfferResponseOut(Schema):

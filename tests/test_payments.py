@@ -469,7 +469,7 @@ def test_accepting_offer_triggers_charge(
         availability_status=AvailabilityStatus.AVAILABLE,
     )
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Co",
+        contractor=profile, abn="51824753556", business_name="Co",
         status=VerificationStatus.VERIFIED, reviewed_by=admin_user,
         reviewed_at=timezone.now(),
     )

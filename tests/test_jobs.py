@@ -12,6 +12,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import JPEG_BYTES, mark_paid
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
@@ -61,7 +63,7 @@ def auth(user):
     return {"HTTP_AUTHORIZATION": f"Bearer {issue_tokens_for_user(user)['access']}"}
 
 
-def make_photo_file(name="before.jpg", content=b"fake-image-bytes"):
+def make_photo_file(name="before.jpg", content=JPEG_BYTES):
     return SimpleUploadedFile(name, content, content_type="image/jpeg")
 
 
@@ -135,6 +137,8 @@ def make_confirmed_booking(customer, prop, service_type, contractor_profile):
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service_type, room_count=3
     )
+    # بدء المهمة مشروط بنجاح دفع العميل
+    mark_paid(booking)
     return booking
 
 
@@ -167,7 +171,7 @@ def test_job_auto_created_when_booking_confirmed(
 
     contractor_user, profile = make_contractor("+61400010100")
     BusinessRegistration.objects.create(
-        contractor=profile, abn="12345678901", business_name="Co",
+        contractor=profile, abn="51824753556", business_name="Co",
         status=VerificationStatus.VERIFIED, reviewed_by=admin_user,
         reviewed_at=timezone.now(),
     )
@@ -394,7 +398,7 @@ def test_service_layer_rejects_upload_when_not_in_progress(db, contractor, job):
 
     with pytest.raises(photos_svc.JobNotAcceptingPhotosError):
         photos_svc.upload_job_photo(
-            contractor_user, job.id, PhotoType.AFTER, b"bytes", "image/jpeg"
+            contractor_user, job.id, PhotoType.AFTER, JPEG_BYTES, "image/jpeg"
         )
 
 
@@ -404,7 +408,7 @@ def test_invalid_photo_type_rejected(db, contractor, job):
 
     with pytest.raises(photos_svc.InvalidPhotoTypeError):
         photos_svc.upload_job_photo(
-            contractor_user, job.id, "SIDEWAYS", b"bytes", "image/jpeg"
+            contractor_user, job.id, "SIDEWAYS", JPEG_BYTES, "image/jpeg"
         )
 
 
@@ -435,7 +439,7 @@ def test_storage_key_hidden_from_customer(client, customer, contractor, job):
     """
     contractor_user, _ = contractor
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"bytes", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
 
     r = client.get(f"/api/bookings/{job.booking_id}/job", **auth(customer))
@@ -459,7 +463,7 @@ def test_storage_key_field_is_null_for_every_non_admin_role(
     """
     contractor_user, _ = contractor
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"bytes", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
 
     for actor in (customer, contractor_user):
@@ -474,7 +478,7 @@ def test_storage_key_hidden_from_contractor(client, contractor, job):
     """المقاول أيضًا لا يرى المرجع الخام — الإدارة وحدها."""
     contractor_user, _ = contractor
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"bytes", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
 
     r = client.get(f"/api/bookings/{job.booking_id}/job", **auth(contractor_user))
@@ -487,7 +491,7 @@ def test_storage_key_hidden_from_contractor(client, contractor, job):
 def test_storage_key_visible_to_admin(client, admin_user, contractor, job):
     contractor_user, _ = contractor
     photos_svc.upload_job_photo(
-        contractor_user, job.id, PhotoType.BEFORE, b"bytes", "image/jpeg"
+        contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
     stored = JobPhoto.objects.get(job=job)
 

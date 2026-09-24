@@ -11,6 +11,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import JPEG_BYTES, mark_paid
 from django.test import Client
 from django.utils import timezone
 
@@ -103,6 +105,7 @@ def job(customer, service_type, contractor):
     BookingServiceSelection.objects.create(
         booking=booking, service_type=service_type, room_count=3
     )
+    mark_paid(booking)
     created = jobs_svc.create_job_for_booking(booking)
     # ⚠️ المهمة تُنشأ ASSIGNED؛ هذه الاختبارات تفترض عملًا جاريًا
     return jobs_svc.start_job(created, profile.user)
@@ -110,7 +113,7 @@ def job(customer, service_type, contractor):
 
 def add_photo(contractor_user, job, photo_type):
     return photos_svc.upload_job_photo(
-        contractor_user, job.id, photo_type, b"bytes", "image/jpeg"
+        contractor_user, job.id, photo_type, JPEG_BYTES, "image/jpeg"
     )
 
 

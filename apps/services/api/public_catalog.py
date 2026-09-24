@@ -25,12 +25,12 @@ Public Service Catalog API — Services Domain (§36.2)
 import uuid
 
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth
 
 from ..services import catalog as svc
 from .public_schemas import ErrorOut, ServicePublicOut
 
-router = Router(tags=["Services"], auth=JWTAuth())
+router = Router(tags=["Services"], auth=ActiveUserJWTAuth())
 
 
 def _serialize(service):

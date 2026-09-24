@@ -12,6 +12,15 @@ Payment Service — Payment Domain (Change Set §36.4، §8؛ Infra §2، §14/�
 🔒 التكرارية (Infra §14/§16): مفتاح التكرارية مشتق من booking.id وثابت،
    وقيد OneToOne على قاعدة البيانات يمنع وجود دفعتين لحجز واحد. استدعاء
    الدالة مرتين للحجز نفسه يعيد الدفعة القائمة ولا يشحن ثانيةً.
+
+🔒 المزوّد يُستدعى خارج أي معاملة قاعدة بيانات: سجل PENDING يُثبَّت أولًا،
+   ثم يُستدعى المزوّد، ثم تُحدَّث النتيجة. لو كان الاستدعاء داخل المعاملة
+   لأزال أي استثناء (timeout بعد خصم فعلي مثلًا) سجل الدفعة كليًا — مال
+   تحرّك بلا أي أثر في النظام.
+
+   استثناء من المزوّد يُبقي الدفعة PENDING مع سبب مسجَّل: النتيجة مجهولة
+   (قد يكون الخصم تم)، فلا تُعلَّم FAILED ولا يُعاد الشحن تلقائيًا —
+   تحتاج مطابقة مع المزوّد (webhook أو مراجعة إدارية).
 """
 
 import logging
@@ -24,6 +33,9 @@ from ..adapters import get_payment_adapter
 from ..models import Payment, PaymentMethod, PaymentStatus
 
 logger = logging.getLogger(__name__)
+
+# عملة المنصة — السوق أسترالي حصرًا
+CURRENCY = "AUD"
 
 
 class PaymentError(Exception):
@@ -71,7 +83,6 @@ def build_idempotency_key(booking):
     return f"booking-{booking.id}"
 
 
-@transaction.atomic
 def charge_for_booking(booking, method=PaymentMethod.CARD):
     """
     يشحن قيمة الحجز مباشرة بعد تأكيده، ويعيد الـPayment في الحالتين.
@@ -84,43 +95,63 @@ def charge_for_booking(booking, method=PaymentMethod.CARD):
         MissingPriceError:        لا لقطة سعر.
         PaymentAlreadyExistsError: للحجز دفعة سابقة.
     """
-    if booking.status != BookingStatus.CONFIRMED:
-        raise BookingNotConfirmedError(
-            f"Booking must be CONFIRMED before charging (currently {booking.status})."
+    # (1) سجل PENDING يُثبَّت قبل لمس المزوّد
+    with transaction.atomic():
+        # قراءة طازجة: الحالة والسعر كما في قاعدة البيانات لا كما في الذاكرة
+        booking = Booking.objects.get(pk=booking.pk)
+
+        if booking.status != BookingStatus.CONFIRMED:
+            raise BookingNotConfirmedError(
+                f"Booking must be CONFIRMED before charging (currently {booking.status})."
+            )
+
+        if booking.computed_price is None:
+            raise MissingPriceError("Booking has no computed price; nothing to charge.")
+
+        # دفاع في العمق: فحص في الخدمة + قيد OneToOne في قاعدة البيانات
+        if Payment.objects.filter(booking=booking).exists():
+            raise PaymentAlreadyExistsError(
+                "This booking already has a payment; it cannot be charged twice."
+            )
+
+        payment = Payment(
+            booking=booking,
+            amount=booking.computed_price,
+            method=method,
+            status=PaymentStatus.PENDING,
         )
+        payment.full_clean()
 
-    if booking.computed_price is None:
-        raise MissingPriceError("Booking has no computed price; nothing to charge.")
+        try:
+            with transaction.atomic():
+                payment.save()
+        except IntegrityError as exc:
+            # سباق: أنشأ عاملٌ آخر الدفعة بيننا وبين الفحص أعلاه
+            raise PaymentAlreadyExistsError(
+                "This booking already has a payment; it cannot be charged twice."
+            ) from exc
 
-    # دفاع في العمق: فحص في الخدمة + قيد OneToOne في قاعدة البيانات
-    existing = Payment.objects.filter(booking=booking).first()
-    if existing is not None:
-        raise PaymentAlreadyExistsError(
-            "This booking already has a payment; it cannot be charged twice."
-        )
-
-    payment = Payment(
-        booking=booking,
-        amount=booking.computed_price,
-        method=method,
-        status=PaymentStatus.PENDING,
-    )
-    payment.full_clean()
-
+    # (2) المزوّد — خارج المعاملة
     try:
-        payment.save()
-    except IntegrityError as exc:
-        # سباق: أنشأ عاملٌ آخر الدفعة بيننا وبين الفحص أعلاه
-        raise PaymentAlreadyExistsError(
-            "This booking already has a payment; it cannot be charged twice."
-        ) from exc
+        result = get_payment_adapter().charge(
+            amount=payment.amount,
+            method=payment.method,
+            idempotency_key=build_idempotency_key(booking),
+            currency=CURRENCY,
+            customer_reference=str(booking.customer_id),
+        )
+    except Exception as exc:  # noqa: BLE001 — النتيجة مجهولة، لا فاشلة
+        logger.exception(
+            "Payment provider error — outcome unknown, left PENDING for "
+            "reconciliation (payment_id=%s, booking_id=%s)",
+            payment.id,
+            booking.id,
+        )
+        payment.failure_reason = f"provider_error: {type(exc).__name__}"
+        payment.save(update_fields=["failure_reason", "updated_at"])
+        return payment
 
-    adapter = get_payment_adapter()
-    result = adapter.charge(
-        amount=payment.amount,
-        method=payment.method,
-        idempotency_key=build_idempotency_key(booking),
-    )
+    # (3) النتيجة
 
     if result.success:
         payment.status = PaymentStatus.SUCCEEDED

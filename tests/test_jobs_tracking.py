@@ -16,6 +16,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import JPEG_BYTES, mark_paid
 from django.test import Client
 from django.utils import timezone
 

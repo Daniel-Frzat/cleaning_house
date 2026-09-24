@@ -36,6 +36,19 @@ class PropertyNotFoundError(PropertyError):
     code = "property_not_found"
 
 
+class PropertyHasActiveBookingsError(PropertyError):
+    """
+    العقار عليه حجوزات نشطة — لا يُعدَّل عنوانه ولا يُحذف (قرار PO —
+    2026-09-24).
+
+    🔒 الحجز لا يحمل نسخة من العنوان: المسافة والسعر المجمّد ومنطقة
+       التوقيت ووجهة المقاول كلها تُقرأ من العنوان الحي. تغييره بعد القبول
+       كان يرسل المقاول لمكان آخر بالسعر القديم.
+    """
+
+    code = "property_has_active_bookings"
+
+
 class InvalidOwnerRoleError(PropertyError):
     """الدور غير مسموح له بامتلاك عقار."""
 
@@ -128,6 +141,45 @@ def list_properties(user):
     return Property.objects.filter(owner=user).select_related("address")
 
 
+def has_in_flight_bookings(prop):
+    """
+    حجز "في الطريق" = مقاول مرتبط بالعنوان الحالي فعلًا:
+      - CONFIRMED لم تكتمل مهمته (المقاول مُسنَد والسعر مجمّد على المسافة)
+      - أو PENDING عليه عرض حيّ (المسافة مجمّدة على العرض)
+
+    📌 الحجز PENDING بلا عرض حيّ (NO_CONTRACTOR) ليس في الطريق: لا مقاول ولا
+       سعر مرتبطان بالعنوان. منع تعديله كان سيمنع الإصلاح نفسه — إضافة
+       إحداثيات لعقار لم يجد مقاولًا بسببها.
+    ⚠️ الحجز المؤكَّد يبقى CONFIRMED بعد إكمال العمل، فالحد الفاصل هو
+       اكتمال المهمة.
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.bookings.models import Booking, BookingStatus, DispatchOfferStatus
+    from apps.jobs.models import JobStatus
+
+    confirmed_open = Q(status=BookingStatus.CONFIRMED) & ~Q(job__status=JobStatus.COMPLETED)
+    live_offer = Q(
+        status=BookingStatus.PENDING,
+        dispatch_offers__status=DispatchOfferStatus.PENDING,
+        dispatch_offers__expires_at__gt=timezone.now(),
+    )
+    return Booking.objects.filter(property=prop).filter(confirmed_open | live_offer).exists()
+
+
+def has_pending_bookings(prop):
+    from apps.bookings.models import Booking, BookingStatus
+
+    return Booking.objects.filter(property=prop, status=BookingStatus.PENDING).exists()
+
+
+def _refuse(action):
+    raise PropertyHasActiveBookingsError(
+        f"This property has active bookings and cannot be {action} until they finish."
+    )
+
+
 @transaction.atomic
 def update_property(user, property_id, **fields):
     """يعدّل عقارًا بعد التحقق من الملكية."""
@@ -143,6 +195,11 @@ def update_property(user, property_id, **fields):
             raise PropertyError(f"Field '{key}' cannot be updated here.")
         setattr(prop, key, value)
 
+    if fields.get("is_active") is False and (
+        has_in_flight_bookings(prop) or has_pending_bookings(prop)
+    ):
+        _refuse("deactivated")
+
     prop.full_clean()
     prop.save()
     return prop
@@ -157,6 +214,12 @@ def update_address(user, property_id, **fields):
     if address is None:
         raise PropertyNotFoundError("This property has no address yet.")
 
+    if has_in_flight_bookings(prop):
+        _refuse("re-addressed")
+    # الولاية تحدد المنطقة الزمنية المخزَّنة على الحجوزات المعلّقة
+    if "state" in fields and fields["state"] != address.state and has_pending_bookings(prop):
+        _refuse("moved to another state")
+
     fields.pop("country", None)
     for key, value in fields.items():
         setattr(address, key, value)
@@ -170,6 +233,8 @@ def update_address(user, property_id, **fields):
 def deactivate_property(user, property_id):
     """إلغاء تفعيل ناعم — لا حذف فعلي في هذه المرحلة."""
     prop = get_property(user, property_id)
+    if has_in_flight_bookings(prop) or has_pending_bookings(prop):
+        _refuse("removed")
     prop.is_active = False
     prop.save(update_fields=["is_active", "updated_at"])
     return prop

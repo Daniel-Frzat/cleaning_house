@@ -68,6 +68,17 @@ class InvalidJobStatusError(JobError):
     code = "invalid_job_status"
 
 
+class PaymentNotSettledError(JobError):
+    """
+    دفعة العميل لم تنجح بعد — لا يبدأ المقاول عملًا لن يُدفع له عنه.
+
+    الدفع للمقاول مشروط بنجاح دفع العميل (payouts)، فبدء العمل قبله
+    يعرّض المقاول للعمل مجانًا.
+    """
+
+    code = "payment_not_settled"
+
+
 class MissingProofPhotosError(JobError):
     """
     لا إعلان إنجاز بلا دليل مصوَّر.
@@ -181,7 +192,33 @@ def get_job_by_booking_id(user, booking_id):
     return job
 
 
-def get_job_for_contractor(user, job_id):
+def lock_job(job):
+    """
+    🔒 يقفل صف المهمة (select_for_update) ويحدّث حالتها في الكائن نفسه.
+
+    كل انتقال وكل كتابة تابعة للحالة (صورة، موقع) تقفل أولًا ثم تفحص:
+    بدونه يمر طلبان متزامنان على الحالة القديمة نفسها — رفع صورة مع
+    mark-done مثلًا يضيف دليلًا بعد تجميده.
+    """
+    fresh = (
+        Job.objects.select_for_update()
+        .only("status", "started_at", "marked_done_at", "confirmed_at")
+        .get(pk=job.pk)
+    )
+    job.status = fresh.status
+    job.started_at = fresh.started_at
+    job.marked_done_at = fresh.marked_done_at
+    job.confirmed_at = fresh.confirmed_at
+    return job
+
+
+def _customer_payment_succeeded(booking):
+    from apps.payments.models import Payment, PaymentStatus
+
+    return Payment.objects.filter(booking=booking, status=PaymentStatus.SUCCEEDED).exists()
+
+
+def get_job_for_contractor(user, job_id, lock=False):
     """
     يعيد مهمة يملك هذا المقاول حق العمل عليها.
 
@@ -208,6 +245,9 @@ def get_job_for_contractor(user, job_id):
         )
         raise JobPermissionError("This job is not assigned to you.")
 
+    if lock:
+        # الكتابات التابعة للحالة (صورة، موقع) تقفل قبل فحص الحالة
+        lock_job(job)
     return job
 
 
@@ -244,9 +284,15 @@ def start_job(job, contractor_user):
         )
         raise JobPermissionError("This job is not assigned to you.")
 
+    lock_job(job)
     if job.status != JobStatus.ASSIGNED:
         raise InvalidJobStatusError(
             f"Job is {job.status} and cannot be started."
+        )
+
+    if not _customer_payment_succeeded(job.booking):
+        raise PaymentNotSettledError(
+            "The customer's payment has not succeeded yet; the job cannot start."
         )
 
     job.status = JobStatus.IN_PROGRESS
@@ -282,6 +328,7 @@ def mark_job_done(job, contractor_user):
         )
         raise JobPermissionError("This job is not assigned to you.")
 
+    lock_job(job)
     if job.status != JobStatus.IN_PROGRESS:
         raise InvalidJobStatusError(
             f"Job is {job.status} and cannot be marked done."
@@ -334,6 +381,7 @@ def confirm_job_completion(job, customer_user):
         )
         raise JobPermissionError("Only the booking's own customer can confirm it.")
 
+    lock_job(job)
     if job.status != JobStatus.AWAITING_CUSTOMER_CONFIRMATION:
         raise InvalidJobStatusError(
             f"Job is {job.status} and cannot be confirmed."
@@ -364,7 +412,8 @@ def _release_payout_after_commit(booking):
     الاستثناءات تُبتلع وتُسجَّل: المهمة مؤكَّدة فعلًا، وخطأ في نطاق الدفع
     يجب ألا يتحول إلى 500 على طلب تأكيد ناجح. الدفعة الفاشلة تبقى مسجَّلة
     بحالة FAILED، والمهمة والحجز كما هما (سياسة مفتوحة — راجع
-    payouts/services).
+    payouts/services). مهمة مكتملة بلا Payout تلتقطها المهمة الدورية
+    bookings.repair_confirmed_bookings.
     """
     from apps.payouts.services.payouts import release_payout_for_booking
 

@@ -794,9 +794,11 @@ def test_booking_list_does_not_issue_a_query_per_payment(
             status=PaymentStatus.SUCCEEDED,
         )
 
+    # التوكن يُصدر خارج العدّ: إصداره يسجّل OutstandingToken (قائمة الإبطال)
+    headers = auth(customer_a)
     # عدد ثابت لا يتناسب مع عدد الحجوزات
     with django_assert_num_queries(4):
-        r = client.get("/api/bookings", **auth(customer_a))
+        r = client.get("/api/bookings", **headers)
 
     assert r.status_code == 200, r.content
     assert len(r.json()) == 5

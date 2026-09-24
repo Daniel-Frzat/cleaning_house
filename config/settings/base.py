@@ -29,6 +29,9 @@ DJANGO_APPS = [
 
 THIRD_PARTY_APPS = [
     "ninja_jwt",
+    # قائمة سوداء لتوكنات refresh — تُمكّن تسجيل الخروج وتدوير التوكن
+    # (refresh القديم يُبطَل فور استخدامه).
+    "ninja_jwt.token_blacklist",
 ]
 
 # apps.accounts — Identity Domain.
@@ -65,6 +68,8 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # ملفات لوحة Admin الساكنة تحت gunicorn — بلا خادم ملفات منفصل.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -121,6 +126,8 @@ USE_TZ = True
 # Static files
 # ------------------------------------------------------------
 STATIC_URL = "static/"
+# collectstatic يجمع هنا، و WhiteNoise يقدّمها (لوحة Admin فقط — الواجهة API).
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ------------------------------------------------------------
 # JWT Configuration (Auth Foundation — Phase 0)
@@ -131,6 +138,10 @@ NINJA_JWT = {
     "SIGNING_KEY": config("JWT_SIGNING_KEY"),
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=config("JWT_ACCESS_TOKEN_LIFETIME_MIN", default=15, cast=int)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=config("JWT_REFRESH_TOKEN_LIFETIME_DAYS", default=7, cast=int)),
+    # 🔒 تدوير: كل تجديد يعيد refresh جديدًا ويُبطل القديم، فالتوكن المسروق
+    #    يصلح مرة واحدة على الأكثر.
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # ------------------------------------------------------------
@@ -227,13 +238,64 @@ OTP_EXPIRY_SECONDS = config("OTP_EXPIRY_SECONDS", default=300, cast=int)  # 5 د
 OTP_MAX_ATTEMPTS = config("OTP_MAX_ATTEMPTS", default=5, cast=int)
 OTP_RESEND_COOLDOWN_SECONDS = config("OTP_RESEND_COOLDOWN_SECONDS", default=60, cast=int)
 OTP_CODE_LENGTH = config("OTP_CODE_LENGTH", default=6, cast=int)
-# Accept any submitted OTP only in explicitly opted-in development environments.
-OTP_ACCEPT_ANY_CODE = config("OTP_ACCEPT_ANY_CODE", default=False, cast=bool)
+# حدود الطلب: الحد اليومي لكل رقم يمنع تجاوز حد المحاولات بطلب رموز
+# متتالية، والحد الساعي لكل IP يمنع استنزاف رصيد SMS. 0 = بلا حد.
+OTP_MAX_REQUESTS_PER_PHONE_PER_DAY = config(
+    "OTP_MAX_REQUESTS_PER_PHONE_PER_DAY", default=10, cast=int
+)
+OTP_MAX_REQUESTS_PER_IP_PER_HOUR = config(
+    "OTP_MAX_REQUESTS_PER_IP_PER_HOUR", default=20, cast=int
+)
+
+
+def _parse_otp_test_numbers(raw):
+    """
+    "+61400000001:123456,+61400000002:654321" → {phone: code}.
+
+    🧪 أرقام اختبار برمز ثابت ولا ترسل SMS — لتجربة الدخول قبل التعاقد مع
+       مزوّد SMS. تنطبق على هذه الأرقام وحدها؛ كل رقم آخر يبقى محميًا.
+    ⚠️ استخدم أرقامًا غير مملوكة لأحد، ولا تمنح حساباتها صلاحية ADMIN.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    numbers = {}
+    for entry in filter(None, (e.strip() for e in raw.split(","))):
+        phone, sep, code = entry.partition(":")
+        phone, code = phone.strip(), code.strip()
+        if not sep or not phone or not code.isdigit() or len(code) != OTP_CODE_LENGTH:
+            raise ImproperlyConfigured(
+                f"OTP_TEST_NUMBERS entry {entry!r} must look like "
+                f"+61400000001:{'1' * OTP_CODE_LENGTH} (code of OTP_CODE_LENGTH digits)."
+            )
+        numbers[phone] = code
+    return numbers
+
+
+OTP_TEST_NUMBERS = _parse_otp_test_numbers(config("OTP_TEST_NUMBERS", default=""))
+
+# عدد البروكسيات الموثوقة أمام التطبيق — لاستخراج IP العميل الحقيقي من
+# X-Forwarded-For (يُستخدم في حد طلبات OTP). 0 = REMOTE_ADDR مباشرةً.
+# ⚠️ لا ترفعه فوق العدد الحقيقي: الترويسة يمكن للعميل تزويرها.
+NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", default=0, cast=int)
 
 # ------------------------------------------------------------
-# Celery / Redis (Background Jobs infra only — no tasks with
-# business logic yet; Dispatch expiry / Escrow checks / etc.
-# سيُضافون في مراحلهم الخاصة حسب Domain)
+# Dispatch & Scheduling (قرارات Product Owner — 2026-09-24)
+# ------------------------------------------------------------
+# أقصى مسافة بين المقاول والعقار لإرسال عرض. بدونها قد يُرسل حجز في
+# سيدني لمقاول في بيرث، وتُضاف كلفة 3000+ كم على السعر.
+DISPATCH_MAX_DISTANCE_KM = config("DISPATCH_MAX_DISTANCE_KM", default=50, cast=int)
+# أقل مهلة بين الآن وموعد الزيارة عند الإنشاء وإعادة الجدولة. قبول عرض
+# بعد فوات الموعد مرفوض دائمًا بغض النظر عن هذه القيمة.
+BOOKING_MIN_LEAD_MINUTES = config("BOOKING_MIN_LEAD_MINUTES", default=120, cast=int)
+
+# ------------------------------------------------------------
+# Job photos — حدود الرفع
+# ------------------------------------------------------------
+JOB_PHOTO_MAX_BYTES = config("JOB_PHOTO_MAX_BYTES", default=10 * 1024 * 1024, cast=int)
+JOB_PHOTO_MAX_PER_JOB = config("JOB_PHOTO_MAX_PER_JOB", default=30, cast=int)
+
+# ------------------------------------------------------------
+# Celery / Redis
 # ------------------------------------------------------------
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default="redis://localhost:6379/1")
@@ -255,6 +317,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "bookings.expire_pending_offers",
         # كل دقيقة: المهلة 60 دقيقة، فالدقة بالدقيقة كافية ورخيصة
         "schedule": crontab(minute="*"),
+    },
+    # شبكة أمان للآثار الجانبية بعد التأكيد (مهمة/شحن/دفع للمقاول)
+    "repair-confirmed-bookings": {
+        "task": "bookings.repair_confirmed_bookings",
+        "schedule": crontab(minute="*/5"),
     },
 }
 

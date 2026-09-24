@@ -18,6 +18,7 @@ Scheduled Visit — Booking Domain (موعد الزيارة)
 import datetime
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.utils import timezone as dj_timezone
 
 # ساعات العمل العامة بالتوقيت المحلي المحسوب
@@ -41,6 +42,18 @@ class ScheduledAtInPastError(SchedulingError):
     """الموعد في الماضي."""
 
     code = "scheduled_at_in_past"
+
+
+class TimezoneMismatchError(SchedulingError):
+    """منطقة زمنية من العميل تخالف المنطقة المشتقة من العنوان."""
+
+    code = "timezone_not_allowed"
+
+
+class ScheduledTooSoonError(SchedulingError):
+    """الموعد أقرب من المهلة الدنيا (BOOKING_MIN_LEAD_MINUTES)."""
+
+    code = "scheduled_at_too_soon"
 
 
 class OutsideBusinessHoursError(SchedulingError):
@@ -82,8 +95,17 @@ def normalize_scheduled_at(scheduled_at, timezone_name):
     utc_value = local.astimezone(datetime.timezone.utc)
 
     # 🔒 المستقبل أولًا: موعد ماضٍ داخل الدوام يبقى مرفوضًا
-    if utc_value <= dj_timezone.now():
+    now = dj_timezone.now()
+    if utc_value <= now:
         raise ScheduledAtInPastError("The scheduled visit must be in the future.")
+
+    # 📌 مهلة دنيا: العرض يعيش حتى 60 دقيقة والمقاول يحتاج وقتًا للوصول،
+    #    فموعد بعد دقيقتين لا يمكن خدمته (قرار PO — 2026-09-24: ساعتان).
+    lead = getattr(settings, "BOOKING_MIN_LEAD_MINUTES", 0)
+    if lead and utc_value < now + datetime.timedelta(minutes=lead):
+        raise ScheduledTooSoonError(
+            f"The scheduled visit must be at least {lead} minutes from now."
+        )
 
     local_time = local.timetz().replace(tzinfo=None)
     if not (BUSINESS_HOURS_START <= local_time <= BUSINESS_HOURS_END):
