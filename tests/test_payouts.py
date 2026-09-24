@@ -754,8 +754,13 @@ def test_no_manual_payout_trigger_endpoint():
 
     paths = api.get_openapi_schema()["paths"]
 
+    # 📌 مطابقة الـSuperuser ليست مُحفِّزًا: لا تستدعي المزوّد ولا تُنشئ
+    #    Payout — تسجّل نتيجة دفعة قائمة مجهولة النتيجة فقط.
+    reconcile = "/api/admin/payouts/{payout_id}/reconcile"
+    assert set(paths[reconcile]) == {"post"}
+
     for path, methods in paths.items():
-        if "payout" in path:
+        if "payout" in path and path != reconcile:
             assert set(methods) == {"get"}, f"{path} exposes {sorted(methods)}"
 
 

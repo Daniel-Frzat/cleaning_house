@@ -19,6 +19,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from apps.accounts.roles import ConfirmedRole
+from apps.audit.services.audit import record
 
 from ..models import BusinessRegistration, InsuranceDocument, VerificationStatus
 from .profile import (  # noqa: F401 — نعيد استخدام نفس بوابات الدور
@@ -198,7 +199,39 @@ def list_pending(user):
     }
 
 
-def _review(user, instance, status, rejection_reason):
+def list_verifications_for_profile(user, profile_id):
+    """
+    السجل الكامل لتحقق مقاول واحد — كل التقديمات بكل حالاتها، الأحدث أولًا.
+
+    Raises ContractorProfileNotFoundError إن لم يوجد الملف.
+    """
+    from ..models import ContractorProfile
+
+    assert_is_admin(user)
+
+    profile = ContractorProfile.objects.filter(pk=profile_id).first()
+    if profile is None:
+        raise ContractorProfileNotFoundError("Contractor profile not found.")
+
+    return {
+        "profile": profile,
+        "business_registrations": BusinessRegistration.objects.filter(
+            contractor=profile
+        ).order_by("-created_at"),
+        "insurance_documents": InsuranceDocument.objects.filter(
+            contractor=profile
+        ).order_by("-created_at"),
+    }
+
+
+# اسم الفعل في سجل التدقيق لكل نوع
+_AUDIT_ACTIONS = {
+    "BusinessRegistration": "business_registration.review",
+    "InsuranceDocument": "insurance_document.review",
+}
+
+
+def _review(user, instance, status, rejection_reason, request=None):
     """
     منطق المراجعة المشترك بين النوعين.
 
@@ -244,6 +277,20 @@ def _review(user, instance, status, rejection_reason):
     instance.full_clean()
     instance.save()
 
+    # 📌 داخل معاملة المستدعي — قرار تراجع لا يترك أثرًا كاذبًا
+    record(
+        user,
+        _AUDIT_ACTIONS[type(instance).__name__],
+        target=instance,
+        details={
+            "from": VerificationStatus.PENDING,
+            "to": status,
+            "contractor_id": str(instance.contractor_id),
+            "rejection_reason": instance.rejection_reason,
+        },
+        request=request,
+    )
+
     logger.info(
         "Verification reviewed (model=%s, id=%s, status=%s, by=%s)",
         type(instance).__name__,
@@ -255,7 +302,9 @@ def _review(user, instance, status, rejection_reason):
 
 
 @transaction.atomic
-def review_business_registration(user, registration_id, status, rejection_reason=None):
+def review_business_registration(
+    user, registration_id, status, rejection_reason=None, request=None
+):
     """يعتمد أو يرفض تسجيل نشاط — ADMIN فقط."""
     assert_is_admin(user)
 
@@ -269,11 +318,11 @@ def review_business_registration(user, registration_id, status, rejection_reason
     if registration is None:
         raise VerificationNotFoundError("Business registration not found.")
 
-    return _review(user, registration, status, rejection_reason)
+    return _review(user, registration, status, rejection_reason, request=request)
 
 
 @transaction.atomic
-def review_insurance_document(user, document_id, status, rejection_reason=None):
+def review_insurance_document(user, document_id, status, rejection_reason=None, request=None):
     """يعتمد أو يرفض وثيقة تأمين — ADMIN فقط."""
     assert_is_admin(user)
 
@@ -286,7 +335,7 @@ def review_insurance_document(user, document_id, status, rejection_reason=None):
     if document is None:
         raise VerificationNotFoundError("Insurance document not found.")
 
-    return _review(user, document, status, rejection_reason)
+    return _review(user, document, status, rejection_reason, request=request)
 
 
 # ------------------------------------------------------------

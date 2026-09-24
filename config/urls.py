@@ -17,6 +17,9 @@ Root URL Configuration.
   - /api/contractor/jobs/{id}/photos → Before/after photo upload (assigned contractor)
   - /api/bookings/{id}/payout → Contractor payout status (payee contractor or ADMIN)
   - /api/support-requests → Support Domain (any authenticated role, own requests)
+  - /api/admin/{users,properties,bookings,jobs,payments,payouts,support-requests,
+    dashboard,audit-log} → Back-office للوحة التحكم المخصّصة (ADMIN؛ المطابقة
+    وسجل التدقيق SUPERUSER). كل طفرة إدارية تُسجَّل في apps.audit.
 
 ⚠️ /api/admin/ مسار الإدارة عبر الـAPI — لا علاقة له بـ/admin/ (Django Admin).
 ⚠️ السعر يُكشف للعميل فقط بعد قبول مقاول للعرض (§36.1).
@@ -28,6 +31,15 @@ from django.urls import path
 from ninja import NinjaAPI
 
 from apps.accounts.api.auth import router as auth_router
+from apps.accounts.api.backoffice_users import router as admin_users_router
+from apps.audit.api.admin import audit_router as admin_audit_router
+from apps.audit.api.admin import dashboard_router as admin_dashboard_router
+from apps.bookings.api.admin import router as admin_bookings_router
+from apps.jobs.api.admin import router as admin_jobs_router
+from apps.payments.api.admin import router as admin_payments_router
+from apps.payouts.api.admin import router as admin_payouts_router
+from apps.properties.api.admin import router as admin_properties_router
+from apps.support.api.admin import router as admin_support_router
 from apps.accounts.authentication import AuthzError
 from apps.bookings.api.bookings import router as bookings_router
 from apps.bookings.api.quotes import router as booking_quotes_router
@@ -164,6 +176,21 @@ api = NinjaAPI(
                     "version: no replies and no attachments."
                 ),
             },
+            {"name": "Admin — Users", "description": "Back-office: user accounts, suspension (ADMIN)."},
+            {"name": "Admin — Properties", "description": "Back-office: all properties (ADMIN, read-only)."},
+            {"name": "Admin — Bookings", "description": "Back-office: bookings with full dispatch history (ADMIN, read-only)."},
+            {"name": "Admin — Jobs", "description": "Back-office: jobs and proof photos (ADMIN, read-only)."},
+            {
+                "name": "Admin — Payments",
+                "description": "Back-office: customer payments (ADMIN); reconciliation (SUPERUSER).",
+            },
+            {
+                "name": "Admin — Payouts",
+                "description": "Back-office: contractor payouts (ADMIN); reconciliation (SUPERUSER).",
+            },
+            {"name": "Admin — Support", "description": "Back-office: support requests and their status (ADMIN)."},
+            {"name": "Admin — Dashboard", "description": "Back-office: summary counters (ADMIN)."},
+            {"name": "Admin — Audit log", "description": "Back-office: administrative audit trail (SUPERUSER)."},
             {"name": "System", "description": "Service health."},
         ],
     },
@@ -222,6 +249,18 @@ api.add_router("", contractor_earnings_router)
 # الدعم — مسار مستقل تمامًا: متاح لأي دور مصادَق عليه، والصلاحية ملكية
 # لا دور. لا تعارض مع /bookings رغم أن الطلب قد يشير إلى حجز.
 api.add_router("/support-requests", support_router)
+# Back-office — لوحة التحكم المخصّصة (ليست Django Admin). كل المسارات تحت
+# /api/admin/<مورد> ولا تتعارض مع /services* و /pricing-config و
+# /contractors* و /verifications* في الـrouters الأخرى المركّبة على /admin.
+api.add_router("/admin", admin_users_router)
+api.add_router("/admin", admin_properties_router)
+api.add_router("/admin", admin_bookings_router)
+api.add_router("/admin", admin_jobs_router)
+api.add_router("/admin", admin_payments_router)
+api.add_router("/admin", admin_payouts_router)
+api.add_router("/admin", admin_support_router)
+api.add_router("/admin", admin_dashboard_router)
+api.add_router("/admin", admin_audit_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

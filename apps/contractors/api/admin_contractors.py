@@ -20,7 +20,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from ninja import Router
-from apps.accounts.authentication import ActiveUserJWTAuth
+from apps.accounts.authentication import ActiveUserJWTAuth, AdminJWTAuth
 
 from ..services import profile as svc
 from ..services import verification as vsvc
@@ -32,6 +32,7 @@ from .profile import (
 from .schemas import (
     BusinessRegistrationOut,
     ContractorProfileOut,
+    ContractorVerificationsOut,
     ErrorOut,
     InsuranceDocumentOut,
     PendingVerificationsOut,
@@ -109,6 +110,43 @@ def retrieve_contractor(request, profile_id: uuid.UUID):
         )
 
     return 200, serialize(profile)
+
+
+# ------------------------------------------------------------
+# GET /admin/contractors/{id}/verifications
+# ------------------------------------------------------------
+@router.get(
+    "/contractors/{profile_id}/verifications",
+    auth=AdminJWTAuth(),
+    response={200: ContractorVerificationsOut, 403: ErrorOut, 404: ErrorOut},
+    summary="Full verification history of one contractor (admin only)",
+    description=(
+        "**Who may call:** `ADMIN` only.\n\n"
+        "Every business registration and insurance document this contractor "
+        "ever submitted, in every state (pending, verified, rejected), newest "
+        "first. **Side effects:** none — read-only."
+    ),
+)
+def contractor_verifications(request, profile_id: uuid.UUID):
+    try:
+        history = vsvc.list_verifications_for_profile(request.user, profile_id)
+    except (vsvc.AdminRoleRequiredError, vsvc.ContractorProfilePermissionError) as exc:
+        return _error(403, "admin_required", str(exc))
+    except vsvc.ContractorProfileNotFoundError:
+        return _error(
+            404, "contractor_profile_not_found", "Contractor profile not found."
+        )
+
+    return 200, {
+        "contractor_id": history["profile"].id,
+        "eligible": vsvc.is_contractor_eligible(history["profile"]),
+        "business_registrations": [
+            serialize_business_registration(r) for r in history["business_registrations"]
+        ],
+        "insurance_documents": [
+            serialize_insurance_document(d) for d in history["insurance_documents"]
+        ],
+    }
 
 
 # ============================================================
@@ -220,6 +258,7 @@ def review_business_registration(request, registration_id: uuid.UUID, payload: R
             registration_id,
             status=payload.status.value,
             rejection_reason=payload.rejection_reason,
+            request=request,
         )
     except (vsvc.AdminRoleRequiredError, vsvc.ContractorProfilePermissionError) as exc:
         return _error(403, exc.code, str(exc))
@@ -280,6 +319,7 @@ def review_insurance_document(request, document_id: uuid.UUID, payload: ReviewPa
             document_id,
             status=payload.status.value,
             rejection_reason=payload.rejection_reason,
+            request=request,
         )
     except (vsvc.AdminRoleRequiredError, vsvc.ContractorProfilePermissionError) as exc:
         return _error(403, exc.code, str(exc))

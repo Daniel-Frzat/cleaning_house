@@ -114,7 +114,7 @@ def _serialize_config(config):
 )
 def create_service(request, payload: ServiceTypeIn):
     try:
-        service = svc.create_service_type(request.user, **payload.dict())
+        service = svc.create_service_type(request.user, **payload.dict(), request=request)
     except svc.CatalogPermissionError as exc:
         return _forbidden(exc)
     except ValidationError as exc:
@@ -206,7 +206,7 @@ def update_service(request, service_id: uuid.UUID, payload: ServiceTypePatch):
 
     try:
         if fields:
-            service = svc.update_service_type(request.user, service_id, **fields)
+            service = svc.update_service_type(request.user, service_id, request=request, **fields)
         else:
             # لا شيء لتعديله — نتحقق من الصلاحية والوجود على الأقل
             service = svc.get_service_type(request.user, service_id)
@@ -251,7 +251,7 @@ def delete_service(request, service_id: uuid.UUID):
     الخدمة قد يُشار إليها لاحقًا من Bookings.
     """
     try:
-        service = svc.deactivate_service_type(request.user, service_id)
+        service = svc.deactivate_service_type(request.user, service_id, request=request)
     except svc.CatalogPermissionError as exc:
         return _forbidden(exc)
     except svc.ServiceTypeNotFoundError:
@@ -310,7 +310,7 @@ def update_pricing_config(request, payload: PricingConfigPatch):
     قيمة واحدة للنظام كله (§5) — ليست لكل خدمة.
     """
     try:
-        config = svc.update_pricing_config(request.user, payload.price_per_km)
+        config = svc.update_pricing_config(request.user, payload.price_per_km, request=request)
     except svc.CatalogPermissionError as exc:
         return _forbidden(exc)
     except ValidationError as exc:

@@ -176,3 +176,13 @@ class PendingVerificationsOut(Schema):
 
     business_registrations: list[BusinessRegistrationOut]
     insurance_documents: list[InsuranceDocumentOut]
+
+
+class ContractorVerificationsOut(Schema):
+    """السجل الكامل لتحقق مقاول واحد — كل الحالات، الأحدث أولًا."""
+
+    contractor_id: uuid.UUID
+    # الأهلية المحسوبة لحظيًا (is_contractor_eligible) — للعرض فقط
+    eligible: bool
+    business_registrations: list[BusinessRegistrationOut]
+    insurance_documents: list[InsuranceDocumentOut]
