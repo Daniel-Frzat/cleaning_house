@@ -265,8 +265,17 @@ def _attempt_charge(payment, booking):
     #    فشل أي أثر لاحق.
     if payment.status == PaymentStatus.SUCCEEDED:
         transaction.on_commit(lambda: confirm_payment(payment.id), robust=True)
+    _emit_payment_outcome(payment)
 
     return payment
+
+
+def _emit_payment_outcome(payment):
+    """فشل الدفع أو حاجته لتأكيد 3-D Secure يحتاج تدخل العميل فورًا."""
+    if payment.status == PaymentStatus.FAILED:
+        _emit("payment_failed", payment)
+    elif payment.status == PaymentStatus.REQUIRES_ACTION:
+        _emit("payment_action_required", payment)
 
 
 @transaction.atomic
@@ -343,6 +352,10 @@ def confirm_payment(payment_id):
 
     # إنشاء المهمة بعد الـcommit: فشلها لا يجوز أن يتراجع عن دفعة ناجحة.
     transaction.on_commit(lambda: _create_job_after_commit(booking), robust=True)
+
+    # إشعار الطرفين: العميل (وُجد عامل) والمقاول (العميل دفع)
+    _emit("booking_confirmed", booking)
+    _emit("job_confirmed", booking)
 
     return payment
 
@@ -466,6 +479,7 @@ def confirm_payment_action(user, payment_id):
     )
     if payment.status == PaymentStatus.SUCCEEDED:
         transaction.on_commit(lambda: confirm_payment(payment.id), robust=True)
+    _emit_payment_outcome(payment)
     return payment
 
 
@@ -510,3 +524,10 @@ def get_payment_for_booking(user, booking):
         raise PaymentNotFoundError("No payment exists for this booking.")
 
     return payment
+
+
+def _emit(event, *args):
+    """إشعار بعد نجاح المعاملة (apps/notifications/hooks.py) — استيراد كسول."""
+    from apps.notifications.hooks import emit_on_commit
+
+    emit_on_commit(event, *args)

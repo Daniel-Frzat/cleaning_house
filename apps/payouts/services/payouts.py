@@ -221,6 +221,11 @@ def _record_payout_result(payout, result, booking):
         payout.amount,
     )
 
+    if payout.status == PayoutStatus.SUCCEEDED:
+        from apps.notifications.hooks import emit_on_commit
+
+        emit_on_commit("payout_sent", payout)
+
     # ⚠️ لا Job ولا Booking يُمسّان هنا مهما كانت النتيجة — سياسة مفتوحة.
     return payout
 

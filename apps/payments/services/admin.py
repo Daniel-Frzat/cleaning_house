@@ -173,6 +173,10 @@ def reconcile_payment(actor, payment_id, outcome, note, provider_reference=None,
             payment.save(
                 update_fields=["status", "failure_reason", "action_payload", "updated_at"]
             )
+            # العميل يستطيع إعادة المحاولة بطريقة دفع أخرى — يجب أن يعلم
+            from apps.notifications.hooks import emit_on_commit
+
+            emit_on_commit("payment_failed", payment)
 
         details = {
             "outcome": outcome,

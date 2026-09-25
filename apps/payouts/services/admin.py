@@ -134,6 +134,10 @@ def reconcile_payout(actor, payout_id, outcome, note, provider_reference=None, r
         payout.save(
             update_fields=["status", "provider_reference", "failure_reason", "updated_at"]
         )
+        if payout.status == PayoutStatus.SUCCEEDED:
+            from apps.notifications.hooks import emit_on_commit
+
+            emit_on_commit("payout_sent", payout)
 
         details = {
             "outcome": outcome,

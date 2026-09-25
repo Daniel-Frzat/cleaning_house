@@ -274,7 +274,7 @@
             "description": "No Content"
           }
         },
-        "description": "**Who may call:** anyone holding a `refresh` token — no access token is needed, so logout works even after the access token expired.\n\nRevokes the refresh token so it can no longer be used. The current access token stays valid until its short lifetime ends; the client should delete both tokens locally.\n\nIdempotent: an already revoked, expired or malformed token also returns `204`.",
+        "description": "**Who may call:** anyone holding a `refresh` token — no access token is needed, so logout works even after the access token expired.\n\nRevokes the refresh token so it can no longer be used. The current access token stays valid until its short lifetime ends; the client should delete both tokens locally.\n\nIdempotent: an already revoked, expired or malformed token also returns `204`.\n\nSend `device_token` (this device's FCM token) to stop push notifications to it as part of the logout.",
         "tags": [
           "Auth"
         ],
@@ -282,7 +282,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RefreshIn"
+                "$ref": "#/components/schemas/LogoutIn"
               }
             }
           },
@@ -4579,6 +4579,494 @@
         ]
       }
     },
+    "/api/devices": {
+      "post": {
+        "operationId": "apps_notifications_api_notifications_register_device",
+        "summary": "Register this device for push notifications",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Call after login and whenever Firebase issues a new token (`onTokenRefresh`). Idempotent: the same token is updated, and a token previously registered by another account moves to this one.",
+        "tags": [
+          "Notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/devices/unregister": {
+      "post": {
+        "operationId": "apps_notifications_api_notifications_unregister_device",
+        "summary": "Stop push notifications on this device",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "description": "Call on logout, before discarding the tokens. Idempotent.",
+        "tags": [
+          "Notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceUnregisterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "operationId": "apps_notifications_api_notifications_list_notifications",
+        "summary": "List my notifications",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "unread_only",
+            "schema": {
+              "default": false,
+              "title": "Unread Only",
+              "type": "boolean"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "schema": {
+              "title": "Audience",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Newest first, kept for 90 days. `unread_only=true` filters; `audience=CUSTOMER|CONTRACTOR` shows one mode of a dual-role account (broadcasts appear in both). Paged with `limit`/`offset`.",
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/unread-count": {
+      "get": {
+        "operationId": "apps_notifications_api_notifications_unread_count",
+        "summary": "Unread notifications count",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "audience",
+            "schema": {
+              "title": "Audience",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/read-all": {
+      "post": {
+        "operationId": "apps_notifications_api_notifications_read_all",
+        "summary": "Mark all my notifications as read",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "audience",
+            "schema": {
+              "title": "Audience",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/{notification_id}/read": {
+      "post": {
+        "operationId": "apps_notifications_api_notifications_read_one",
+        "summary": "Mark one notification as read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/broadcasts": {
+      "post": {
+        "operationId": "apps_notifications_api_admin_create_broadcast",
+        "summary": "Send a broadcast notification",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BroadcastOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sends an announcement to every active account in `target` (`CUSTOMERS`, `CONTRACTORS` or `ALL_USERS`; admins never receive it). Each recipient gets it in their notification list and as a push. Audited.",
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_notifications_api_admin_list_broadcasts",
+        "summary": "List broadcasts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BroadcastListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/broadcasts/{broadcast_id}": {
+      "get": {
+        "operationId": "apps_notifications_api_admin_retrieve_broadcast",
+        "summary": "Broadcast detail with delivery stats",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "broadcast_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Broadcast Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BroadcastOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{user_id}/notifications": {
+      "get": {
+        "operationId": "apps_notifications_api_admin_user_notifications",
+        "summary": "A user's notifications with push delivery status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNotificationListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/admin/users": {
       "get": {
         "operationId": "apps_accounts_api_backoffice_users_list_users",
@@ -6884,6 +7372,32 @@
           "refresh"
         ],
         "title": "RefreshIn",
+        "type": "object"
+      },
+      "LogoutIn": {
+        "properties": {
+          "refresh": {
+            "minLength": 1,
+            "title": "Refresh",
+            "type": "string"
+          },
+          "device_token": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Token"
+          }
+        },
+        "required": [
+          "refresh"
+        ],
+        "title": "LogoutIn",
         "type": "object"
       },
       "UserProfilePatch": {
@@ -10728,6 +11242,427 @@
           "message"
         ],
         "title": "SupportRequestIn",
+        "type": "object"
+      },
+      "DeviceOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "app_version": {
+            "default": "",
+            "title": "App Version",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "created_at",
+          "last_seen_at"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "DeviceIn": {
+        "properties": {
+          "token": {
+            "maxLength": 512,
+            "minLength": 10,
+            "title": "Token",
+            "type": "string"
+          },
+          "platform": {
+            "description": "IOS | ANDROID | WEB",
+            "title": "Platform",
+            "type": "string"
+          },
+          "app_version": {
+            "default": "",
+            "maxLength": 32,
+            "title": "App Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ],
+        "title": "DeviceIn",
+        "type": "object"
+      },
+      "DeviceUnregisterIn": {
+        "properties": {
+          "token": {
+            "maxLength": 512,
+            "minLength": 10,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "DeviceUnregisterIn",
+        "type": "object"
+      },
+      "NotificationListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "unread",
+          "items"
+        ],
+        "title": "NotificationListOut",
+        "type": "object"
+      },
+      "NotificationOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "string"
+          },
+          "read": {
+            "title": "Read",
+            "type": "boolean"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "audience",
+          "title",
+          "body",
+          "priority",
+          "read",
+          "created_at"
+        ],
+        "title": "NotificationOut",
+        "type": "object"
+      },
+      "UnreadCountOut": {
+        "properties": {
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread"
+        ],
+        "title": "UnreadCountOut",
+        "type": "object"
+      },
+      "MarkAllOut": {
+        "properties": {
+          "marked": {
+            "title": "Marked",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marked"
+        ],
+        "title": "MarkAllOut",
+        "type": "object"
+      },
+      "BroadcastOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "recipients_count": {
+            "title": "Recipients Count",
+            "type": "integer"
+          },
+          "created_by_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivery": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Delivery",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "title",
+          "body",
+          "recipients_count",
+          "created_at"
+        ],
+        "title": "BroadcastOut",
+        "type": "object"
+      },
+      "BroadcastIn": {
+        "properties": {
+          "target": {
+            "description": "CUSTOMERS | CONTRACTORS | ALL_USERS",
+            "title": "Target",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "title",
+          "body"
+        ],
+        "title": "BroadcastIn",
+        "type": "object"
+      },
+      "BroadcastListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BroadcastOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "BroadcastListOut",
+        "type": "object"
+      },
+      "AdminNotificationListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminNotificationListOut",
+        "type": "object"
+      },
+      "AdminNotificationOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "string"
+          },
+          "read": {
+            "title": "Read",
+            "type": "boolean"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "push_status": {
+            "title": "Push Status",
+            "type": "string"
+          },
+          "push_attempts": {
+            "title": "Push Attempts",
+            "type": "integer"
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          },
+          "push_error": {
+            "default": "",
+            "title": "Push Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "audience",
+          "title",
+          "body",
+          "priority",
+          "read",
+          "created_at",
+          "push_status",
+          "push_attempts"
+        ],
+        "title": "AdminNotificationOut",
         "type": "object"
       },
       "ConfirmedRole": {

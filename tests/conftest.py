@@ -119,3 +119,16 @@ def _fast_password_hasher(settings):
     الاختبارات التي تضبط كلمات سر. MD5 للاختبارات وحدها.
     """
     settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
+@pytest.fixture(autouse=True)
+def _fake_push_adapter(settings):
+    """الإشعارات في الاختبارات: محوّل وهمي وإرسال فوري بعد الـcommit."""
+    from adapters.push_notification.fake import FakePushAdapter
+
+    settings.PUSH_ADAPTER = "adapters.push_notification.fake.FakePushAdapter"
+    settings.PUSH_ALLOW_FAKE_ADAPTER = True
+    settings.NOTIFICATIONS_DELIVERY = "inline"
+    FakePushAdapter.reset()
+    yield
+    FakePushAdapter.reset()

@@ -89,10 +89,15 @@ def revoke_refresh_token(raw_refresh):
        تحذفه محليًا عند الخروج.
 
     Idempotent: إبطال توكن مُبطل مسبقًا لا يُعد خطأ.
+
+    يعيد صاحب التوكن (لإلغاء تسجيل جهازه)، أو None إن كان التوكن غير صالح.
     """
     try:
         token = RefreshToken(raw_refresh)
     except TokenError:
         # منتهٍ أو مُبطل مسبقًا أو غير صالح: لا شيء يمكن تجديده به — الخروج تم
-        return
+        return None
     token.blacklist()
+    return get_user_model().objects.filter(
+        **{api_settings.USER_ID_FIELD: token.get(api_settings.USER_ID_CLAIM)}
+    ).first()

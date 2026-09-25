@@ -60,3 +60,7 @@ dist/
 *.egg
 # --- Claude Code agent worktrees ---
 .claude/worktrees/
+
+# --- Firebase / Google service account keys (أسرار — لا تُرفع أبدًا) ---
+*firebase-adminsdk*.json
+*service-account*.json

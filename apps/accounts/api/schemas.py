@@ -36,6 +36,11 @@ class RefreshIn(Schema):
     refresh: str = Field(..., min_length=1)
 
 
+class LogoutIn(RefreshIn):
+    # توكن FCM لهذا الجهاز — يوقف إشعاراته مع الخروج (اختياري)
+    device_token: Optional[str] = Field(None, max_length=512)
+
+
 # ------------------------------------------------------------
 # الاستجابات
 # ------------------------------------------------------------

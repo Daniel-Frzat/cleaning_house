@@ -44,6 +44,7 @@ from .schemas import (
     OTPRequestIn,
     OTPRequestOut,
     OTPVerifyIn,
+    LogoutIn,
     RefreshIn,
     SocialLoginIn,
     TokenPairOut,
@@ -364,11 +365,17 @@ def refresh_token(request, payload: RefreshIn):
         "access token stays valid until its short lifetime ends; the client "
         "should delete both tokens locally.\n\n"
         "Idempotent: an already revoked, expired or malformed token also "
-        "returns `204`."
+        "returns `204`.\n\n"
+        "Send `device_token` (this device's FCM token) to stop push "
+        "notifications to it as part of the logout."
     ),
 )
-def logout(request, payload: RefreshIn):
-    token_service.revoke_refresh_token(payload.refresh)
+def logout(request, payload: LogoutIn):
+    user = token_service.revoke_refresh_token(payload.refresh)
+    if payload.device_token and user is not None:
+        from apps.notifications.services.notifications import unregister_device
+
+        unregister_device(user, payload.device_token)
     return 204, None
 
 

@@ -277,6 +277,10 @@ def _review(user, instance, status, rejection_reason, request=None):
     instance.full_clean()
     instance.save()
 
+    from apps.notifications.hooks import emit_on_commit
+
+    emit_on_commit("verification_reviewed", instance)
+
     # 📌 داخل معاملة المستدعي — قرار تراجع لا يترك أثرًا كاذبًا
     record(
         user,

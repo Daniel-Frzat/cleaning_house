@@ -148,6 +148,14 @@ def world(superuser):
         user=customer, jti="old-jti", token="old", expires_at=now + timedelta(days=1)
     ))
     Group.objects.create(name="Operations")
+
+    from apps.notifications.models import Broadcast, DeviceToken, Notification
+
+    broadcast = Broadcast.objects.create(created_by=superuser, target="CUSTOMERS", title="Hi", body="News")
+    Notification.objects.create(
+        user=customer, audience="CUSTOMER", type="broadcast", title="Hi", body="News", broadcast=broadcast
+    )
+    DeviceToken.objects.create(user=customer, token="fcm-token-0123456789", platform="ANDROID")
     return {
         "customer": customer,
         "worker": worker,

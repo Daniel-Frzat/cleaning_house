@@ -57,6 +57,9 @@ from apps.contractors.api.profile import router as contractor_profile_router
 from apps.services.api.catalog import router as admin_catalog_router
 from apps.services.api.public_catalog import router as public_services_router
 from apps.support.api.support import router as support_router
+from apps.notifications.api.admin import router as admin_notifications_router
+from apps.notifications.api.notifications import devices_router as notification_devices_router
+from apps.notifications.api.notifications import router as notifications_router
 
 API_DESCRIPTION = """
 REST API for **Cleaning House**, an Australian cleaning marketplace that connects
@@ -254,6 +257,10 @@ api.add_router("", contractor_earnings_router)
 # الدعم — مسار مستقل تمامًا: متاح لأي دور مصادَق عليه، والصلاحية ملكية
 # لا دور. لا تعارض مع /bookings رغم أن الطلب قد يشير إلى حجز.
 api.add_router("/support-requests", support_router)
+# الإشعارات — أجهزة FCM وقائمة الإشعارات، والرسائل العامة للإدارة
+api.add_router("/devices", notification_devices_router)
+api.add_router("/notifications", notifications_router)
+api.add_router("/admin", admin_notifications_router)
 # Back-office — لوحة التحكم المخصّصة (ليست Django Admin). كل المسارات تحت
 # /api/admin/<مورد> ولا تتعارض مع /services* و /pricing-config و
 # /contractors* و /verifications* في الـrouters الأخرى المركّبة على /admin.

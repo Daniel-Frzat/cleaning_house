@@ -107,6 +107,10 @@ def change_status(actor, request_id, new_status, request=None):
     obj.status = new_status
     obj.save(update_fields=["status", "updated_at"])
 
+    from apps.notifications.hooks import emit_on_commit
+
+    emit_on_commit("support_updated", obj)
+
     record(
         actor,
         "support_request.status",

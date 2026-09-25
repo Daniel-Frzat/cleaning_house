@@ -336,6 +336,9 @@ def assign_next_contractor(booking):
     offer.full_clean()
     offer.save()
 
+    # 📌 العرض صالح دقائق معدودة — بلا إشعار لا يعلم به المقاول
+    _emit("offer_new", offer)
+
     # 📌 SEARCHING بعد حفظ العرض لا قبله — فلا تُرى الحالة بلا عرض حيّ.
     booking.dispatch_status = DispatchStatus.SEARCHING
     booking.save(update_fields=[
@@ -416,3 +419,10 @@ def _frozen_services_total(booking):
         service = selection.service_type
         total += (service.room_price * selection.room_count) + service.base_price
     return total
+
+
+def _emit(event, *args):
+    """إشعار بعد نجاح المعاملة (apps/notifications/hooks.py) — استيراد كسول."""
+    from apps.notifications.hooks import emit_on_commit
+
+    emit_on_commit(event, *args)

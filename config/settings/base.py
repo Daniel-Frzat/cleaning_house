@@ -65,6 +65,8 @@ LOCAL_APPS = [
     "apps.support",
     # سجل أفعال الإدارة — للإضافة فقط
     "apps.audit",
+    # الإشعارات: أجهزة FCM، قائمة الإشعارات، الرسائل العامة
+    "apps.notifications",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -350,6 +352,26 @@ JOB_PHOTO_MAX_BYTES = config("JOB_PHOTO_MAX_BYTES", default=10 * 1024 * 1024, ca
 JOB_PHOTO_MAX_PER_JOB = config("JOB_PHOTO_MAX_PER_JOB", default=30, cast=int)
 
 # ------------------------------------------------------------
+# Push Notifications — Firebase Cloud Messaging (قرار PO — 2026-09-25)
+# ------------------------------------------------------------
+PUSH_ADAPTER = config("PUSH_ADAPTER", default="adapters.push_notification.fcm.FCMPushAdapter")
+# حساب الخدمة: المحتوى كاملًا (الاستضافة) أو مسار الملف (محليًا). سرّ — لا يُرفع.
+FIREBASE_CREDENTIALS_JSON = config("FIREBASE_CREDENTIALS_JSON", default="")
+FIREBASE_CREDENTIALS_FILE = config("FIREBASE_CREDENTIALS_FILE", default="")
+# صمّام FakePushAdapter عند DEBUG=False (الاختبارات فقط)
+PUSH_ALLOW_FAKE_ADAPTER = config("PUSH_ALLOW_FAKE_ADAPTER", default=False, cast=bool)
+# "inline" بلا عامل خلفي (الافتراضي)، أو "celery" حين يعمل عامل Celery + Redis
+NOTIFICATIONS_DELIVERY = config("NOTIFICATIONS_DELIVERY", default="inline")
+NOTIFICATIONS_MAX_PUSH_ATTEMPTS = config("NOTIFICATIONS_MAX_PUSH_ATTEMPTS", default=5, cast=int)
+NOTIFICATIONS_RETENTION_DAYS = config("NOTIFICATIONS_RETENTION_DAYS", default=90, cast=int)
+NOTIFICATIONS_STALE_DEVICE_DAYS = config("NOTIFICATIONS_STALE_DEVICE_DAYS", default=270, cast=int)
+# قنوات Android حسب الأولوية — تُعدَّل حين يحدّد تطبيق الموبايل أسماءه
+NOTIFICATION_ANDROID_CHANNELS = {
+    "HIGH": config("NOTIFICATION_CHANNEL_HIGH", default="offers"),
+    "NORMAL": config("NOTIFICATION_CHANNEL_NORMAL", default="general"),
+}
+
+# ------------------------------------------------------------
 # Celery / Redis
 # ------------------------------------------------------------
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
@@ -377,6 +399,14 @@ CELERY_BEAT_SCHEDULE = {
     "repair-confirmed-bookings": {
         "task": "bookings.repair_confirmed_bookings",
         "schedule": crontab(minute="*/5"),
+    },
+    "retry-pending-notifications": {
+        "task": "notifications.retry_pending",
+        "schedule": crontab(minute="*/5"),
+    },
+    "cleanup-notifications": {
+        "task": "notifications.cleanup",
+        "schedule": crontab(hour=3, minute=30),
     },
 }
 

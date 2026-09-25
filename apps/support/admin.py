@@ -7,6 +7,7 @@ from django.utils.text import Truncator
 
 from apps.audit.admin import EMPTY, BackOfficeMixin, short_id
 from apps.audit.services.audit import record
+from apps.notifications.hooks import emit_on_commit
 
 from .models import SupportRequest, SupportStatus
 
@@ -101,6 +102,7 @@ class SupportRequestAdmin(BackOfficeMixin, admin.ModelAdmin):
                     details={"from": previous, "to": obj.status},
                     request=request,
                 )
+                emit_on_commit("support_updated", obj)
 
     def _set_status(self, request, queryset, status):
         done = 0
@@ -120,6 +122,7 @@ class SupportRequestAdmin(BackOfficeMixin, admin.ModelAdmin):
                         details={"from": previous, "to": status},
                         request=request,
                     )
+                    emit_on_commit("support_updated", support_request)
                 done += 1
             except ValidationError as exc:
                 self.message_user(

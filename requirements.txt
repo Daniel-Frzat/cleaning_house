@@ -52,6 +52,9 @@ redis==5.0.7
 # القاعدة أعلاه تمنع إضافتها *قبل* حسم القرار، وقد حُسم SMS لصالح ClickSend.
 # لا SDK خاص بالمزوّد — REST مباشرة، فيبقى استبدال المزوّد تغييرَ ملف واحد.
 requests==2.32.3
+# توكن OAuth من حساب خدمة Firebase لإرسال FCM HTTP v1 (بلا firebase-admin
+# الثقيلة: gRPC و Firestore و Storage غير مطلوبة)
+google-auth==2.58.1
 
 # --- Testing ---
 pytest==8.2.2

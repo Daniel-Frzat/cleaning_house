@@ -321,6 +321,7 @@ def start_job(job, contractor_user):
     job.status = JobStatus.IN_PROGRESS
     job.started_at = timezone.now()
     job.save(update_fields=["status", "started_at", "updated_at"])
+    _emit("job_started", job)
 
     logger.info("Job started (job_id=%s, by=%s)", job.id, contractor_user.id)
     return job
@@ -368,6 +369,7 @@ def mark_job_done(job, contractor_user):
     job.status = JobStatus.AWAITING_CUSTOMER_CONFIRMATION
     job.marked_done_at = timezone.now()
     job.save(update_fields=["status", "marked_done_at", "updated_at"])
+    _emit("job_awaiting_confirmation", job)
 
     logger.info(
         "Job marked done (job_id=%s, by=%s)", job.id, contractor_user.id
@@ -413,6 +415,8 @@ def confirm_job_completion(job, customer_user):
     job.status = JobStatus.COMPLETED
     job.confirmed_at = timezone.now()
     job.save(update_fields=["status", "confirmed_at", "updated_at"])
+    # 📌 أثر جانبي معزول بعد الـcommit (استيراد كسول — حارس المعمارية)
+    _emit("job_completed", job)
 
     logger.info(
         "Job completion confirmed (job_id=%s, by=%s)", job.id, customer_user.id
@@ -479,3 +483,10 @@ def get_job_for_transition(job_id):
         raise JobNotFoundError("Job not found.")
 
     return job
+
+
+def _emit(event, *args):
+    """إشعار بعد نجاح المعاملة (apps/notifications/hooks.py) — استيراد كسول."""
+    from apps.notifications.hooks import emit_on_commit
+
+    emit_on_commit(event, *args)
