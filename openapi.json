@@ -22,6 +22,43 @@
         ]
       }
     },
+    "/api/health/ready": {
+      "get": {
+        "operationId": "config_urls_readiness_check",
+        "summary": "Readiness check (database reachable and fully migrated)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "description": "Public. `200` only when the database answers and every migration is applied; otherwise `503` with the reason. Used by the platform as the deploy health check, so a release whose migrations did not run never receives traffic.",
+        "tags": [
+          "System"
+        ]
+      }
+    },
     "/api/auth/otp/request": {
       "post": {
         "operationId": "apps_accounts_api_auth_request_otp",

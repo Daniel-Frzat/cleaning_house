@@ -214,8 +214,41 @@ api = NinjaAPI(
     ),
 )
 def health_check(request):
-    """يتأكد أن التطبيق والاتصال بقاعدة البيانات يعملان."""
+    """Liveness: العملية تعمل. لا يلمس قاعدة البيانات."""
     return {"status": "ok", "phase": "Phase 0 — Foundation"}
+
+
+@api.get(
+    "/health/ready",
+    tags=["System"],
+    auth=None,
+    response={200: dict, 503: dict},
+    summary="Readiness check (database reachable and fully migrated)",
+    description=(
+        "Public. `200` only when the database answers and every migration is "
+        "applied; otherwise `503` with the reason. Used by the platform as the "
+        "deploy health check, so a release whose migrations did not run never "
+        "receives traffic."
+    ),
+)
+def readiness_check(request):
+    """
+    🔒 كان النشر يُفعَّل والقاعدة بلا migrations الجديدة، فيعيد كل طلب يقرأ
+       المستخدمين 500 بينما /health يقول ok. هذا الفحص يمنع ذلك.
+    """
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        executor = MigrationExecutor(connection)
+        pending = executor.migration_plan(executor.loader.graph.leaf_nodes())
+    except Exception as exc:  # noqa: BLE001
+        return 503, {"status": "unavailable", "reason": f"database: {type(exc).__name__}"}
+    if pending:
+        return 503, {"status": "unavailable", "reason": f"{len(pending)} unapplied migration(s)"}
+    return 200, {"status": "ready"}
 
 
 @api.exception_handler(AuthzError)
