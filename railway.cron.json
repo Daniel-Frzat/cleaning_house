@@ -1,8 +1,0 @@
-{
-  "$schema": "https://railway.com/railway.schema.json",
-  "deploy": {
-    "startCommand": "python manage.py run_periodic_tasks",
-    "cronSchedule": "*/5 * * * *",
-    "restartPolicyType": "NEVER"
-  }
-}

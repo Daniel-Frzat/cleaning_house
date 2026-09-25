@@ -1,7 +1,7 @@
 """
 python manage.py run_periodic_tasks
 
-كل المهام الدورية في تشغيل واحد — لخدمة Railway Cron (railway.cron.json،
+كل المهام الدورية في تشغيل واحد — لخدمة Railway Cron (cleaning_house-cron،
 كل 5 دقائق)، بديلًا عن Celery Beat + Worker + Redis.
 
   1) انتهاء عروض الإسناد + التتابع للمقاول التالي + استعادة الحجوزات العالقة
