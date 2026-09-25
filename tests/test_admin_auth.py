@@ -460,3 +460,45 @@ def test_challenge_rows_are_created_per_login(client):
     make_admin()
     post(client, "/api/admin/auth/login", {"identifier": "ops@example.com", "password": PW})
     assert AdminLoginChallenge.objects.count() == 1
+
+
+# ============================================================
+# 8) وضع التجريب قبل مزوّد SMS
+# ============================================================
+@pytest.mark.django_db
+def test_test_numbers_can_serve_the_admin_second_factor_when_explicitly_allowed(client, settings):
+    make_admin()
+    settings.OTP_TEST_NUMBERS = {"+61400800001": "123456"}
+    settings.OTP_TEST_NUMBERS_ALLOW_ADMIN = True
+    body = post(client, "/api/admin/auth/login", {"identifier": "ops@example.com", "password": PW}).json()
+    assert CapturingSMSAdapter.sent == []  # لا SMS
+    r = post(client, "/api/admin/auth/verify", {"challenge_id": body["challenge_id"], "code": "123456"})
+    assert r.status_code == 200
+    # كلمة السر ما زالت مطلوبة
+    assert post(client, "/api/admin/auth/login", {"identifier": "ops@example.com", "password": "bad"}).status_code == 401
+
+
+@pytest.mark.django_db
+def test_test_mode_expires_automatically(client, settings):
+    from apps.accounts.services import otp as otp_service
+
+    settings.OTP_TEST_NUMBERS = {"+61400800050": "123456"}
+    settings.OTP_TEST_MODE_UNTIL = "2020-01-01"
+    assert otp_service.test_numbers() == {}
+    settings.OTP_TEST_MODE_UNTIL = "not-a-date"
+    assert otp_service.test_numbers() == {}  # تاريخ غير صالح = منتهٍ
+    settings.OTP_TEST_MODE_UNTIL = "2999-01-01"
+    assert otp_service.test_numbers() == {"+61400800050": "123456"}
+
+
+def test_deploy_warning_while_test_mode_is_on(settings):
+    from apps.accounts.apps import otp_test_mode_check
+
+    settings.DEBUG = False
+    settings.OTP_TEST_NUMBERS = {"+61400800050": "123456"}
+    settings.OTP_TEST_NUMBERS_ALLOW_ADMIN = True
+    settings.OTP_TEST_MODE_UNTIL = ""
+    [warning] = otp_test_mode_check()
+    assert warning.id == "accounts.W001" and "admin" in warning.msg
+    settings.OTP_TEST_NUMBERS = {}
+    assert otp_test_mode_check() == []

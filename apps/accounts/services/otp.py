@@ -139,9 +139,39 @@ def normalize_phone(phone):
 _normalize_phone = normalize_phone
 
 
+def test_mode_expired(today=None):
+    """هل انتهى OTP_TEST_MODE_UNTIL؟ تاريخ غير صالح يُعامل كمنتهٍ (الأمان أولًا)."""
+    import datetime
+
+    raw = (getattr(settings, "OTP_TEST_MODE_UNTIL", "") or "").strip()
+    if not raw:
+        return False
+    try:
+        until = datetime.date.fromisoformat(raw)
+    except ValueError:
+        return True
+    return (today or timezone.localdate()) > until
+
+
 def test_numbers():
-    """{phone: code} من OTP_TEST_NUMBERS. فارغ افتراضيًا."""
+    """{phone: code} من OTP_TEST_NUMBERS — فارغ افتراضيًا، وبعد OTP_TEST_MODE_UNTIL."""
+    if test_mode_expired():
+        return {}
     return getattr(settings, "OTP_TEST_NUMBERS", None) or {}
+
+
+def _test_code_for(phone, purpose):
+    """
+    الرمز الثابت لرقم اختبار، أو None.
+
+    🔒 دخول العملاء دائمًا؛ العامل الثاني للأدمن فقط إن فُعّل
+       OTP_TEST_NUMBERS_ALLOW_ADMIN صراحةً (وضع تجريب مؤقت).
+    """
+    if purpose == OTPPurpose.LOGIN:
+        return test_numbers().get(phone)
+    if purpose == OTPPurpose.ADMIN_LOGIN and getattr(settings, "OTP_TEST_NUMBERS_ALLOW_ADMIN", False):
+        return test_numbers().get(phone)
+    return None
 
 
 def generate_code(length=None):
@@ -252,7 +282,7 @@ def generate_and_send(phone, purpose=OTPPurpose.LOGIN, ip=None):
 
     # 3) توليد وتخزين الـhash فقط
     # 🔒 أرقام الاختبار لدخول العملاء وحده — لا تعفي عاملًا ثانيًا لأدمن
-    fixed_code = test_numbers().get(phone) if purpose == OTPPurpose.LOGIN else None
+    fixed_code = _test_code_for(phone, purpose)
     code = fixed_code or generate_code(policy["code_length"])
     otp = OTPVerification.objects.create(
         phone=phone,

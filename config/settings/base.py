@@ -330,6 +330,14 @@ def _parse_otp_test_numbers(raw):
 
 OTP_TEST_NUMBERS = _parse_otp_test_numbers(config("OTP_TEST_NUMBERS", default=""))
 
+# ⚠️ وضع التجريب قبل التعاقد مع مزوّد SMS (قرار PO — 2026-09-25):
+#   OTP_TEST_NUMBERS_ALLOW_ADMIN: يسمح لأرقام الاختبار أن تكون العامل الثاني
+#     لدخول الأدمن أيضًا (كلمة السر تبقى مطلوبة). مغلق افتراضيًا.
+#   OTP_TEST_MODE_UNTIL: تاريخ (YYYY-MM-DD) تتوقف بعده أرقام الاختبار كلها
+#     تلقائيًا — حتى لو نُسي حذفها. فارغ = بلا تاريخ انتهاء.
+OTP_TEST_NUMBERS_ALLOW_ADMIN = config("OTP_TEST_NUMBERS_ALLOW_ADMIN", default=False, cast=bool)
+OTP_TEST_MODE_UNTIL = config("OTP_TEST_MODE_UNTIL", default="")
+
 # عدد البروكسيات الموثوقة أمام التطبيق — لاستخراج IP العميل الحقيقي من
 # X-Forwarded-For (يُستخدم في حد طلبات OTP). 0 = REMOTE_ADDR مباشرةً.
 # ⚠️ لا ترفعه فوق العدد الحقيقي: الترويسة يمكن للعميل تزويرها.
