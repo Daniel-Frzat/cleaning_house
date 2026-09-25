@@ -32,6 +32,12 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", default=1, cast=int)
 
 SECURE_SSL_REDIRECT = True
+# 🔒 فحص صحة Railway يصل داخليًا عبر HTTP وبالـhostname healthcheck.railway.app:
+#    بدون هذين يُرفض بـ400 (ALLOWED_HOSTS) أو يُحوَّل بـ301 (SSL redirect)،
+#    فيفشل الفحص ولا يُفعَّل أي نشر جديد أبدًا.
+SECURE_REDIRECT_EXEMPT = [r"^api/health"]
+if "healthcheck.railway.app" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS = [*ALLOWED_HOSTS, "healthcheck.railway.app"]
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000

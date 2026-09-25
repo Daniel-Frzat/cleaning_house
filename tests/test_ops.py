@@ -27,3 +27,20 @@ def test_periodic_tasks_command_runs_every_task(capsys):
     for name in ("expire_pending_offers", "repair_confirmed_bookings",
                  "retry_pending_notifications", "cleanup_notifications"):
         assert name in out
+
+
+def test_production_settings_let_railway_healthcheck_through():
+    """فحص Railway: hostname داخلي و HTTP — لا 400 ولا 301."""
+    import importlib
+    import os
+    from unittest import mock
+
+    env = {"SECRET_KEY": "x" * 50, "JWT_SIGNING_KEY": "y", "DATABASE_URL": "postgres://u:p@h:5432/d",
+           "ALLOWED_HOSTS": "example.com", "DJANGO_ENV": "production"}
+    with mock.patch.dict(os.environ, env):
+        importlib.reload(importlib.import_module("config.settings.base"))
+        prod = importlib.reload(importlib.import_module("config.settings.production"))
+    importlib.reload(importlib.import_module("config.settings.base"))
+    assert "healthcheck.railway.app" in prod.ALLOWED_HOSTS
+    assert "example.com" in prod.ALLOWED_HOSTS
+    assert any(__import__("re").match(p, "api/health/ready") for p in prod.SECURE_REDIRECT_EXEMPT)
