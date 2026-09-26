@@ -13,6 +13,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests.helpers import start_job_for_tests
+
 from tests.helpers import JPEG_BYTES, mark_paid
 from tests.conftest import set_contractor_location
 from django.core.exceptions import ImproperlyConfigured
@@ -159,7 +161,7 @@ def job(customer, prop, service_type, contractor):
     user, profile = contractor
     booking = make_confirmed_booking(customer, prop, service_type, profile)
     created = jobs_svc.create_job_for_booking(booking)
-    return jobs_svc.start_job(created, user)
+    return start_job_for_tests(created, user)
 
 
 # ============================================================
@@ -258,9 +260,10 @@ def test_second_job_rejected_by_service_and_db(job):
 
 @pytest.mark.django_db
 def test_job_status_enum_has_no_cancelled(db):
-    """⚠️ الإلغاء بند مفتوح (#12) — لا حالة له هنا."""
+    """⚠️ لا CANCELLED للمهمة: تُنشأ بعد الدفع، والإلغاء الذاتي قبل الدفع وحده."""
     assert set(JobStatus.values) == {
         "ASSIGNED",
+        "ARRIVED",
         "IN_PROGRESS",
         "AWAITING_CUSTOMER_CONFIRMATION",
         "COMPLETED",

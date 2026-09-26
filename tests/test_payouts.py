@@ -12,6 +12,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests.helpers import start_job_for_tests
+
 from tests.helpers import JPEG_BYTES, mark_paid
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import IntegrityError, transaction
@@ -589,7 +591,7 @@ def test_confirming_job_triggers_payout(
     booking = make_booking(customer, service_type, profile)
     job = jobs_svc.create_job_for_booking(booking)
     # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
-    job = jobs_svc.start_job(job, contractor_user)
+    job = start_job_for_tests(job, contractor_user)
     photos_svc.upload_job_photo(
         contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )
@@ -617,7 +619,7 @@ def test_no_payout_before_confirmation(
     booking = make_booking(customer, service_type, profile)
     job = jobs_svc.create_job_for_booking(booking)
     # ⚠️ المهمة تُنشأ ASSIGNED — تبدأ صراحةً قبل إعلان الإنجاز
-    job = jobs_svc.start_job(job, contractor_user)
+    job = start_job_for_tests(job, contractor_user)
     photos_svc.upload_job_photo(
         contractor_user, job.id, PhotoType.BEFORE, JPEG_BYTES, "image/jpeg"
     )

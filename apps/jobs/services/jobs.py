@@ -79,6 +79,12 @@ class PaymentNotSettledError(JobError):
     code = "payment_not_settled"
 
 
+class NotAtPropertyError(JobError):
+    """الموقع المُبلَّغ أبعد من JOB_ARRIVAL_RADIUS_M عن العقار."""
+
+    code = "not_at_property"
+
+
 class MissingProofPhotosError(JobError):
     """
     لا إعلان إنجاز بلا دليل مصوَّر.
@@ -202,10 +208,11 @@ def lock_job(job):
     """
     fresh = (
         Job.objects.select_for_update()
-        .only("status", "started_at", "marked_done_at", "confirmed_at")
+        .only("status", "arrived_at", "started_at", "marked_done_at", "confirmed_at")
         .get(pk=job.pk)
     )
     job.status = fresh.status
+    job.arrived_at = fresh.arrived_at
     job.started_at = fresh.started_at
     job.marked_done_at = fresh.marked_done_at
     job.confirmed_at = fresh.confirmed_at
@@ -283,6 +290,57 @@ def _photo_types_present(job):
 
 
 @transaction.atomic
+def arrive_job(job, contractor_user, latitude, longitude, accuracy_m=None):
+    """
+    يعلن المقاول المُسنَد وصوله: ASSIGNED → ARRIVED (قرار PO — 2026-09-26).
+
+    🔒 الخادم يتحقق من القرب: المسافة بين الموقع المُبلَّغ والعقار ≤
+       JOB_ARRIVAL_RADIUS_M (مع هامش دقة GPS المُبلَّغة حتى 100 م). عقار بلا
+       إحداثيات لا يمكن التحقق منه فيُقبل (لا يُسنَد أصلًا بلا إحداثيات).
+    📌 يُغلق نافذة التتبع (ASSIGNED وحدها): العامل عند الباب، ومتابعته بعد
+       ذلك مراقبة لا خدمة. العميل يُشعَر بالوصول.
+    """
+    from decimal import Decimal
+
+    from django.conf import settings
+
+    from apps.bookings.services.distance import haversine_km, property_coordinates
+
+    if contractor_user is None or not contractor_user.is_authenticated:
+        raise JobPermissionError("Authentication required.")
+    if not contractor_user.has_contractor_access():
+        raise JobPermissionError("Only contractors can report arrival.")
+    if _assigned_contractor_user_id(job.booking) != contractor_user.id:
+        raise JobPermissionError("This job is not assigned to you.")
+
+    lock_job(job)
+    if job.status != JobStatus.ASSIGNED:
+        raise InvalidJobStatusError(f"Job is {job.status} and cannot be marked arrived.")
+    if not _customer_payment_succeeded(job.booking):
+        raise PaymentNotSettledError(
+            "The customer's payment has not succeeded yet; the job cannot proceed."
+        )
+
+    origin = property_coordinates(job.booking.property)
+    if origin is not None:
+        distance_m = haversine_km(origin[0], origin[1], latitude, longitude) * 1000
+        allowance = min(Decimal(accuracy_m or 0), Decimal(100))
+        radius = Decimal(getattr(settings, "JOB_ARRIVAL_RADIUS_M", 300)) + allowance
+        if distance_m > radius:
+            raise NotAtPropertyError(
+                f"You are about {int(distance_m)} m from the property; "
+                f"arrival is accepted within {int(radius)} m."
+            )
+
+    job.status = JobStatus.ARRIVED
+    job.arrived_at = timezone.now()
+    job.save(update_fields=["status", "arrived_at", "updated_at"])
+    _emit("job_arrived", job)
+    logger.info("Job arrived (job_id=%s, by=%s)", job.id, contractor_user.id)
+    return job
+
+
+@transaction.atomic
 def start_job(job, contractor_user):
     """
     يعلن المقاول المُسنَد بدء العمل: ASSIGNED → IN_PROGRESS.
@@ -308,9 +366,11 @@ def start_job(job, contractor_user):
         raise JobPermissionError("This job is not assigned to you.")
 
     lock_job(job)
-    if job.status != JobStatus.ASSIGNED:
+    # 📌 البدء بعد الوصول وحده (أربع مراحل — قرار PO 2026-09-26)
+    if job.status != JobStatus.ARRIVED:
         raise InvalidJobStatusError(
-            f"Job is {job.status} and cannot be started."
+            f"Job is {job.status} and cannot be started"
+            + (" — report arrival first." if job.status == JobStatus.ASSIGNED else ".")
         )
 
     if not _customer_payment_succeeded(job.booking):

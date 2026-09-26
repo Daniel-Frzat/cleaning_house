@@ -352,6 +352,8 @@ DISPATCH_MAX_DISTANCE_KM = config("DISPATCH_MAX_DISTANCE_KM", default=50, cast=i
 # أقل مهلة بين الآن وموعد الزيارة عند الإنشاء وإعادة الجدولة. قبول عرض
 # بعد فوات الموعد مرفوض دائمًا بغض النظر عن هذه القيمة.
 BOOKING_MIN_LEAD_MINUTES = config("BOOKING_MIN_LEAD_MINUTES", default=120, cast=int)
+# مسافة قبول "وصلت" من العقار بالأمتار (+ حتى 100 م من دقة GPS المُبلَّغة)
+JOB_ARRIVAL_RADIUS_M = config("JOB_ARRIVAL_RADIUS_M", default=300, cast=int)
 
 # ------------------------------------------------------------
 # Job photos — حدود الرفع

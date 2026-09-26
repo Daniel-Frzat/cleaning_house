@@ -35,7 +35,7 @@ from apps.properties.services import properties as properties_svc
 from ..models import BookingStatus
 from ..services import bookings as svc
 from ..services import scheduling as scheduling_svc
-from .schemas import BookingIn, BookingOut, BookingRescheduleIn, ErrorOut
+from .schemas import BookingCancelIn, BookingIn, BookingOut, BookingRescheduleIn, ErrorOut
 
 router = Router(tags=["Bookings"], auth=ActiveUserJWTAuth())
 
@@ -114,6 +114,10 @@ def _serialize(booking):
             booking.scheduled_at, booking.customer_timezone
         ),
         "customer_timezone": booking.customer_timezone,
+        "is_on_demand": booking.scheduled_at is None,
+        "requested_at": booking.requested_at,
+        "cancelled_at": booking.cancelled_at,
+        "cancellation_reason": booking.cancellation_reason,
         # 📌 تقدّم البحث يُعاد كما هو دون شرط الحالة: هو حقل عرض لا
         #    يكشف سعرًا ولا هوية مقاول، بخلاف الحقلين أعلاه.
         "dispatch_status": booking.dispatch_status,
@@ -155,15 +159,19 @@ def _serialize(booking):
         "**Who may call:** `CUSTOMER` only, and only against a property they "
         "own.\n\n"
         "**Preconditions:** at least one service selection, every selected "
-        "service must be active in the catalog, and `scheduled_at` must be in "
+        "service must be active in the catalog, and the property must not have "
+        "been removed.\n\n"
+        "**Two kinds of request:**\n"
+        "* **On-demand (\"request a cleaner now\")** — omit `scheduled_at`. "
+        "Allowed between 07:00 and 19:00 in the property's local timezone "
+        "(`400 outside_business_hours` otherwise); no lead time. The response "
+        "has `is_on_demand: true` and `scheduled_at: null`.\n"
+        "* **Scheduled ahead** — send `scheduled_at` (ISO 8601). It must be in "
         "the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes "
-        "away, and within business hours (07:00-19:00) in the property's local "
-        "timezone. The property must not have been removed.\n\n"
-        "`scheduled_at` is required (ISO 8601). Sent without an offset it is "
-        "read in the timezone derived from the property's state; sent with an "
-        "explicit offset it is honoured as given. Either way it is stored in "
-        "UTC and returned as both `scheduled_at` (UTC) and "
-        "`scheduled_at_local`, so the client never has to convert.\n\n"
+        "away (`400 scheduled_at_too_soon`), and between 07:00 and 19:00 "
+        "property-local. Sent without an offset it is read in the property's "
+        "timezone; with an offset it is honoured as given. Returned as both "
+        "`scheduled_at` (UTC) and `scheduled_at_local`.\n\n"
         "The booking is created as `PENDING` **with no price and no assigned "
         "contractor** — `computed_price` and `assigned_contractor_id` are `null` "
         "in the response, and the price is not calculated at this point.\n\n"
@@ -349,9 +357,10 @@ def retrieve_booking(request, booking_id: uuid.UUID):
         "rescheduling after a contractor has been assigned or the booking "
         "confirmed is not available yet, pending the cancellation and refund "
         "policy.\n\n"
-        "`scheduled_at` follows the same rules as booking creation: it must be in "
-        "the future, at least `BOOKING_MIN_LEAD_MINUTES` away, and between 07:00 "
-        "and 19:00 local time. The timezone is always the one derived from the "
+        "Omit `scheduled_at` to **request a cleaner again now** (\"Try again\"): "
+        "same rules as an on-demand booking, and `requested_at` is re-stamped. "
+        "Send `scheduled_at` to move it to a later time: same rules as a "
+        "scheduled booking. The timezone is always the one derived from the "
         "property address; `timezone` is accepted only for backwards "
         "compatibility and must equal it (otherwise `400 timezone_not_allowed`)."
         "\n\n"
@@ -419,3 +428,37 @@ def reschedule_booking(request, booking_id: uuid.UUID, payload: BookingReschedul
         return _error(400, exc.code, str(exc))
 
     return 200, _serialize(booking)
+
+
+# ------------------------------------------------------------
+# POST /bookings/{id}/cancel
+# ------------------------------------------------------------
+@router.post(
+    "/{booking_id}/cancel",
+    response={200: BookingOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    summary="Cancel an unpaid booking (customer only)",
+    description=(
+        "**Who may call:** `CUSTOMER` only, for a booking they own.\n\n"
+        "Free cancellation while nothing has been charged: the booking must "
+        "be `PENDING` and have no payment, or only a `FAILED`/`NOT_CHARGED` "
+        "one.\n\n"
+        "**Refused with `409`:** `booking_not_cancellable` (already confirmed "
+        "or cancelled) or `cancellation_requires_support` (a payment is "
+        "processing, awaiting 3-D Secure, or succeeded — contact support).\n\n"
+        "**Side effects:** status becomes `CANCELLED` with `cancelled_at`; every "
+        "live or reserved dispatch offer is closed and that contractor is "
+        "notified (`offer.cancelled`). No new offers are made."
+    ),
+)
+def cancel_booking(request, booking_id: uuid.UUID, payload: BookingCancelIn = None):
+    try:
+        booking = svc.cancel_booking(
+            request.user, booking_id, reason=(payload.reason if payload else "")
+        )
+    except svc.InvalidCustomerRoleError as exc:
+        return _error(403, exc.code, str(exc))
+    except (svc.BookingPermissionError, svc.BookingNotFoundError):
+        return _not_found()
+    except (svc.BookingNotCancellableError, svc.CancellationRequiresSupportError) as exc:
+        return _error(409, exc.code, str(exc))
+    return 200, _serialize(svc.get_booking(request.user, booking.id))

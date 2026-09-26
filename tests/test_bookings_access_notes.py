@@ -357,6 +357,10 @@ def test_the_contractor_still_sees_them_after_starting(
         offers_svc.accept_offer(cu, offer.id)
     job = client.get(f"/api/bookings/{booking.id}/job", **auth(cu)).json()
 
+    from apps.jobs.models import Job
+    from tests.helpers import arrive
+
+    arrive(Job.objects.get(pk=job["id"]), cu)
     started = client.post(f"/api/contractor/jobs/{job['id']}/start",
                           **auth(cu)).json()
 

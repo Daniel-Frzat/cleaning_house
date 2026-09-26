@@ -43,6 +43,7 @@ from apps.payouts.api.admin import router as admin_payouts_router
 from apps.properties.api.admin import router as admin_properties_router
 from apps.support.api.admin import router as admin_support_router
 from apps.accounts.authentication import AuthzError
+from ninja.errors import ValidationError as NinjaValidationError
 from apps.bookings.api.bookings import router as bookings_router
 from apps.bookings.api.quotes import router as booking_quotes_router
 from apps.bookings.api.offers import router as contractor_offers_router
@@ -99,6 +100,11 @@ and is never combined with either.
 `contractor_status` and `available_modes`. The singular `role` field is the
 account's primary role and is kept for backwards compatibility only: a
 dual-role account reports `"role": "CUSTOMER"` while `roles` holds both.
+
+Every handled error has the body `{"code": "...", "detail": "..."}` — translate
+by `code`, which is stable. The full list is `ERROR_CODES.md` in the backend
+repository, generated from the source. Schema-validation errors use the same
+shape with `code: "validation_error"` and an `errors[]` array per field.
 
 Calling an endpoint without the required permission returns `403`. On resources that are
 owned by a specific user, a request from a non-owner returns `404` instead of
@@ -249,6 +255,40 @@ def readiness_check(request):
     if pending:
         return 503, {"status": "unavailable", "reason": f"{len(pending)} unapplied migration(s)"}
     return 200, {"status": "ready"}
+
+
+@api.exception_handler(NinjaValidationError)
+def _schema_validation_error(request, exc):
+    """
+    أخطاء التحقق من شكل الطلب (حقل ناقص / نوع خاطئ / معرّف مشوَّه) بنفس
+    شكل ErrorOut الموحّد: {code, detail} + errors لكل حقل.
+
+    📌 كان Ninja يعيد {"detail": [...]} بلا code، وdetail قائمة لا نص —
+       الشكل الوحيد المختلف في الـAPI كله. التطبيق يترجم الرسائل بالـcode.
+
+    errors[]: {field, loc, message, type}
+      - loc: المسار الكامل كما يعطيه Ninja، مثل ["body", "payload", "phone"]
+      - field: اسم الحقل للعرض بجانب خانة النموذج ("phone")
+    """
+    errors = []
+    for err in exc.errors:
+        loc = [str(part) for part in err.get("loc", [])]
+        # أول عنصرين موقع الطلب واسم المعامل (body/payload، query، path)
+        meaningful = loc[2:] if len(loc) > 2 and loc[0] == "body" else loc[1:]
+        errors.append({
+            "field": ".".join(meaningful) or (loc[-1] if loc else ""),
+            "loc": loc,
+            "message": err.get("msg", ""),
+            "type": err.get("type", ""),
+        })
+    detail = "; ".join(
+        f"{e['field']}: {e['message']}" if e["field"] else e["message"] for e in errors
+    ) or "Invalid request."
+    return api.create_response(
+        request,
+        {"code": "validation_error", "detail": detail, "errors": errors},
+        status=422,
+    )
 
 
 @api.exception_handler(AuthzError)

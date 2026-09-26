@@ -30,7 +30,14 @@ class ServiceSelectionIn(Schema):
 
     service_type_id: uuid.UUID
     # صفر مسموح — يعني الرسم الأساسي وحده لتلك الخدمة
-    room_count: int = Field(..., ge=0)
+    room_count: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Rooms for this service: price = room_price × room_count + base_price. "
+            "Add-ons have room_price 0, so any value (0 or 1) prices the same."
+        ),
+    )
 
 
 class BookingIn(Schema):
@@ -38,7 +45,8 @@ class BookingIn(Schema):
 
     property_id: uuid.UUID
     service_selections: list[ServiceSelectionIn] = Field(default_factory=list)
-    scheduled_at: datetime
+    # غائب = طلب فوري "الآن"؛ حاضر = حجز مسبق (قرار PO — 2026-09-26)
+    scheduled_at: Optional[datetime] = None
     access_notes: str = Field("", max_length=ACCESS_NOTES_MAX_LENGTH)
     quote_id: Optional[uuid.UUID] = None
     payment_method_reference: str = Field("", max_length=255)
@@ -73,8 +81,13 @@ class BookingRescheduleIn(Schema):
        وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.
     """
 
-    scheduled_at: datetime
+    # غائب = إعادة طلب فوري الآن ("حاول مرة أخرى")
+    scheduled_at: Optional[datetime] = None
     timezone: Optional[str] = None
+
+
+class BookingCancelIn(Schema):
+    reason: str = Field("", max_length=255)
 
 
 class ServiceSelectionOut(Schema):
@@ -134,12 +147,15 @@ class BookingOut(Schema):
     # None قبل التأكيد، واللقطة بعده
     computed_price: Optional[Decimal] = None
     assigned_contractor_id: Optional[uuid.UUID] = None
-    # 📌 موعد الزيارة بالـUTC كما هو مخزَّن.
-    #    Optional لأن الصفوف السابقة للحقل بلا موعد — لا لأن الإنشاء
-    #    الجديد يسمح بتركه (الـschema يفرضه إلزاميًا).
+    # 📌 موعد الزيارة بالـUTC كما هو مخزَّن. null = طلب فوري (is_on_demand).
     scheduled_at: Optional[datetime] = None
     # نفس اللحظة محوَّلة لتوقيت العميل — الواجهة لا تحوّل بنفسها
     scheduled_at_local: Optional[datetime] = None
+    # true عند الطلب الفوري (بلا scheduled_at)
+    is_on_demand: bool = False
+    requested_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    cancellation_reason: str = ""
     # اسم IANA المستخدم في التحويل أعلاه (للعرض)
     customer_timezone: str = ""
     # 📌 تقدّم البحث عن مقاول — عرض فقط لا قرار:
@@ -216,6 +232,8 @@ class OfferDetailOut(OfferOut):
 
     scheduled_at: Optional[datetime] = None
     scheduled_at_local: Optional[datetime] = None
+    # true عند الطلب الفوري — المقاول يعرف أن العميل ينتظر الآن
+    is_on_demand: bool = False
     customer_timezone: str = ""
     suburb: str = ""
     state: str = ""

@@ -35,6 +35,7 @@ class AdminJobOut(Schema):
     customer_id: uuid.UUID
     contractor: Optional[ContractorSummaryOut] = None
     status: str
+    arrived_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
@@ -70,6 +71,7 @@ def _serialize(job):
         "customer_id": booking.customer_id,
         "contractor": serialize_contractor(booking.assigned_contractor),
         "status": job.status,
+        "arrived_at": job.arrived_at,
         "started_at": job.started_at,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,

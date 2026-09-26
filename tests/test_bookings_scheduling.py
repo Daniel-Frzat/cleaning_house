@@ -359,23 +359,122 @@ def test_timezone_is_derived_from_property_state_not_a_default(client, customer,
     assert r.json()["customer_timezone"] == "Australia/Perth"
 
 
+def _pin_sydney_clock(monkeypatch, hour):
+    """يثبّت "الآن" على ساعة محددة بتوقيت سيدني (غد، لتفادي حدود اليوم)."""
+    import datetime
+    from zoneinfo import ZoneInfo
+
+    from apps.bookings.services import scheduling
+
+    sydney = ZoneInfo("Australia/Sydney")
+    fixed = (datetime.datetime.now(sydney) + datetime.timedelta(days=1)).replace(
+        hour=hour, minute=0, second=0, microsecond=0
+    )
+    monkeypatch.setattr(scheduling.dj_timezone, "now", lambda: fixed)
+    return fixed
+
+
 @pytest.mark.django_db
-def test_scheduled_at_is_required_by_the_schema(client, customer, property_nsw, general):
-    """غيابه خطأ تحقق من الإطار (422) لا قاعدة عمل."""
+def test_omitting_scheduled_at_creates_an_on_demand_request(
+    client, customer, property_nsw, general, monkeypatch
+):
+    """📌 قرار PO — 2026-09-26: بلا scheduled_at = "اطلب عاملًا الآن"، بلا مهلة."""
+    _pin_sydney_clock(monkeypatch, 10)
     r = post(
         client,
         "/api/bookings",
         {
             "property_id": str(property_nsw.id),
-            "service_selections": [
-                {"service_type_id": str(general.id), "room_count": 1}
-            ],
+            "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
         },
         **auth(customer),
     )
+    assert r.status_code == 201, r.content
+    body = r.json()
+    assert body["is_on_demand"] is True
+    assert body["scheduled_at"] is None and body["requested_at"]
 
-    assert r.status_code == 422, r.content
+
+@pytest.mark.django_db
+def test_on_demand_request_outside_business_hours_is_refused(
+    client, customer, property_nsw, general, monkeypatch
+):
+    _pin_sydney_clock(monkeypatch, 21)
+    r = post(
+        client,
+        "/api/bookings",
+        {
+            "property_id": str(property_nsw.id),
+            "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
+        },
+        **auth(customer),
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "outside_business_hours"
     assert Booking.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_customer_cancels_an_unpaid_booking(client, customer, property_nsw, general, monkeypatch):
+    _pin_sydney_clock(monkeypatch, 10)
+    booking_id = post(
+        client,
+        "/api/bookings",
+        {
+            "property_id": str(property_nsw.id),
+            "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
+        },
+        **auth(customer),
+    ).json()["id"]
+
+    r = post(client, f"/api/bookings/{booking_id}/cancel", {"reason": "Changed my mind"}, **auth(customer))
+    assert r.status_code == 200, r.content
+    assert r.json()["status"] == "CANCELLED"
+    assert r.json()["cancelled_at"] and r.json()["cancellation_reason"] == "Changed my mind"
+
+    again = post(client, f"/api/bookings/{booking_id}/cancel", {}, **auth(customer))
+    assert again.status_code == 409 and again.json()["code"] == "booking_not_cancellable"
+
+
+@pytest.mark.django_db
+def test_cancel_refused_once_payment_has_started(client, customer, property_nsw, general, monkeypatch):
+    from decimal import Decimal
+
+    from apps.payments.models import Payment
+
+    _pin_sydney_clock(monkeypatch, 10)
+    booking_id = post(
+        client,
+        "/api/bookings",
+        {
+            "property_id": str(property_nsw.id),
+            "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
+        },
+        **auth(customer),
+    ).json()["id"]
+    Payment.objects.create(booking_id=booking_id, amount=Decimal("125.00"), method="CARD", status="PROCESSING")
+
+    r = post(client, f"/api/bookings/{booking_id}/cancel", {}, **auth(customer))
+    assert r.status_code == 409
+    assert r.json()["code"] == "cancellation_requires_support"
+
+
+@pytest.mark.django_db
+def test_other_customer_cannot_cancel(client, customer, property_nsw, general, monkeypatch):
+    from apps.accounts.models import User
+
+    _pin_sydney_clock(monkeypatch, 10)
+    booking_id = post(
+        client,
+        "/api/bookings",
+        {
+            "property_id": str(property_nsw.id),
+            "service_selections": [{"service_type_id": str(general.id), "room_count": 1}],
+        },
+        **auth(customer),
+    ).json()["id"]
+    stranger = User.objects.create_user(phone="+61400555999")
+    assert post(client, f"/api/bookings/{booking_id}/cancel", {}, **auth(stranger)).status_code == 404
 
 
 @pytest.mark.django_db

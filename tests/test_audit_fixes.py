@@ -9,6 +9,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+
+from tests.helpers import start_job_for_tests
 from django.core.exceptions import ValidationError
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -378,7 +380,13 @@ def test_job_cannot_start_before_customer_payment_succeeds(client, customer, pro
     user, profile = make_contractor("+61400070131")
     booking = make_confirmed(customer, prop, general, profile)
     job = jobs_svc.create_job_for_booking(booking)
-    r = client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user))
+    # بوابة الدفع عند أول خطوة للمقاول — إعلان الوصول
+    r = client.post(
+        f"/api/contractor/jobs/{job.id}/arrive",
+        data={"latitude": "-33.868800", "longitude": "151.209300"},
+        content_type="application/json",
+        **auth(user),
+    )
     assert r.status_code == 409
     assert r.json()["code"] == "payment_not_settled"
 
@@ -467,7 +475,7 @@ def running_job(customer, prop, general):
     booking = make_confirmed(customer, prop, general, profile)
     mark_paid(booking)
     job = jobs_svc.create_job_for_booking(booking)
-    jobs_svc.start_job(job, user)
+    start_job_for_tests(job, user)
     return user, job
 
 

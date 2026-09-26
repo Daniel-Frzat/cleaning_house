@@ -13,6 +13,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests.helpers import arrive
+
 from tests.helpers import JPEG_BYTES, mark_paid
 from django.test import Client
 from django.utils import timezone
@@ -119,7 +121,7 @@ def test_a_new_job_is_assigned_not_in_progress(job):
 def test_job_status_enum_has_four_states():
     """⚠️ لا CANCELLED — الإلغاء بند مفتوح."""
     assert set(JobStatus.values) == {
-        "ASSIGNED", "IN_PROGRESS", "AWAITING_CUSTOMER_CONFIRMATION", "COMPLETED",
+        "ASSIGNED", "ARRIVED", "IN_PROGRESS", "AWAITING_CUSTOMER_CONFIRMATION", "COMPLETED",
     }
 
 
@@ -130,6 +132,8 @@ def test_job_status_enum_has_four_states():
 def test_assigned_contractor_starts_the_job(contractor, job):
     user, _ = contractor
 
+    arrive(job, user)
+
     started = jobs_svc.start_job(job, user)
 
     assert started.status == JobStatus.IN_PROGRESS
@@ -139,6 +143,8 @@ def test_assigned_contractor_starts_the_job(contractor, job):
 @pytest.mark.django_db
 def test_start_is_persisted(contractor, job):
     user, _ = contractor
+
+    arrive(job, user)
 
     jobs_svc.start_job(job, user)
 
@@ -153,6 +159,8 @@ def test_started_at_is_not_the_creation_time(contractor, job):
     user, _ = contractor
     created_at = job.created_at
 
+    arrive(job, user)
+
     started = jobs_svc.start_job(job, user)
 
     assert started.started_at >= created_at
@@ -162,6 +170,7 @@ def test_started_at_is_not_the_creation_time(contractor, job):
 def test_api_start_endpoint(client, contractor, job):
     user, _ = contractor
 
+    arrive(job, user)
     r = client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user))
 
     assert r.status_code == 200, r.content
@@ -194,6 +203,7 @@ def test_the_customer_cannot_start_the_job(client, customer, job):
 @pytest.mark.django_db
 def test_starting_twice_is_refused_with_409(client, contractor, job):
     user, _ = contractor
+    arrive(job, user)
     client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user))
 
     r = client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user))
@@ -233,6 +243,7 @@ def test_photos_are_refused_before_the_job_starts(contractor, job):
 @pytest.mark.django_db
 def test_photos_are_accepted_once_started(contractor, job):
     user, _ = contractor
+    arrive(job, user)
     jobs_svc.start_job(job, user)
 
     photo = photos_svc.upload_job_photo(
@@ -258,6 +269,8 @@ def test_the_full_sequence(client, customer, contractor, job):
     user, _ = contractor
 
     assert job.status == JobStatus.ASSIGNED
+
+    arrive(job, user)
 
     jobs_svc.start_job(job, user)
     job.refresh_from_db()
@@ -296,6 +309,8 @@ def test_customer_can_tell_assigned_from_in_progress(client, customer, contracto
     assert before["status"] == JobStatus.ASSIGNED
     assert before["started_at"] is None
 
+    arrive(job, user)
+
     jobs_svc.start_job(job, user)
 
     after = client.get(
@@ -303,3 +318,80 @@ def test_customer_can_tell_assigned_from_in_progress(client, customer, contracto
     ).json()
     assert after["status"] == JobStatus.IN_PROGRESS
     assert after["started_at"] is not None
+
+
+# ============================================================
+# مرحلة الوصول (ARRIVED — قرار PO 2026-09-26)
+# ============================================================
+@pytest.mark.django_db
+def test_start_requires_arrival_first(client, contractor, job):
+    user, _ = contractor
+    r = client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user))
+    assert r.status_code == 409
+    assert "arrival" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_arrive_near_property_then_start(client, contractor, job):
+    from decimal import Decimal
+
+    from apps.properties.models import PropertyAddress
+
+    PropertyAddress.objects.filter(property=job.booking.property).update(
+        latitude=Decimal("-33.868800"), longitude=Decimal("151.209300")
+    )
+    user, _ = contractor
+    r = client.post(
+        f"/api/contractor/jobs/{job.id}/arrive",
+        data={"latitude": "-33.869500", "longitude": "151.209300", "accuracy": "15"},
+        content_type="application/json",
+        **auth(user),
+    )
+    assert r.status_code == 200, r.content
+    assert r.json()["status"] == "ARRIVED" and r.json()["arrived_at"]
+    assert client.post(f"/api/contractor/jobs/{job.id}/start", **auth(user)).status_code == 200
+
+
+@pytest.mark.django_db
+def test_arrive_far_from_property_is_refused(client, contractor, job):
+    from decimal import Decimal
+
+    from apps.properties.models import PropertyAddress
+
+    PropertyAddress.objects.filter(property=job.booking.property).update(
+        latitude=Decimal("-33.868800"), longitude=Decimal("151.209300")
+    )
+    user, _ = contractor
+    r = client.post(
+        f"/api/contractor/jobs/{job.id}/arrive",
+        data={"latitude": "-33.900000", "longitude": "151.209300"},  # ~3.5 km
+        content_type="application/json",
+        **auth(user),
+    )
+    assert r.status_code == 409
+    assert r.json()["code"] == "not_at_property"
+    job.refresh_from_db()
+    assert job.status == JobStatus.ASSIGNED
+
+
+@pytest.mark.django_db
+def test_arrival_closes_tracking_and_notifies_customer(contractor, job, django_capture_on_commit_callbacks):
+    from apps.notifications.models import Notification
+
+    user, _ = contractor
+    with django_capture_on_commit_callbacks(execute=True):
+        arrive(job, user)
+    assert job.is_tracking_window_open() is False
+    n = Notification.objects.get(user=job.booking.customer)
+    assert n.type == "job.arrived"
+
+
+@pytest.mark.django_db
+def test_other_contractor_cannot_report_arrival(client, other_contractor, job):
+    r = client.post(
+        f"/api/contractor/jobs/{job.id}/arrive",
+        data={"latitude": "-33.8688", "longitude": "151.2093"},
+        content_type="application/json",
+        **auth(other_contractor),
+    )
+    assert r.status_code == 403

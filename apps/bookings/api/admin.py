@@ -374,3 +374,41 @@ def retrieve_booking(request, booking_id: uuid.UUID):
     except svc.BookingNotFoundError as exc:
         return error(404, exc.code, str(exc))
     return 200, _serialize_detail(booking)
+
+
+class AdminCancelIn(Schema):
+    reason: str = Field(..., min_length=1, max_length=255)
+
+
+@router.post(
+    "/bookings/{booking_id}/cancel",
+    response={200: AdminBookingDetailOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    summary="Cancel an unpaid booking on the customer's behalf (admin only)",
+    description=(
+        "Same rule as the customer's own cancellation: only a `PENDING` booking "
+        "with no payment, or only a `FAILED`/`NOT_CHARGED` one "
+        "(`409 booking_not_cancellable` / `cancellation_requires_support` "
+        "otherwise). `reason` is required and audited; the contractor holding a "
+        "live or reserved offer is notified."
+    ),
+)
+def cancel_booking(request, booking_id: uuid.UUID, payload: AdminCancelIn):
+    from ..services import bookings as booking_svc
+
+    try:
+        booking = svc.get_booking(request.user, booking_id)
+        booking_svc.cancel_booking(
+            booking.customer, booking.id, reason=payload.reason,
+            actor=request.user, request=request,
+        )
+        booking = svc.get_booking(request.user, booking_id)
+    except AdminRequiredError as exc:
+        return forbidden(exc)
+    except svc.BookingNotFoundError as exc:
+        return error(404, exc.code, str(exc))
+    except (
+        booking_svc.BookingNotCancellableError,
+        booking_svc.CancellationRequiresSupportError,
+    ) as exc:
+        return error(409, exc.code, str(exc))
+    return 200, _serialize_detail(booking)

@@ -37,6 +37,7 @@ from ..services import photos as photos_svc
 from ..services import tracking as tracking_svc
 from .schemas import (
     ContractorJobOut,
+    JobArriveIn,
     ErrorOut,
     JobLocationIn,
     JobOut,
@@ -138,6 +139,7 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
         "id": job.id,
         "booking_id": job.booking_id,
         "status": job.status,
+        "arrived_at": job.arrived_at,
         "started_at": job.started_at,
         "access_notes": job.booking.access_notes if include_access_notes else None,
         "marked_done_at": job.marked_done_at,
@@ -328,7 +330,50 @@ def retrieve_job(request, booking_id: uuid.UUID):
 
 
 # ------------------------------------------------------------
-# POST /contractor/jobs/{job_id}/mark-done
+# POST /contractor/jobs/{job_id}/arrive
+# ------------------------------------------------------------
+@contractor_router.post(
+    "/jobs/{job_id}/arrive",
+    response={200: JobOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut},
+    summary="Report arrival at the property (assigned contractor only)",
+    description=(
+        "**Who may call:** the `CONTRACTOR` assigned to this job.\n\n"
+        "Send the device's current `latitude`/`longitude` (and `accuracy` in "
+        "metres if known). The server checks the point is within "
+        "`JOB_ARRIVAL_RADIUS_M` (default 300 m, plus up to 100 m of reported GPS "
+        "accuracy) of the property; otherwise `409 not_at_property` with the "
+        "distance.\n\n"
+        "**Preconditions:** the job is `ASSIGNED`.\n\n"
+        "**Side effects:** `ASSIGNED → ARRIVED`, `arrived_at` recorded, live "
+        "tracking stops, and the customer is notified (`job.arrived`). "
+        "`POST .../start` becomes available."
+    ),
+)
+def arrive_job(request, job_id: uuid.UUID, payload: JobArriveIn):
+    try:
+        job = jobs_svc.get_job_for_transition(job_id)
+        job = jobs_svc.arrive_job(
+            job, request.user, payload.latitude, payload.longitude, payload.accuracy
+        )
+    except jobs_svc.JobNotFoundError:
+        return _error(404, "job_not_found", "Job not found.")
+    except jobs_svc.JobPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    except (
+        jobs_svc.InvalidJobStatusError,
+        jobs_svc.PaymentNotSettledError,
+        jobs_svc.NotAtPropertyError,
+    ) as exc:
+        return _error(409, exc.code, str(exc))
+
+    photos_with_urls = photos_svc.list_photos_with_urls(job)
+    return 200, _serialize_job(
+        job, photos_with_urls, include_storage_key=False, include_access_notes=True
+    )
+
+
+# ------------------------------------------------------------
+# POST /contractor/jobs/{job_id}/start
 # ------------------------------------------------------------
 @contractor_router.post(
     "/jobs/{job_id}/start",
@@ -337,12 +382,10 @@ def retrieve_job(request, booking_id: uuid.UUID):
     description=(
         "**Who may call:** the `CONTRACTOR` assigned to this job, and no one "
         "else. No request body.\n\n"
-        "**Preconditions:** the job must be `ASSIGNED` — that is, the offer was "
-        "accepted but work has not begun.\n\n"
-        "Moves the job to `IN_PROGRESS` and records `started_at`. This is the "
-        "contractor's \"I have arrived / starting now\" action, and it is what "
-        "lets a customer tell *accepted but not here yet* from *working right "
-        "now* — the two were a single instant before this endpoint existed.\n\n"
+        "**Preconditions:** the job must be `ARRIVED` — report arrival first "
+        "with `POST /api/contractor/jobs/{id}/arrive`.\n\n"
+        "Moves the job to `IN_PROGRESS` and records `started_at` (\"start "
+        "cleaning\").\n\n"
         "**Side effects:** photo upload becomes available. A job that is only "
         "`ASSIGNED` refuses photos with `409`, because a BEFORE photo taken "
         "before arriving does not describe the property."
@@ -351,7 +394,7 @@ def retrieve_job(request, booking_id: uuid.UUID):
         "responses": {
             403: {"description": "The caller is not the contractor assigned to this job."},
             404: {"description": "No job with this id."},
-            409: {"description": "The job is not `ASSIGNED` — it has already started, or is further along."},
+            409: {"description": "The job is not `ARRIVED` — arrival not reported yet, or already started."},
         }
     },
 )

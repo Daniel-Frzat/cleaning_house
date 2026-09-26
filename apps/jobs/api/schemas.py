@@ -40,7 +40,9 @@ class JobOut(Schema):
     id: uuid.UUID
     booking_id: uuid.UUID
     status: str
-    # يُملأ حين يعلن المقاول بدء العمل (ASSIGNED → IN_PROGRESS)
+    # يُملأ حين يعلن المقاول وصوله (ASSIGNED → ARRIVED)
+    arrived_at: Optional[datetime] = None
+    # يُملأ حين يعلن المقاول بدء العمل (ARRIVED → IN_PROGRESS)
     started_at: Optional[datetime] = None
     # 🔒 ملاحظات وصول العميل — null لكل من ليس المقاول المُسنَد.
     #    قد تحوي مكان مفتاح المنزل، فالحجب افتراضي في المُسلسِل.
@@ -147,3 +149,11 @@ class JobTrackingOut(Schema):
     tracking_active: bool
     contractor_location: Optional[ContractorLocationOut] = None
     property_location: PropertyLocationOut
+
+
+class JobArriveIn(Schema):
+    """موقع الجهاز لحظة إعلان الوصول — يتحقق منه الخادم."""
+
+    latitude: Decimal = LatitudeField
+    longitude: Decimal = LongitudeField
+    accuracy: Optional[Decimal] = Field(None, ge=0, max_digits=7, decimal_places=2)

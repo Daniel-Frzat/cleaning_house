@@ -258,6 +258,12 @@ class Booking(models.Model):
         help_text="When the customer requested a cleaner (on-demand).",
     )
 
+    # ------------------------------------------------------------
+    # الإلغاء (قرار PO — 2026-09-26: مجاني ما دام لم يُدفع شيء)
+    # ------------------------------------------------------------
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.CharField(max_length=255, blank=True)
+
     # الاقتباس الذي وافق عليه العميل. SET_NULL: حذف اقتباس قديم لا يجوز
     # أن يمحو حجزًا، والسقف المجمَّد أدناه يبقى محفوظًا على الحجز نفسه.
     quote = models.ForeignKey(

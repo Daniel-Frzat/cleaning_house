@@ -12,6 +12,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests.helpers import start_job_for_tests
+
 from tests.helpers import JPEG_BYTES, mark_paid
 from django.test import Client
 from django.utils import timezone
@@ -108,7 +110,7 @@ def job(customer, service_type, contractor):
     mark_paid(booking)
     created = jobs_svc.create_job_for_booking(booking)
     # ⚠️ المهمة تُنشأ ASSIGNED؛ هذه الاختبارات تفترض عملًا جاريًا
-    return jobs_svc.start_job(created, profile.user)
+    return start_job_for_tests(created, profile.user)
 
 
 def add_photo(contractor_user, job, photo_type):

@@ -25,9 +25,11 @@ class JobStatus(models.TextChoices):
     """
     حالة تنفيذ المهمة (§36.3).
 
-    ⚠️ أربع حالات — لا CANCELLED ولا غيرها. راجع docstring الملف.
+    ⚠️ لا CANCELLED: المهمة لا تُنشأ إلا بعد الدفع، والإلغاء الذاتي مسموح
+       قبل الدفع وحده (قرار PO — 2026-09-26).
 
-    ASSIGNED                       : قَبِل المقاول، ولم يبدأ التنفيذ بعد.
+    ASSIGNED                       : قَبِل المقاول، ولم يصل بعد (في الطريق).
+    ARRIVED                        : المقاول أعلن وصوله قرب العقار (تحقق الخادم).
     IN_PROGRESS                    : المقاول أعلن بدء العمل.
     AWAITING_CUSTOMER_CONFIRMATION : المقاول أعلن الإنجاز، بانتظار العميل.
     COMPLETED                      : العميل أكّد الإنجاز.
@@ -38,6 +40,9 @@ class JobStatus(models.TextChoices):
     """
 
     ASSIGNED = "ASSIGNED", "Assigned"
+    # 📌 قرار PO — 2026-09-26: "وصل" و"بدأ التنظيف" لحظتان مختلفتان في
+    #    التصميم (أربع مراحل)، وكانت /start تمثلهما معًا.
+    ARRIVED = "ARRIVED", "Arrived"
     IN_PROGRESS = "IN_PROGRESS", "In progress"
     AWAITING_CUSTOMER_CONFIRMATION = (
         "AWAITING_CUSTOMER_CONFIRMATION",
@@ -76,7 +81,10 @@ class Job(models.Model):
         default=JobStatus.ASSIGNED,
     )
 
-    # يُملأ حين يعلن المقاول بدء العمل (ASSIGNED → IN_PROGRESS)
+    # يُملأ حين يعلن المقاول وصوله (ASSIGNED → ARRIVED)
+    arrived_at = models.DateTimeField(null=True, blank=True)
+
+    # يُملأ حين يعلن المقاول بدء العمل (ARRIVED → IN_PROGRESS)
     started_at = models.DateTimeField(null=True, blank=True)
 
     # يُملأ حين يعلن المقاول الإنجاز

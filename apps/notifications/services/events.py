@@ -15,9 +15,11 @@
 | payout.sent                 | مقاول   | NORMAL   |
 | payment.failed              | عميل    | HIGH     |
 | payment.action_required     | عميل    | HIGH     |
+| job.arrived                 | عميل    | NORMAL   |
 | job.started                 | عميل    | NORMAL   |
 | job.awaiting_confirmation   | عميل    | NORMAL   |
 | support.updated             | مقدّم الطلب | NORMAL |
+| offer.cancelled             | مقاول   | NORMAL   |
 
 ⚠️ لا إشعار عند "لم يُعثر على عامل" (NO_CONTRACTOR) — قرار PO صريح،
    والقرار المفتوح #16 باقٍ كما هو.
@@ -168,6 +170,17 @@ def payment_action_required(payment):
     )
 
 
+def job_arrived(job):
+    return notify(
+        job.booking.customer,
+        "job.arrived",
+        Audience.CUSTOMER,
+        "Your cleaner has arrived",
+        "Your cleaner is at the property.",
+        data={"booking_id": job.booking_id, "job_id": job.id},
+    )
+
+
 def job_started(job):
     return notify(
         job.booking.customer,
@@ -209,4 +222,16 @@ def support_updated(support_request):
         "Support update",
         f"Your request is now {state}.",
         data={"support_request_id": support_request.id},
+    )
+
+
+def offer_cancelled(offer, booking):
+    """الحجز أُلغي والعرض كان حيًّا أو محجوزًا لهذا المقاول."""
+    return notify(
+        offer.contractor.user,
+        "offer.cancelled",
+        Audience.CONTRACTOR,
+        "Job cancelled",
+        f"The customer cancelled the job in {_suburb(booking)}. No action needed.",
+        data={"offer_id": offer.id, "booking_id": booking.id},
     )

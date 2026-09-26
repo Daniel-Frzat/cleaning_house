@@ -309,6 +309,17 @@ def confirm_payment(payment_id):
     if booking.status == BookingStatus.CONFIRMED:
         return payment
 
+    # 🔒 لا يُسند إلا حجز ما زال PENDING. حجز خرج منها (أُلغي قبل الدفع —
+    #    والإلغاء يرفض أي دفعة بدأت) لا يُسند أبدًا؛ يُسجَّل للمطابقة
+    #    والاسترداد اليدوي.
+    if booking.status != BookingStatus.PENDING:
+        logger.error(
+            "Payment succeeded on a booking that is no longer pending — needs "
+            "manual review/refund (payment_id=%s, booking_id=%s, status=%s)",
+            payment.id, booking.id, booking.status,
+        )
+        return payment
+
     if payment.status != PaymentStatus.SUCCEEDED:
         raise PaymentError("Payment is not successful; assignment cannot proceed.")
 

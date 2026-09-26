@@ -12,6 +12,8 @@ from decimal import Decimal
 from unittest import mock
 
 import pytest
+
+from tests.helpers import start_job_for_tests
 from django.test import Client
 from django.utils import timezone
 
@@ -226,7 +228,7 @@ def test_full_job_lifecycle_notifications(customer, prop, general, pricing, djan
 
     job = jobs_svc.get_job_by_booking_id(customer, booking.id)
     with django_capture_on_commit_callbacks(execute=True):
-        jobs_svc.start_job(job, user)
+        start_job_for_tests(job, user)
     photos_svc.upload_job_photo(user, job.id, "BEFORE", JPEG_BYTES, "image/jpeg")
     photos_svc.upload_job_photo(user, job.id, "AFTER", JPEG_BYTES, "image/jpeg")
     with django_capture_on_commit_callbacks(execute=True):
@@ -234,7 +236,9 @@ def test_full_job_lifecycle_notifications(customer, prop, general, pricing, djan
     with django_capture_on_commit_callbacks(execute=True):
         jobs_svc.confirm_job_completion(job, customer)
 
-    assert types_for(customer) == ["booking.confirmed", "job.started", "job.awaiting_confirmation"]
+    assert types_for(customer) == [
+        "booking.confirmed", "job.arrived", "job.started", "job.awaiting_confirmation",
+    ]
     assert types_for(user) == ["offer.new", "job.confirmed", "job.completed", "payout.sent"]
 
 

@@ -129,3 +129,20 @@ def to_local(utc_value, timezone_name):
         return None
 
     return utc_value.astimezone(ZoneInfo(timezone_name or "UTC"))
+
+
+def assert_open_now(timezone_name, now=None):
+    """
+    الطلب الفوري (بلا scheduled_at): ساعات العمل نفسها 07:00–19:00 بتوقيت
+    العقار تسري على لحظة الطلب (قرار PO — 2026-09-26). لا مهلة دنيا.
+    """
+    tz = ZoneInfo(timezone_name)
+    local = (now or dj_timezone.now()).astimezone(tz)
+    local_time = local.timetz().replace(tzinfo=None)
+    if not (BUSINESS_HOURS_START <= local_time <= BUSINESS_HOURS_END):
+        raise OutsideBusinessHoursError(
+            f"Cleaners can be requested between "
+            f"{BUSINESS_HOURS_START.strftime('%H:%M')} and "
+            f"{BUSINESS_HOURS_END.strftime('%H:%M')} local time ({timezone_name}); "
+            f"it is {local.strftime('%H:%M')} there now."
+        )

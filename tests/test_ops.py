@@ -44,3 +44,23 @@ def test_production_settings_let_railway_healthcheck_through():
     assert "healthcheck.railway.app" in prod.ALLOWED_HOSTS
     assert "example.com" in prod.ALLOWED_HOSTS
     assert any(__import__("re").match(p, "api/health/ready") for p in prod.SECURE_REDIRECT_EXEMPT)
+
+
+@pytest.mark.django_db
+def test_schema_validation_errors_use_the_uniform_error_shape():
+    """B9: أخطاء شكل الطلب {code, detail, errors[]} كبقية الأخطاء."""
+    import json
+    import uuid
+
+    r = Client().post("/api/auth/otp/request", data=json.dumps({}), content_type="application/json")
+    body = r.json()
+    assert r.status_code == 422
+    assert body["code"] == "validation_error"
+    assert isinstance(body["detail"], str) and "phone" in body["detail"]
+    assert body["errors"][0]["field"] == "phone"
+    assert body["errors"][0]["loc"][-1] == "phone"
+
+
+def test_error_codes_file_is_up_to_date():
+    """B10: ERROR_CODES.md يُولَّد من الكود — رمز جديد أو معدَّل يظهر في المراجعة."""
+    call_command("export_error_codes", "--check")

@@ -18,13 +18,14 @@ Booking Service — Booking Domain (Change Set §36.1، §20)
 import logging
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.accounts.roles import ConfirmedRole
 from apps.properties.services import properties as properties_svc
 from apps.services.models import ServiceType
 
 from ..models import Booking, BookingServiceSelection, BookingStatus, DispatchStatus
-from .scheduling import TimezoneMismatchError, normalize_scheduled_at
+from .scheduling import TimezoneMismatchError, assert_open_now, normalize_scheduled_at
 from .timezone import get_timezone_for_state
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,23 @@ class InvalidRoomCountError(BookingError):
     """عدد الغرف سالب أو ليس عددًا صحيحًا."""
 
     code = "invalid_room_count"
+
+
+class BookingNotCancellableError(BookingError):
+    """الحجز ليس في حالة تسمح بالإلغاء (مؤكَّد أو ملغى سابقًا)."""
+
+    code = "booking_not_cancellable"
+
+
+class CancellationRequiresSupportError(BookingError):
+    """
+    بدأ الدفع (قيد المعالجة / يحتاج تأكيدًا / نجح) — الإلغاء عبر الدعم.
+
+    📌 قرار PO: الإلغاء الذاتي مجاني ما دام لم يُدفع شيء. بعد بدء الدفع قد
+       يكون المال تحرّك، والاسترداد يحتاج مزوّد دفع حقيقيًا وسياسة.
+    """
+
+    code = "cancellation_requires_support"
 
 
 class PropertyInactiveError(BookingError):
@@ -261,12 +279,16 @@ def create_booking(
     address = getattr(prop, "address", None)
     customer_timezone = get_timezone_for_state(getattr(address, "state", ""))
 
-    # يرفع SchedulingError عند موعد ماضٍ أو خارج الدوام
-    scheduled_utc = (
-        normalize_scheduled_at(scheduled_at, customer_timezone)
-        if scheduled_at is not None
-        else None
-    )
+    # 📌 نوعان (قرار PO — 2026-09-26):
+    #    - فوري: بلا scheduled_at — "اطلب عاملًا الآن"؛ ساعات العمل على لحظة
+    #      الطلب، بلا مهلة دنيا.
+    #    - مسبق: scheduled_at — ماضٍ/مهلة دنيا/ساعات العمل.
+    # يرفع SchedulingError في الحالتين عند المخالفة.
+    if scheduled_at is None:
+        assert_open_now(customer_timezone)
+        scheduled_utc = None
+    else:
+        scheduled_utc = normalize_scheduled_at(scheduled_at, customer_timezone)
 
     booking = Booking(
         customer=user,
@@ -369,7 +391,7 @@ def get_booking(user, booking_id):
 # إعادة الجدولة
 # ------------------------------------------------------------
 @transaction.atomic
-def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
+def reschedule_booking(user, booking_id, scheduled_at=None, timezone_name=None):
     """
     يغيّر موعد حجز لم يجد مقاولًا، ويعيد إطلاق دورة الإسناد.
 
@@ -411,9 +433,14 @@ def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
             f"({effective_timezone}) and cannot be changed."
         )
 
-    # 🔒 نفس قواعد الإنشاء حرفيًا (ماضٍ / ساعات العمل) — تُعاد من
-    #    scheduling.py ولا تُكرَّر هنا، فلا تفترق القاعدتان.
-    scheduled_utc = normalize_scheduled_at(scheduled_at, effective_timezone)
+    # 🔒 نفس قواعد الإنشاء حرفيًا — بلا scheduled_at = إعادة طلب فوري الآن
+    #    ("حاول مرة أخرى")، ومعه = موعد مسبق بقواعده.
+    if scheduled_at is None:
+        assert_open_now(effective_timezone)
+        scheduled_utc = None
+        booking.requested_at = timezone.now()
+    else:
+        scheduled_utc = normalize_scheduled_at(scheduled_at, effective_timezone)
 
     # ⚠️ الحذف قبل الكتابة وداخل المعاملة نفسها: لو فشل ما بعده لا يبقى
     #    حجز بموعد قديم وقد فُقدت عروضه.
@@ -429,6 +456,7 @@ def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
             "scheduled_at",
             "customer_timezone",
             "dispatch_status",
+            "requested_at",
             "updated_at",
         ]
     )
@@ -444,6 +472,87 @@ def reschedule_booking(user, booking_id, scheduled_at, timezone_name=None):
     #    أن يتراجع عن إعادة جدولة صحيحة.
     transaction.on_commit(lambda: _dispatch_after_commit(booking), robust=True)
 
+    return booking
+
+
+# ------------------------------------------------------------
+# الإلغاء (قرار PO — 2026-09-26)
+# ------------------------------------------------------------
+# دفعة بهذه الحالات لم تُخصم منها أي قيمة — الإلغاء آمن
+UNCHARGED_PAYMENT_STATUSES = ("FAILED", "NOT_CHARGED")
+
+
+def cancel_booking(user, booking_id, reason="", actor=None, request=None):
+    """
+    يلغي حجزًا لم يُدفع عنه شيء.
+
+    🔒 الشروط (بعد قفل الصف):
+       - الحجز PENDING — المؤكَّد مدفوع أصلًا (يُسند بعد الدفع وحده)
+       - لا دفعة، أو دفعة لم تُخصم (FAILED / NOT_CHARGED). دفعة قيد المعالجة
+         أو تنتظر 3-D Secure أو ناجحة → الإلغاء عبر الدعم.
+    📌 الأثر: CANCELLED، إنهاء كل عرض حيّ أو محجوز، وإشعار مقاول كان العرض
+       موجَّهًا إليه أو محجوزًا له. لا إسناد بعده، ولا عروض جديدة.
+
+    user: العميل صاحب الحجز. actor: أدمن يلغي نيابةً عنه (يُسجَّل في التدقيق).
+    """
+    from apps.payments.models import Payment
+
+    from ..models import DispatchOfferStatus
+
+    with transaction.atomic():
+        if actor is None:
+            get_booking(user, booking_id)  # الملكية (404 للغير)
+        booking = Booking.objects.select_for_update().get(pk=booking_id)
+
+        if booking.status != BookingStatus.PENDING:
+            raise BookingNotCancellableError(
+                f"A {booking.status.lower()} booking cannot be cancelled here."
+            )
+        payment = Payment.objects.filter(booking=booking).first()
+        if payment is not None and payment.status not in UNCHARGED_PAYMENT_STATUSES:
+            raise CancellationRequiresSupportError(
+                "Payment for this booking has started; contact support to cancel it."
+            )
+
+        affected = list(
+            booking.dispatch_offers.filter(
+                status__in=(
+                    DispatchOfferStatus.PENDING,
+                    DispatchOfferStatus.ACCEPTED_PENDING_PAYMENT,
+                )
+            ).select_related("contractor__user")
+        )
+        now = timezone.now()
+        booking.dispatch_offers.filter(pk__in=[o.pk for o in affected]).update(
+            status=DispatchOfferStatus.EXPIRED, responded_at=now
+        )
+
+        booking.status = BookingStatus.CANCELLED
+        booking.cancelled_at = now
+        booking.cancellation_reason = (reason or "").strip()[:255]
+        booking.save(
+            update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"]
+        )
+
+        if actor is not None:
+            from apps.audit.services.audit import record
+
+            record(
+                actor, "booking.cancel", target=booking,
+                details={"reason": booking.cancellation_reason}, request=request,
+            )
+
+        from apps.notifications.hooks import emit_on_commit
+
+        for offer in affected:
+            emit_on_commit("offer_cancelled", offer, booking)
+
+    logger.info(
+        "Booking cancelled (booking_id=%s, by=%s, offers_closed=%d)",
+        booking.id,
+        (actor or user).id,
+        len(affected),
+    )
     return booking
 
 

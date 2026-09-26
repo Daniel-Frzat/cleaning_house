@@ -69,6 +69,7 @@ def _serialize_offer_detail(offer):
         "scheduled_at": booking.scheduled_at,
         "scheduled_at_local": to_local(booking.scheduled_at, booking.customer_timezone),
         "customer_timezone": booking.customer_timezone,
+        "is_on_demand": booking.scheduled_at is None,
         "suburb": getattr(address, "suburb", ""),
         "state": getattr(address, "state", ""),
         "postcode": getattr(address, "postcode", ""),

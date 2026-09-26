@@ -3,7 +3,7 @@
   "info": {
     "title": "Cleaning House API",
     "version": "1.0.0",
-    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nNine domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and creates the job as\n`ASSIGNED`; the contractor starts it explicitly.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
+    "description": "REST API for **Cleaning House**, an Australian cleaning marketplace that connects\ncustomers with cleaning contractors. Built with Django and Django Ninja.\n\n## Authentication\n\nAll endpoints require a JWT access token unless explicitly marked otherwise\n(`POST /api/auth/otp/request`, `POST /api/auth/otp/verify`,\n`POST /api/auth/social/{provider}` and `GET /api/health` are public).\n\nSend the token on every protected request:\n\n```\nAuthorization: Bearer <JWT access token>\n```\n\nThere is no password login. A token is obtained either by verifying an SMS\none-time password (OTP) or by logging in with Apple or Google (Social Login).\nBoth flows return an `access` and a `refresh` token.\n\n## Roles\n\nA user's permissions decide which endpoints are reachable:\n\n* **CUSTOMER** — owns properties, creates bookings, confirms job completion.\n* **CONTRACTOR** — owns a contractor profile, responds to dispatch offers,\n  executes jobs and uploads proof photos.\n* **ADMIN** — manages the service catalog and pricing, reviews contractor\n  verifications, and sees provider references hidden from other roles.\n\n**One account can hold both the customer and contractor permissions** — the\nsame login books cleans and, once approved, takes work. `ADMIN` is exclusive\nand is never combined with either.\n\n`GET /api/auth/me` returns `roles` (an array — read this), alongside\n`contractor_status` and `available_modes`. The singular `role` field is the\naccount's primary role and is kept for backwards compatibility only: a\ndual-role account reports `\"role\": \"CUSTOMER\"` while `roles` holds both.\n\nEvery handled error has the body `{\"code\": \"...\", \"detail\": \"...\"}` — translate\nby `code`, which is stable. The full list is `ERROR_CODES.md` in the backend\nrepository, generated from the source. Schema-validation errors use the same\nshape with `code: \"validation_error\"` and an `errors[]` array per field.\n\nCalling an endpoint without the required permission returns `403`. On resources that are\nowned by a specific user, a request from a non-owner returns `404` instead of\n`403` wherever distinguishing the two would leak the existence of the resource.\n\n## Domains\n\nNine domains are implemented end to end: Identity, Properties, Service\nCatalog & Pricing, Contractors (profile and verification), Bookings (with\nauto-dispatch, offers and rescheduling), Payments, Jobs, Payouts, and Support.\n\n## Booking lifecycle\n\nA booking is created as `PENDING` with **no price and no contractor**. Dispatch\nthen offers it to the nearest available contractor. The price is calculated and\nfrozen onto the booking **only when a contractor accepts an offer** — that is\nalso the first moment the price is visible to the customer. Acceptance moves the\nbooking to `CONFIRMED`, charges the customer directly, and creates the job as\n`ASSIGNED`; the contractor starts it explicitly.\nThe contractor marks the job done, the customer confirms it, and the contractor\npayout is released.\n\n## ⚠️ External providers\n\nSome external providers are **not selected yet**. Payment capture, contractor\npayout, photo storage, SMS/OTP delivery and social-login verification are all\ndefined as abstract adapters, and no concrete implementation ships with this\nbuild. Until a provider is configured for each of them, those operations fail\nin a production deployment."
   },
   "paths": {
     "/api/health": {
@@ -2910,7 +2910,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and `scheduled_at` must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes away, and within business hours (07:00-19:00) in the property's local timezone. The property must not have been removed.\n\n`scheduled_at` is required (ISO 8601). Sent without an offset it is read in the timezone derived from the property's state; sent with an explicit offset it is honoured as given. Either way it is stored in UTC and returned as both `scheduled_at` (UTC) and `scheduled_at_local`, so the client never has to convert.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
+        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and the property must not have been removed.\n\n**Two kinds of request:**\n* **On-demand (\"request a cleaner now\")** — omit `scheduled_at`. Allowed between 07:00 and 19:00 in the property's local timezone (`400 outside_business_hours` otherwise); no lead time. The response has `is_on_demand: true` and `scheduled_at: null`.\n* **Scheduled ahead** — send `scheduled_at` (ISO 8601). It must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes away (`400 scheduled_at_too_soon`), and between 07:00 and 19:00 property-local. Sent without an offset it is read in the property's timezone; with an offset it is honoured as given. Returned as both `scheduled_at` (UTC) and `scheduled_at_local`.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
         "tags": [
           "Bookings"
         ],
@@ -3132,7 +3132,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n**Preconditions:** the booking must still be `PENDING`, its `dispatch_status` must be `NO_CONTRACTOR`, it must have no assigned contractor and no successful payment. Any other state returns `409` — rescheduling after a contractor has been assigned or the booking confirmed is not available yet, pending the cancellation and refund policy.\n\n`scheduled_at` follows the same rules as booking creation: it must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` away, and between 07:00 and 19:00 local time. The timezone is always the one derived from the property address; `timezone` is accepted only for backwards compatibility and must equal it (otherwise `400 timezone_not_allowed`).\n\n**Side effects:** the booking's previous dispatch offers are **deleted**, `dispatch_status` returns to `SEARCHING`, and a fresh dispatch round starts after the change commits. Clearing the old offers is what makes the new round meaningful: a contractor is never offered the same booking twice, so without it every eligible contractor would still be excluded and the search would end immediately. A contractor who declined the old time is therefore eligible for the new one.\n\nFinding no contractor again is not an error: the booking simply returns to `NO_CONTRACTOR` and can be rescheduled again.",
+        "description": "**Who may call:** `CUSTOMER` only, and only for a booking they own.\n\n**Preconditions:** the booking must still be `PENDING`, its `dispatch_status` must be `NO_CONTRACTOR`, it must have no assigned contractor and no successful payment. Any other state returns `409` — rescheduling after a contractor has been assigned or the booking confirmed is not available yet, pending the cancellation and refund policy.\n\nOmit `scheduled_at` to **request a cleaner again now** (\"Try again\"): same rules as an on-demand booking, and `requested_at` is re-stamped. Send `scheduled_at` to move it to a later time: same rules as a scheduled booking. The timezone is always the one derived from the property address; `timezone` is accepted only for backwards compatibility and must equal it (otherwise `400 timezone_not_allowed`).\n\n**Side effects:** the booking's previous dispatch offers are **deleted**, `dispatch_status` returns to `SEARCHING`, and a fresh dispatch round starts after the change commits. Clearing the old offers is what makes the new round meaningful: a contractor is never offered the same booking twice, so without it every eligible contractor would still be excluded and the search would end immediately. A contractor who declined the old time is therefore eligible for the new one.\n\nFinding no contractor again is not an error: the booking simply returns to `NO_CONTRACTOR` and can be rescheduled again.",
         "tags": [
           "Bookings"
         ],
@@ -3145,6 +3145,89 @@
             }
           },
           "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/cancel": {
+      "post": {
+        "operationId": "apps_bookings_api_bookings_cancel_booking",
+        "summary": "Cancel an unpaid booking (customer only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `CUSTOMER` only, for a booking they own.\n\nFree cancellation while nothing has been charged: the booking must be `PENDING` and have no payment, or only a `FAILED`/`NOT_CHARGED` one.\n\n**Refused with `409`:** `booking_not_cancellable` (already confirmed or cancelled) or `cancellation_requires_support` (a payment is processing, awaiting 3-D Secure, or succeeded — contact support).\n\n**Side effects:** status becomes `CANCELLED` with `cancelled_at`; every live or reserved dispatch offer is closed and that contractor is notified (`offer.cancelled`). No new offers are made.",
+        "tags": [
+          "Bookings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BookingCancelIn"
+                  }
+                ]
+              }
+            }
+          },
+          "required": false
         },
         "security": [
           {
@@ -4029,6 +4112,95 @@
         ]
       }
     },
+    "/api/contractor/jobs/{job_id}/arrive": {
+      "post": {
+        "operationId": "apps_jobs_api_jobs_arrive_job",
+        "summary": "Report arrival at the property (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job.\n\nSend the device's current `latitude`/`longitude` (and `accuracy` in metres if known). The server checks the point is within `JOB_ARRIVAL_RADIUS_M` (default 300 m, plus up to 100 m of reported GPS accuracy) of the property; otherwise `409 not_at_property` with the distance.\n\n**Preconditions:** the job is `ASSIGNED`.\n\n**Side effects:** `ASSIGNED → ARRIVED`, `arrived_at` recorded, live tracking stops, and the customer is notified (`job.arrived`). `POST .../start` becomes available.",
+        "tags": [
+          "Contractor Jobs"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobArriveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/jobs/{job_id}/start": {
       "post": {
         "operationId": "apps_jobs_api_jobs_start_job",
@@ -4087,7 +4259,7 @@
             }
           },
           "409": {
-            "description": "The job is not `ASSIGNED` — it has already started, or is further along.",
+            "description": "The job is not `ARRIVED` — arrival not reported yet, or already started.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4097,7 +4269,7 @@
             }
           }
         },
-        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else. No request body.\n\n**Preconditions:** the job must be `ASSIGNED` — that is, the offer was accepted but work has not begun.\n\nMoves the job to `IN_PROGRESS` and records `started_at`. This is the contractor's \"I have arrived / starting now\" action, and it is what lets a customer tell *accepted but not here yet* from *working right now* — the two were a single instant before this endpoint existed.\n\n**Side effects:** photo upload becomes available. A job that is only `ASSIGNED` refuses photos with `409`, because a BEFORE photo taken before arriving does not describe the property.",
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else. No request body.\n\n**Preconditions:** the job must be `ARRIVED` — report arrival first with `POST /api/contractor/jobs/{id}/arrive`.\n\nMoves the job to `IN_PROGRESS` and records `started_at` (\"start cleaning\").\n\n**Side effects:** photo upload becomes available. A job that is only `ASSIGNED` refuses photos with `409`, because a BEFORE photo taken before arriving does not describe the property.",
         "tags": [
           "Contractor Jobs"
         ],
@@ -5914,6 +6086,85 @@
         "tags": [
           "Admin — Bookings"
         ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/bookings/{booking_id}/cancel": {
+      "post": {
+        "operationId": "apps_bookings_api_admin_cancel_booking",
+        "summary": "Cancel an unpaid booking on the customer's behalf (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Same rule as the customer's own cancellation: only a `PENDING` booking with no payment, or only a `FAILED`/`NOT_CHARGED` one (`409 booking_not_cancellable` / `cancellation_requires_support` otherwise). `reason` is required and audited; the contractor holding a live or reserved offer is notified.",
+        "tags": [
+          "Admin — Bookings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCancelIn"
+              }
+            }
+          },
+          "required": true
+        },
         "security": [
           {
             "AdminJWTAuth": []
@@ -9412,6 +9663,40 @@
             ],
             "title": "Scheduled At Local"
           },
+          "is_on_demand": {
+            "default": false,
+            "title": "Is On Demand",
+            "type": "boolean"
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "cancellation_reason": {
+            "default": "",
+            "title": "Cancellation Reason",
+            "type": "string"
+          },
           "customer_timezone": {
             "default": "",
             "title": "Customer Timezone",
@@ -9620,9 +9905,16 @@
             "type": "array"
           },
           "scheduled_at": {
-            "format": "date-time",
-            "title": "Scheduled At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
           },
           "access_notes": {
             "default": "",
@@ -9650,8 +9942,7 @@
           }
         },
         "required": [
-          "property_id",
-          "scheduled_at"
+          "property_id"
         ],
         "title": "BookingIn",
         "type": "object"
@@ -9665,6 +9956,7 @@
             "type": "string"
           },
           "room_count": {
+            "description": "Rooms for this service: price = room_price × room_count + base_price. Add-ons have room_price 0, so any value (0 or 1) prices the same.",
             "minimum": 0,
             "title": "Room Count",
             "type": "integer"
@@ -9681,9 +9973,16 @@
         "description": "إعادة جدولة حجز لم يجد مقاولًا.\n\n🔒 timezone للتوافق فقط: المنطقة مشتقة من عنوان العقار دائمًا، وأي\n   قيمة مختلفة تُرفض (كانت تتيح تجاوز ساعات العمل أو 500).\n\n⚠️ لا property_id ولا service_selections: إعادة الجدولة تغيّر الموعد\n   وحده. تغيير العقار أو الخدمات حجزٌ آخر لا تعديل.",
         "properties": {
           "scheduled_at": {
-            "format": "date-time",
-            "title": "Scheduled At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
           },
           "timezone": {
             "anyOf": [
@@ -9697,10 +9996,19 @@
             "title": "Timezone"
           }
         },
-        "required": [
-          "scheduled_at"
-        ],
         "title": "BookingRescheduleIn",
+        "type": "object"
+      },
+      "BookingCancelIn": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "BookingCancelIn",
         "type": "object"
       },
       "QuoteOut": {
@@ -9940,6 +10248,11 @@
               }
             ],
             "title": "Scheduled At Local"
+          },
+          "is_on_demand": {
+            "default": false,
+            "title": "Is On Demand",
+            "type": "boolean"
           },
           "customer_timezone": {
             "default": "",
@@ -10414,6 +10727,18 @@
             "title": "Status",
             "type": "string"
           },
+          "arrived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrived At"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -10697,6 +11022,18 @@
             "title": "Status",
             "type": "string"
           },
+          "arrived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrived At"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -10827,6 +11164,61 @@
           "service_summary"
         ],
         "title": "ContractorJobOut",
+        "type": "object"
+      },
+      "JobArriveIn": {
+        "description": "موقع الجهاز لحظة إعلان الوصول — يتحقق منه الخادم.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,5}|(?=[\\d.]{1,8}0*$)\\d{0,5}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "JobArriveIn",
         "type": "object"
       },
       "JobLocationIn": {
@@ -13358,6 +13750,21 @@
         "title": "ServiceLineOut",
         "type": "object"
       },
+      "AdminCancelIn": {
+        "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AdminCancelIn",
+        "type": "object"
+      },
       "JobFilters": {
         "properties": {
           "limit": {
@@ -13424,9 +13831,10 @@
         "type": "object"
       },
       "JobStatus": {
-        "description": "حالة تنفيذ المهمة (§36.3).\n\n⚠️ أربع حالات — لا CANCELLED ولا غيرها. راجع docstring الملف.\n\nASSIGNED                       : قَبِل المقاول، ولم يبدأ التنفيذ بعد.\nIN_PROGRESS                    : المقاول أعلن بدء العمل.\nAWAITING_CUSTOMER_CONFIRMATION : المقاول أعلن الإنجاز، بانتظار العميل.\nCOMPLETED                      : العميل أكّد الإنجاز.\n\n📌 ASSIGNED أُضيفت لأن القبول والبدء كانا لحظة واحدة، فلم يكن للعميل\n   أي طريقة ليعرف أن مقاولًا قَبِل لكنه لم يصل بعد. الفصل يعطي أيضًا\n   تطبيق المقاول لحظة \"أنا في الطريق / أبدأ الآن\" التي لم تكن موجودة.",
+        "description": "حالة تنفيذ المهمة (§36.3).\n\n⚠️ لا CANCELLED: المهمة لا تُنشأ إلا بعد الدفع، والإلغاء الذاتي مسموح\n   قبل الدفع وحده (قرار PO — 2026-09-26).\n\nASSIGNED                       : قَبِل المقاول، ولم يصل بعد (في الطريق).\nARRIVED                        : المقاول أعلن وصوله قرب العقار (تحقق الخادم).\nIN_PROGRESS                    : المقاول أعلن بدء العمل.\nAWAITING_CUSTOMER_CONFIRMATION : المقاول أعلن الإنجاز، بانتظار العميل.\nCOMPLETED                      : العميل أكّد الإنجاز.\n\n📌 ASSIGNED أُضيفت لأن القبول والبدء كانا لحظة واحدة، فلم يكن للعميل\n   أي طريقة ليعرف أن مقاولًا قَبِل لكنه لم يصل بعد. الفصل يعطي أيضًا\n   تطبيق المقاول لحظة \"أنا في الطريق / أبدأ الآن\" التي لم تكن موجودة.",
         "enum": [
           "ASSIGNED",
+          "ARRIVED",
           "IN_PROGRESS",
           "AWAITING_CUSTOMER_CONFIRMATION",
           "COMPLETED"
@@ -13489,6 +13897,18 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "arrived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrived At"
           },
           "started_at": {
             "anyOf": [
@@ -13583,6 +14003,18 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "arrived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrived At"
           },
           "started_at": {
             "anyOf": [
