@@ -13,12 +13,8 @@ from decimal import Decimal
 from typing import Optional
 
 from ninja import Schema
-from pydantic import Field
 
-
-# حدود الإحداثيات — فحص شكلي لا جغرافي (نفس قاعدة properties/contractors).
-LatitudeField = Field(..., ge=-90, le=90, max_digits=9, decimal_places=6)
-LongitudeField = Field(..., ge=-180, le=180, max_digits=9, decimal_places=6)
+from apps.geo_fields import AccuracyMeters, Latitude, Longitude
 
 
 class JobPhotoOut(Schema):
@@ -88,11 +84,11 @@ class JobLocationIn(Schema):
        يقوم على ختمه لا على ساعة الجهاز.
     """
 
-    latitude: Decimal = LatitudeField
-    longitude: Decimal = LongitudeField
+    latitude: Latitude
+    longitude: Longitude
     # 📌 دقة بالأمتار إن توفّرت — تُرسم كدائرة عدم يقين حول النقطة.
     # ⚠️ اختيارية: أجهزة لا تبلّغها، ورفض التحديث لغيابها يُسقط تتبعًا صالحًا.
-    accuracy: Optional[Decimal] = Field(None, ge=0, max_digits=7, decimal_places=2)
+    accuracy: Optional[AccuracyMeters] = None
     recorded_at: datetime
 
 
@@ -154,6 +150,6 @@ class JobTrackingOut(Schema):
 class JobArriveIn(Schema):
     """موقع الجهاز لحظة إعلان الوصول — يتحقق منه الخادم."""
 
-    latitude: Decimal = LatitudeField
-    longitude: Decimal = LongitudeField
-    accuracy: Optional[Decimal] = Field(None, ge=0, max_digits=7, decimal_places=2)
+    latitude: Latitude
+    longitude: Longitude
+    accuracy: Optional[AccuracyMeters] = None

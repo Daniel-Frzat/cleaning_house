@@ -379,6 +379,9 @@ def test_omitting_scheduled_at_creates_an_on_demand_request(
     client, customer, property_nsw, general, monkeypatch
 ):
     """📌 قرار PO — 2026-09-26: بلا scheduled_at = "اطلب عاملًا الآن"، بلا مهلة."""
+    from django.conf import settings
+
+    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = True
     _pin_sydney_clock(monkeypatch, 10)
     r = post(
         client,
@@ -397,8 +400,9 @@ def test_omitting_scheduled_at_creates_an_on_demand_request(
 
 @pytest.mark.django_db
 def test_on_demand_request_outside_business_hours_is_refused(
-    client, customer, property_nsw, general, monkeypatch
+    client, customer, property_nsw, general, monkeypatch, settings
 ):
+    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = True
     _pin_sydney_clock(monkeypatch, 21)
     r = post(
         client,

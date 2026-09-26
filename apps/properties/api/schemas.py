@@ -15,17 +15,14 @@ from typing import Optional
 from ninja import Schema
 from pydantic import Field
 
+from apps.geo_fields import Latitude, Longitude
+
 from ..models import AustralianState, PropertyType
 
 
 # ------------------------------------------------------------
 # العنوان
 # ------------------------------------------------------------
-# حدود الإحداثيات الجغرافية — فحص شكلي لا جغرافي.
-# 📌 لا نقيّدها بحدود أستراليا: عنوان قرب الحدود البحرية أو خطأ بسيط في
-#    قراءة GPS كان سيُرفض بلا مبرر. الرفض هنا لقيمة مستحيلة فقط.
-LatitudeField = Field(None, ge=-90, le=90, max_digits=9, decimal_places=6)
-LongitudeField = Field(None, ge=-180, le=180, max_digits=9, decimal_places=6)
 
 
 class AddressIn(Schema):
@@ -45,8 +42,8 @@ class AddressIn(Schema):
     suburb: str = Field(..., min_length=1, max_length=120)
     state: AustralianState
     postcode: str = Field(..., pattern=r"^\d{4}$")
-    latitude: Optional[Decimal] = LatitudeField
-    longitude: Optional[Decimal] = LongitudeField
+    latitude: Optional[Latitude] = None
+    longitude: Optional[Longitude] = None
     raw_input: Optional[str] = None
 
 
@@ -62,8 +59,8 @@ class AddressPatch(Schema):
     suburb: Optional[str] = Field(None, min_length=1, max_length=120)
     state: Optional[AustralianState] = None
     postcode: Optional[str] = Field(None, pattern=r"^\d{4}$")
-    latitude: Optional[Decimal] = LatitudeField
-    longitude: Optional[Decimal] = LongitudeField
+    latitude: Optional[Latitude] = None
+    longitude: Optional[Longitude] = None
     raw_input: Optional[str] = None
 
 

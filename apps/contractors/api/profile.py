@@ -21,9 +21,16 @@ Contractor Profile API (self-service) — Contractors Domain
 ⚠️ لا يوجد هنا أي منطق Dispatch/مسافة ولا استدعاء لأي adapter (§34/§4).
 """
 
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
 from django.core.exceptions import ValidationError
-from ninja import Router
+from django.utils import timezone
+from ninja import Router, Schema
+
 from apps.accounts.authentication import ActiveUserJWTAuth
+from apps.geo_fields import AccuracyMeters, Latitude, Longitude
 
 from ..services import profile as svc
 from ..services import verification as vsvc
@@ -487,3 +494,95 @@ def list_insurance(request):
         return _verification_error(exc)
 
     return 200, [serialize_insurance_document(d) for d in documents]
+
+
+# ------------------------------------------------------------
+# PUT /contractor/location — الموقع الحالي للإسناد الفوري
+# ------------------------------------------------------------
+class CurrentLocationIn(Schema):
+    latitude: Latitude
+    longitude: Longitude
+    accuracy: Optional[AccuracyMeters] = None
+    recorded_at: datetime
+
+
+class CurrentLocationOut(Schema):
+    latitude: Decimal
+    longitude: Decimal
+    accuracy: Optional[Decimal] = None
+    recorded_at: datetime
+    received_at: datetime
+    # هل تكفي حداثته للإسناد (آخر 5 دقائق بتوقيت الخادم)
+    is_fresh: bool
+    fresh_for_seconds: int
+
+
+def _serialize_location(location):
+    from ..models import CURRENT_LOCATION_FRESHNESS_SECONDS
+
+    age = (timezone.now() - location.received_at).total_seconds()
+    return {
+        "latitude": location.latitude,
+        "longitude": location.longitude,
+        "accuracy": location.accuracy_meters,
+        "recorded_at": location.recorded_at,
+        "received_at": location.received_at,
+        "is_fresh": location.is_fresh(),
+        "fresh_for_seconds": max(int(CURRENT_LOCATION_FRESHNESS_SECONDS - age), 0),
+    }
+
+
+@router.put(
+    "/location",
+    response={200: CurrentLocationOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    summary="Report own current location for dispatch (contractor only)",
+    description=(
+        "**Who may call:** a contractor with a profile, for themselves.\n\n"
+        "Dispatch offers jobs by where the contractor **is now**: only "
+        "contractors who are `AVAILABLE` **and** reported a location within the "
+        "last **5 minutes** (server receive time) are considered. While online, "
+        "the app should send this every 1–2 minutes (and on significant "
+        "movement). Stop sending when going offline.\n\n"
+        "`recorded_at` is when the device captured the fix; more than 60 s in "
+        "the future is rejected (`400 invalid_location`). Replaces the previous "
+        "point; no history is kept. Never shown to customers or other "
+        "contractors.\n\n"
+        "This is **not** the per-job tracking point — while on the way to a "
+        "job, also send `POST /api/contractor/jobs/{id}/location`."
+    ),
+)
+def report_current_location(request, payload: CurrentLocationIn):
+    from ..services import location as location_svc
+
+    try:
+        location = location_svc.report_current_location(
+            request.user, payload.latitude, payload.longitude,
+            payload.recorded_at, payload.accuracy,
+        )
+    except location_svc.InvalidLocationError as exc:
+        return _error(400, exc.code, str(exc))
+    except (svc.InvalidContractorRoleError, svc.ContractorProfilePermissionError) as exc:
+        return _error(403, exc.code, str(exc))
+    except svc.ContractorProfileNotFoundError:
+        return _not_found()
+    return 200, _serialize_location(location)
+
+
+@router.get(
+    "/location",
+    response={200: CurrentLocationOut, 204: None, 403: ErrorOut, 404: ErrorOut},
+    summary="Own last reported location (contractor only)",
+    description="`204` when no location was reported yet. `is_fresh` says whether dispatch can use it.",
+)
+def get_current_location(request):
+    from ..services import location as location_svc
+
+    try:
+        location = location_svc.get_own_current_location(request.user)
+    except (svc.InvalidContractorRoleError, svc.ContractorProfilePermissionError) as exc:
+        return _error(403, exc.code, str(exc))
+    except svc.ContractorProfileNotFoundError:
+        return _not_found()
+    if location is None:
+        return 204, None
+    return 200, _serialize_location(location)

@@ -132,3 +132,13 @@ def _fake_push_adapter(settings):
     FakePushAdapter.reset()
     yield
     FakePushAdapter.reset()
+
+
+@pytest.fixture(autouse=True)
+def _on_demand_hours_off(settings):
+    """
+    الطلب الفوري يُرفض خارج 07:00–19:00 بتوقيت العقار — فتصبح نتيجة أي اختبار
+    ينشئ حجزًا فوريًا مرهونة بساعة تشغيله. الفحص نفسه مختبَر صراحةً (بساعة
+    مثبّتة) في test_bookings_scheduling.py.
+    """
+    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = False

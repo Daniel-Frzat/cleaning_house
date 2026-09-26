@@ -16,12 +16,9 @@ from typing import Optional
 from ninja import Schema
 from pydantic import Field
 
+from apps.geo_fields import Latitude, Longitude
+
 from ..models import AustralianState, AvailabilityStatus, VerificationStatus
-
-
-# حدود الإحداثيات — فحص شكلي لا جغرافي (نفس قاعدة apps/properties).
-LatitudeField = Field(None, ge=-90, le=90, max_digits=9, decimal_places=6)
-LongitudeField = Field(None, ge=-180, le=180, max_digits=9, decimal_places=6)
 
 
 class ContractorProfileIn(Schema):
@@ -43,8 +40,8 @@ class ContractorProfileIn(Schema):
     # 📌 تصل من GPS الجهاز عند الالتقاط — لا geocoding على الخادم (§34/§4).
     # ⚠️ المقاول بلا إحداثيات **لا يصله أي عرض إطلاقًا**: الترشيح يقيس
     #    المسافة، ومن لا موقع له يسقط صامتًا بلا رسالة خطأ.
-    latitude: Optional[Decimal] = LatitudeField
-    longitude: Optional[Decimal] = LongitudeField
+    latitude: Optional[Latitude] = None
+    longitude: Optional[Longitude] = None
 
 
 class ContractorProfilePatch(Schema):
@@ -62,8 +59,8 @@ class ContractorProfilePatch(Schema):
     state: Optional[AustralianState] = None
     postcode: Optional[str] = Field(None, pattern=r"^(\d{4})?$")
 
-    latitude: Optional[Decimal] = LatitudeField
-    longitude: Optional[Decimal] = LongitudeField
+    latitude: Optional[Latitude] = None
+    longitude: Optional[Longitude] = None
 
 
 class AvailabilityPatch(Schema):

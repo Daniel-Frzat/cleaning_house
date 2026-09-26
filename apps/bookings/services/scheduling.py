@@ -135,7 +135,12 @@ def assert_open_now(timezone_name, now=None):
     """
     الطلب الفوري (بلا scheduled_at): ساعات العمل نفسها 07:00–19:00 بتوقيت
     العقار تسري على لحظة الطلب (قرار PO — 2026-09-26). لا مهلة دنيا.
+
+    ON_DEMAND_ENFORCE_BUSINESS_HOURS=False يعطّل الفحص (بيئة الاختبارات،
+    حتى لا تعتمد نتيجتها على ساعة تشغيلها).
     """
+    if not getattr(settings, "ON_DEMAND_ENFORCE_BUSINESS_HOURS", True):
+        return
     tz = ZoneInfo(timezone_name)
     local = (now or dj_timezone.now()).astimezone(tz)
     local_time = local.timetz().replace(tzinfo=None)

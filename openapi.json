@@ -2447,6 +2447,123 @@
         ]
       }
     },
+    "/api/contractor/location": {
+      "put": {
+        "operationId": "apps_contractors_api_profile_report_current_location",
+        "summary": "Report own current location for dispatch (contractor only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentLocationOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** a contractor with a profile, for themselves.\n\nDispatch offers jobs by where the contractor **is now**: only contractors who are `AVAILABLE` **and** reported a location within the last **5 minutes** (server receive time) are considered. While online, the app should send this every 1–2 minutes (and on significant movement). Stop sending when going offline.\n\n`recorded_at` is when the device captured the fix; more than 60 s in the future is rejected (`400 invalid_location`). Replaces the previous point; no history is kept. Never shown to customers or other contractors.\n\nThis is **not** the per-job tracking point — while on the way to a job, also send `POST /api/contractor/jobs/{id}/location`.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentLocationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_contractors_api_profile_get_current_location",
+        "summary": "Own last reported location (contractor only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentLocationOut"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "`204` when no location was reported yet. `is_fresh` says whether dispatch can use it.",
+        "tags": [
+          "Contractor Profile"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/admin/contractors": {
       "get": {
         "operationId": "apps_contractors_api_admin_contractors_list_contractors",
@@ -8463,13 +8580,19 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -90,
+                "le": 90,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -8480,13 +8603,19 @@
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -180,
+                "le": 180,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -8623,13 +8752,19 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -90,
+                "le": 90,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -8640,13 +8775,19 @@
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -180,
+                "le": 180,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -9126,13 +9267,19 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -90,
+                "le": 90,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -9143,13 +9290,19 @@
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -180,
+                "le": 180,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -9225,13 +9378,19 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -90,
+                "le": 90,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -9242,13 +9401,19 @@
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 6,
+                "ge": -180,
+                "le": 180,
+                "max_digits": 9
               },
               {
                 "type": "null"
@@ -9489,6 +9654,147 @@
           "expiry_date"
         ],
         "title": "InsuranceDocumentIn",
+        "type": "object"
+      },
+      "CurrentLocationOut": {
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "is_fresh": {
+            "title": "Is Fresh",
+            "type": "boolean"
+          },
+          "fresh_for_seconds": {
+            "title": "Fresh For Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "recorded_at",
+          "received_at",
+          "is_fresh",
+          "fresh_for_seconds"
+        ],
+        "title": "CurrentLocationOut",
+        "type": "object"
+      },
+      "CurrentLocationIn": {
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "decimal_places": 6,
+            "ge": -90,
+            "le": 90,
+            "max_digits": 9,
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "decimal_places": 6,
+            "ge": -180,
+            "le": 180,
+            "max_digits": 9,
+            "title": "Longitude"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 2,
+                "ge": 0,
+                "max_digits": 7
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "recorded_at"
+        ],
+        "title": "CurrentLocationIn",
         "type": "object"
       },
       "ContractorVerificationsOut": {
@@ -11172,40 +11478,50 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
+            "decimal_places": 6,
+            "ge": -90,
+            "le": 90,
+            "max_digits": 9,
             "title": "Latitude"
           },
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
+            "decimal_places": 6,
+            "ge": -180,
+            "le": 180,
+            "max_digits": 9,
             "title": "Longitude"
           },
           "accuracy": {
             "anyOf": [
               {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,5}|(?=[\\d.]{1,8}0*$)\\d{0,5}\\.\\d{0,2}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 2,
+                "ge": 0,
+                "max_digits": 7
               },
               {
                 "type": "null"
@@ -11227,40 +11543,50 @@
           "latitude": {
             "anyOf": [
               {
-                "maximum": 90.0,
-                "minimum": -90.0,
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
+            "decimal_places": 6,
+            "ge": -90,
+            "le": 90,
+            "max_digits": 9,
             "title": "Latitude"
           },
           "longitude": {
             "anyOf": [
               {
-                "maximum": 180.0,
-                "minimum": -180.0,
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,10}0*$)\\d{0,3}\\.\\d{0,6}0*$)",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
+            "decimal_places": 6,
+            "ge": -180,
+            "le": 180,
+            "max_digits": 9,
             "title": "Longitude"
           },
           "accuracy": {
             "anyOf": [
               {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,5}|(?=[\\d.]{1,8}0*$)\\d{0,5}\\.\\d{0,2}0*$)",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "decimal_places": 2,
+                "ge": 0,
+                "max_digits": 7
               },
               {
                 "type": "null"

@@ -18,6 +18,7 @@ import logging
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -113,7 +114,9 @@ def measure_distance(origin, destination):
             eta_seconds=route.duration_s,
             polyline=route.polyline,
         )
-    except DirectionsUnavailable as exc:
+    except (DirectionsUnavailable, ImproperlyConfigured) as exc:
+        # ImproperlyConfigured: لا مزوّد اتجاهات مُهيّأ (المحوّل الوهمي يرفض
+        # العمل في الإنتاج) — "غير متاح" لا انهيار للإسناد كله.
         if not getattr(settings, "DISPATCH_ALLOW_HAVERSINE_FALLBACK", False):
             logger.warning(
                 "Directions unavailable and haversine fallback is disabled — "
