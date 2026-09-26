@@ -33,6 +33,8 @@ THIRD_PARTY_APPS = [
     # قائمة سوداء لتوكنات refresh — تُمكّن تسجيل الخروج وتدوير التوكن
     # (refresh القديم يُبطَل فور استخدامه).
     "ninja_jwt.token_blacklist",
+    # CORS للوحة التحكم (موقع منفصل يستدعي /api/admin/* من المتصفح)
+    "corsheaders",
 ]
 
 # apps.accounts — Identity Domain.
@@ -73,6 +75,8 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # قبل CommonMiddleware: يجيب طلبات OPTIONS (preflight) قبل أي تحويل
+    "corsheaders.middleware.CorsMiddleware",
     # ملفات لوحة Admin الساكنة تحت gunicorn — بلا خادم ملفات منفصل.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -84,6 +88,28 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
+
+# ------------------------------------------------------------
+# CORS — لوحة التحكم موقع منفصل يستدعي الـAPI من المتصفح
+# ------------------------------------------------------------
+# 🔒 قائمة سماح صريحة، والـAPI وحده (لا /admin/ ولا غيره).
+# 📌 بلا credentials: التوكن في ترويسة Authorization لا في كوكي، فلا يحتاج
+#    المتصفح إرسال كوكيز — ولا تُفعَّل CORS_ALLOW_CREDENTIALS.
+CORS_URLS_REGEX = r"^/api/.*$"
+CORS_ALLOWED_ORIGINS = config(
+    "CORS_ALLOWED_ORIGINS", default="",
+    cast=lambda v: [s.strip().rstrip("/") for s in v.split(",") if s.strip()],
+)
+# تطوير اللوحة محليًا (Vite يبدأ من 5173 ويزيد المنفذ إن كان مشغولًا):
+# يسمح بـhttp://localhost:<أي منفذ> و127.0.0.1. للمرحلة التجريبية فقط —
+# يُطفأ على الإنتاج قبل الإطلاق.
+CORS_ALLOW_LOCALHOST = config("CORS_ALLOW_LOCALHOST", default=False, cast=bool)
+CORS_ALLOWED_ORIGIN_REGEXES = (
+    [r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"] if CORS_ALLOW_LOCALHOST else []
+)
+CORS_ALLOW_CREDENTIALS = False
+# نتيجة preflight تُحفظ ساعة في المتصفح — أقل طلبات OPTIONS
+CORS_PREFLIGHT_MAX_AGE = 3600
 
 TEMPLATES = [
     {

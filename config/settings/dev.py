@@ -4,6 +4,12 @@ from .base import *  # noqa
 
 DEBUG = True
 
+# لوحة التحكم محليًا (Vite على localhost:5173…)
+CORS_ALLOW_LOCALHOST = config("CORS_ALLOW_LOCALHOST", default=True, cast=bool)
+CORS_ALLOWED_ORIGIN_REGEXES = (
+    [r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"] if CORS_ALLOW_LOCALHOST else []
+)
+
 # 📌 التطوير المحلي بلا مزوّد اتجاهات: يُسمح بالارتداد إلى haversine حتى
 #    يعمل التدفّق كاملًا. الإنتاج يبقى على الافتراضي False — لا ارتداد
 #    ضمني دون سياسة معلنة (§9).

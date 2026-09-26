@@ -26,6 +26,7 @@ gunicorn==26.2.0
 # WhiteNoise يقدّم ملفات لوحة Admin الساكنة تحت gunicorn — بدونه تظهر
 # لوحة الإدارة بلا تنسيق في الإنتاج.
 whitenoise==6.12.0
+django-cors-headers==4.9.0
 
 # --- Environment Config ---
 python-decouple==3.8

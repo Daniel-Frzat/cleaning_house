@@ -16,10 +16,11 @@ Source of truth, in this order:
 - **Production:** `https://cleaninghouse-production.up.railway.app`
 - **Local:** `http://localhost:8000`
 
-> **Before you start — CORS.** The backend does not send CORS headers yet.
-> If the dashboard is served from a different origin than the API (for example `https://admin.cleano.com.au` or `http://localhost:5173`), browser calls will be blocked.
-> Send us the exact origins (production, staging, local dev) and we will allow them.
-> Tokens are sent in the `Authorization` header, not in cookies, so no credentials mode is needed.
+> **CORS.** The API answers browser calls from an allowlist of origins, on `/api/*` only, with no credentials mode (tokens go in the `Authorization` header, not cookies).
+>
+> - **Local development:** while the test-phase switch `CORS_ALLOW_LOCALHOST` is on, any `http://localhost:<port>` or `http://127.0.0.1:<port>` origin is allowed, so Vite's 5173, 5174 and so on all work.
+> - **Staging and production dashboards:** send us the exact URL (scheme, host and port if any, no trailing slash) and we add it to `CORS_ALLOWED_ORIGINS`.
+> - A blocked call shows up in the browser console as a CORS error, not as an API error `code`.
 
 ---
 
