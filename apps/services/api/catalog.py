@@ -8,8 +8,8 @@ Service Catalog Admin API — Services Domain (Change Set §36.2، §5)
     PATCH  /api/admin/services/{id}     تعديل الحقول (بما فيها الأسعار)
     DELETE /api/admin/services/{id}     تعطيل ناعم (is_active=False)
 
-    GET    /api/admin/pricing-config    قراءة سعر الكيلومتر العام
-    PATCH  /api/admin/pricing-config    تحديث سعر الكيلومتر العام
+    GET    /api/admin/pricing-config    قراءة إعداد التسعير العام
+    PATCH  /api/admin/pricing-config    تحديث جزئي لإعداد التسعير العام
 
 🔒 سياسة الحالة (موثّقة ومقصودة الاختلاف عن Properties Domain):
    الرفض هنا يعيد 403 وليس 404. في Properties كان الإخفاء ضروريًا لتفادي
@@ -86,6 +86,13 @@ def _serialize(service):
 def _serialize_config(config):
     return {
         "price_per_km": config.price_per_km,
+        "included_distance_km": config.included_distance_km,
+        "maximum_travel_fee": config.maximum_travel_fee,
+        "rounding_rule": config.rounding_rule,
+        "dispatch_offer_ttl_seconds": config.dispatch_offer_ttl_seconds,
+        "currency": config.currency,
+        "pricing_version": config.pricing_version,
+        "active_from": config.active_from,
         "updated_at": config.updated_at,
     }
 
@@ -266,13 +273,14 @@ def delete_service(request, service_id: uuid.UUID):
 @router.get(
     "/pricing-config",
     response={200: PricingConfigOut, 403: ErrorOut},
-    summary="Retrieve the global price_per_km (admin only)",
+    summary="Retrieve the global pricing configuration (admin only)",
     description=(
         "**Who may call:** `ADMIN` only.\n\n"
-        "Returns the single system-wide travel rate used in every price "
-        "calculation. This is one value for the whole platform, not one per "
-        "service, and the configuration row is created on first access if it does "
-        "not exist yet.\n\n"
+        "Returns the single system-wide travel pricing used in every price "
+        "calculation: travel fee = max(0, distance - `included_distance_km`) x "
+        "`price_per_km`, capped at `maximum_travel_fee`. The customer's "
+        "pre-request maximum is services total + `maximum_travel_fee`. One "
+        "configuration for the whole platform, created on first access.\n\n"
         "**Side effects:** none — read-only."
     ),
     openapi_extra={"responses": {403: {"description": "The caller is not an `ADMIN`."}}},
@@ -289,19 +297,20 @@ def retrieve_pricing_config(request):
 @router.patch(
     "/pricing-config",
     response={200: PricingConfigOut, 403: ErrorOut, 422: ErrorOut},
-    summary="Update the global price_per_km (admin only)",
+    summary="Update the global pricing configuration (admin only)",
     description=(
         "**Who may call:** `ADMIN` only.\n\n"
-        "Sets the single system-wide travel rate (§5). There is no per-service "
-        "override.\n\n"
-        "**Side effects:** the new rate applies to **future** price calculations "
-        "only. Bookings whose price was already frozen at acceptance are never "
-        "recalculated."
+        "Partial update: send only the fields to change (at least one). There "
+        "is no per-service override. `currency` is not editable.\n\n"
+        "**Side effects:** applies to **future** quotes and offers only; frozen "
+        "prices are never recalculated. Any pricing change increments "
+        "`pricing_version` (`dispatch_offer_ttl_seconds` alone does not). "
+        "Recorded in the audit log."
     ),
     openapi_extra={
         "responses": {
             403: {"description": "The caller is not an `ADMIN`."},
-            422: {"description": "`price_per_km` failed validation."},
+            422: {"description": "A field failed validation, or no field was sent."},
         }
     },
 )
@@ -310,7 +319,9 @@ def update_pricing_config(request, payload: PricingConfigPatch):
     قيمة واحدة للنظام كله (§5) — ليست لكل خدمة.
     """
     try:
-        config = svc.update_pricing_config(request.user, payload.price_per_km, request=request)
+        config = svc.update_pricing_config(
+            request.user, request=request, **payload.dict(exclude_none=True)
+        )
     except svc.CatalogPermissionError as exc:
         return _forbidden(exc)
     except ValidationError as exc:

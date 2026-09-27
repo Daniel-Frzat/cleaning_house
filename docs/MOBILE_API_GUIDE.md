@@ -1087,8 +1087,8 @@ Responses: `200`, `503`
 | `suburb` | string |  | max len 120 |
 | `state` | `AustralianState` \| null |  |  |
 | `postcode` | string |  | pattern ^(\d{4})?$ |
-| `latitude` | number \| string \| null |  | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string \| null |  | ≥ -180.0, ≤ 180.0 |
+| `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 
 #### `ContractorProfileOut`
 
@@ -1117,16 +1117,16 @@ Responses: `200`, `503`
 | `suburb` | string \| null |  | max len 120 |
 | `state` | `AustralianState` \| null |  |  |
 | `postcode` | string \| null |  | pattern ^(\d{4})?$ |
-| `latitude` | number \| string \| null |  | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string \| null |  | ≥ -180.0, ≤ 180.0 |
+| `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 
 #### `CurrentLocationIn`
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `latitude` | number \| string | yes | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string | yes | ≥ -180.0, ≤ 180.0 |
-| `accuracy` | number \| string \| null |  | ≥ 0.0 |
+| `latitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `accuracy` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `recorded_at` | string (date-time) | yes |  |
 
 #### `CurrentLocationOut`
@@ -1210,17 +1210,17 @@ Responses: `200`, `503`
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `latitude` | number \| string | yes | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string | yes | ≥ -180.0, ≤ 180.0 |
-| `accuracy` | number \| string \| null |  | ≥ 0.0 |
+| `latitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `accuracy` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 
 #### `JobLocationIn`
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `latitude` | number \| string | yes | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string | yes | ≥ -180.0, ≤ 180.0 |
-| `accuracy` | number \| string \| null |  | ≥ 0.0 |
+| `latitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `accuracy` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `recorded_at` | string (date-time) | yes |  |
 
 #### `JobOut`
@@ -1499,8 +1499,8 @@ Responses: `200`, `503`
 | `suburb` | string | yes | min len 1, max len 120 |
 | `state` | `AustralianState` | yes |  |
 | `postcode` | string | yes | pattern ^\d{4}$ |
-| `latitude` | number \| string \| null |  | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string \| null |  | ≥ -180.0, ≤ 180.0 |
+| `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `raw_input` | string \| null |  |  |
 
 #### `AddressOut`
@@ -1525,8 +1525,8 @@ Responses: `200`, `503`
 | `suburb` | string \| null |  | min len 1, max len 120 |
 | `state` | `AustralianState` \| null |  |  |
 | `postcode` | string \| null |  | pattern ^\d{4}$ |
-| `latitude` | number \| string \| null |  | ≥ -90.0, ≤ 90.0 |
-| `longitude` | number \| string \| null |  | ≥ -180.0, ≤ 180.0 |
+| `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `raw_input` | string \| null |  |  |
 
 #### `AustralianState`

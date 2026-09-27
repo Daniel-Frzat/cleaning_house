@@ -626,3 +626,94 @@ def test_pricing_config_update_is_visible_to_other_admins(client, admin_user, ot
 
     r = client.get("/api/admin/pricing-config", **auth(other_admin))
     assert Decimal(r.json()["price_per_km"]) == Decimal("4.25")
+
+
+# ============================================================
+# 7) كل حقول التسعير من الداشبورد — تقرير التطبيق B17
+# ============================================================
+@pytest.mark.django_db
+def test_pricing_config_exposes_every_setting(client, admin_user):
+    body = client.get("/api/admin/pricing-config", **auth(admin_user)).json()
+    assert set(body) >= {
+        "price_per_km", "included_distance_km", "maximum_travel_fee", "rounding_rule",
+        "dispatch_offer_ttl_seconds", "currency", "pricing_version", "active_from", "updated_at",
+    }
+
+
+@pytest.mark.django_db
+def test_partial_update_changes_only_what_was_sent(client, admin_user):
+    patch(client, "/api/admin/pricing-config", {"price_per_km": "2.00"}, **auth(admin_user))
+    r = patch(
+        client, "/api/admin/pricing-config",
+        {"maximum_travel_fee": "40.00", "included_distance_km": "5", "rounding_rule": "NEAREST_DOLLAR"},
+        **auth(admin_user),
+    )
+    assert r.status_code == 200, r.content
+    config = PricingConfig.objects.get()
+    assert config.maximum_travel_fee == Decimal("40.00")
+    assert config.included_distance_km == Decimal("5")
+    assert config.rounding_rule == "NEAREST_DOLLAR"
+    assert config.price_per_km == Decimal("2.00")  # لم يُرسَل فلم يتغيّر
+
+
+@pytest.mark.django_db
+def test_pricing_change_bumps_version_but_ttl_alone_does_not(client, admin_user):
+    v0 = client.get("/api/admin/pricing-config", **auth(admin_user)).json()["pricing_version"]
+    v1 = patch(client, "/api/admin/pricing-config", {"maximum_travel_fee": "40.00"}, **auth(admin_user)).json()["pricing_version"]
+    v2 = patch(client, "/api/admin/pricing-config", {"dispatch_offer_ttl_seconds": 120}, **auth(admin_user)).json()
+    assert v1 == v0 + 1
+    assert v2["pricing_version"] == v1 and v2["dispatch_offer_ttl_seconds"] == 120
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [
+    {},
+    {"maximum_travel_fee": "-1"},
+    {"dispatch_offer_ttl_seconds": 0},
+    {"rounding_rule": "NEAREST_EURO"},
+])
+def test_invalid_pricing_updates_are_refused(client, admin_user, payload):
+    r = patch(client, "/api/admin/pricing-config", payload, **auth(admin_user))
+    assert r.status_code == 422, r.content
+
+
+@pytest.mark.django_db
+def test_currency_is_not_editable(client, admin_user):
+    patch(client, "/api/admin/pricing-config", {"currency": "USD", "price_per_km": "1.00"}, **auth(admin_user))
+    assert PricingConfig.objects.get().currency == "AUD"
+
+
+@pytest.mark.django_db
+def test_pricing_update_is_audited_with_before_and_after(client, admin_user):
+    from apps.audit.models import AuditLog
+
+    patch(client, "/api/admin/pricing-config", {"maximum_travel_fee": "40.00"}, **auth(admin_user))
+    entry = AuditLog.objects.filter(action="pricing_config.update").latest("created_at")
+    assert entry.details == {"maximum_travel_fee": {"from": "9999.99", "to": "40.00"}}
+
+
+@pytest.mark.django_db
+def test_new_cap_sets_the_customer_quote_maximum(client, admin_user):
+    """B17: سقف العميل = مجموع الخدمات + maximum_travel_fee — لا 10,124.99."""
+    from apps.properties.models import Property, PropertyAddress, PropertyType
+
+    customer = make_user("+61400009101")
+    prop = Property.objects.create(owner=customer, property_type=PropertyType.HOUSE)
+    PropertyAddress.objects.create(
+        property=prop, street_address="1 Test St", suburb="Bondi", state="NSW",
+        postcode="2026", latitude=Decimal("-33.868800"), longitude=Decimal("151.209300"),
+    )
+    balcony = ServiceType.objects.create(name="Balcony", room_price=Decimal("0"), base_price=Decimal("35.00"))
+    carpet = ServiceType.objects.create(name="Carpet", room_price=Decimal("0"), base_price=Decimal("90.00"))
+    patch(client, "/api/admin/pricing-config", {"maximum_travel_fee": "40.00"}, **auth(admin_user))
+
+    r = post(client, "/api/quotes", {
+        "property_id": str(prop.id),
+        "service_selections": [
+            {"service_type_id": str(balcony.id), "room_count": 0},
+            {"service_type_id": str(carpet.id), "room_count": 0},
+        ],
+    }, **auth(customer))
+    assert r.status_code == 201, r.content
+    assert Decimal(r.json()["services_total"]) == Decimal("125.00")
+    assert Decimal(r.json()["maximum_total"]) == Decimal("165.00")

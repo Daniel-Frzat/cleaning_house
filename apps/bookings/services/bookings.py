@@ -193,11 +193,14 @@ def _resolve_selections(service_selections, *, allow_inactive=False):
         parsed.append((service_type_id, room_count))
 
     requested_ids = [sid for sid, _ in parsed]
-    found = {s.id: s for s in ServiceType.objects.filter(pk__in=requested_ids)}
+    # 🔒 المفتاح نص لا UUID: المعرّف يصل UUID من الـAPI لكنه نص داخل
+    #    quote.service_snapshot (JSON). بمفتاح UUID كان كل حجز من اقتباس
+    #    يفشل بـ"Service type … not found" — نفس مفتاح quotes.py.
+    found = {str(s.id): s for s in ServiceType.objects.filter(pk__in=requested_ids)}
 
     resolved = []
     for service_type_id, room_count in parsed:
-        service = found.get(service_type_id)
+        service = found.get(str(service_type_id))
 
         if service is None:
             raise UnknownServiceError(f"Service type {service_type_id} not found.")

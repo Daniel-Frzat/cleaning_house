@@ -263,9 +263,19 @@ Review body: `{"status": "VERIFIED" | "REJECTED", "rejection_reason": "…"}`. A
   - Price per selection = `room_price × room_count + base_price`.
   - An add-on is a service with `room_price = 0`.
   - `DELETE` is a soft delete (`is_active = false`). Existing bookings keep their frozen prices.
-- `GET/PATCH /api/admin/pricing-config` with `{"price_per_km": "…"}` sets the travel price.
-  - Changes apply to **new** quotes and offers only.
-  - Prices already offered stay frozen.
+- `GET/PATCH /api/admin/pricing-config` holds the global travel pricing. `PATCH` is partial: send only what changes.
+
+  | Field | Meaning |
+  | --- | --- |
+  | `price_per_km` | Travel rate per kilometre. |
+  | `included_distance_km` | Free distance; only the excess is charged. |
+  | `maximum_travel_fee` | Cap on the travel component. **It also sets the customer's "Up to A$…" figure** (services total + this cap), so keep it realistic. |
+  | `rounding_rule` | `NEAREST_CENT`, `NEAREST_5C`, `NEAREST_10C` or `NEAREST_DOLLAR`, applied once to the final total. |
+  | `dispatch_offer_ttl_seconds` | How long a cleaner can answer an offer. |
+
+  - Read-only in the response: `currency`, `pricing_version` (goes up on every pricing change, not on a TTL change), `active_from`, `updated_at`.
+  - Changes apply to **new** quotes and offers only. Prices already quoted or offered stay frozen.
+  - Every change is in the audit log with before and after values.
 
 **Support**
 
@@ -769,13 +779,13 @@ Responses: `200` → `ServiceTypeOut`, `403` → `ErrorOut`, `404` → `ErrorOut
 
 #### `GET /api/admin/pricing-config`
 
-**Retrieve the global price_per_km (admin only)** — Bearer token.
+**Retrieve the global pricing configuration (admin only)** — Bearer token.
 
 Responses: `200` → `PricingConfigOut`, `403` → `ErrorOut`
 
 #### `PATCH /api/admin/pricing-config`
 
-**Update the global price_per_km (admin only)** — Bearer token.
+**Update the global pricing configuration (admin only)** — Bearer token.
 
 Request body (`application/json`): `PricingConfigPatch`
 
@@ -1355,13 +1365,24 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `price_per_km` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `included_distance_km` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `maximum_travel_fee` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `rounding_rule` | string | yes |  |
+| `dispatch_offer_ttl_seconds` | integer | yes |  |
+| `currency` | string | yes |  |
+| `pricing_version` | integer | yes |  |
+| `active_from` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
 #### `PricingConfigPatch`
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `price_per_km` | number \| string | yes | ≥ 0.0 |
+| `price_per_km` | number \| string \| null |  | ≥ 0.0; Travel rate per kilometre. |
+| `included_distance_km` | number \| string \| null |  | ≥ 0.0; Free distance; only the excess is charged. |
+| `maximum_travel_fee` | number \| string \| null |  | ≥ 0.0; Cap on the travel component. Also sets the customer's pre-request maximum: services total + this cap. |
+| `rounding_rule` | `RoundingRule` \| null |  | Applied once, to the final total. |
+| `dispatch_offer_ttl_seconds` | integer \| null |  | ≥ 1; How long a contractor can answer an offer. Not a pricing change. |
 
 #### `ReconcileIn`
 
@@ -1733,6 +1754,10 @@ One of: `SUCCEEDED`, `FAILED`
 | `today` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `last_7_days` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `last_30_days` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+
+#### `RoundingRule`
+
+One of: `NEAREST_CENT`, `NEAREST_5C`, `NEAREST_10C`, `NEAREST_DOLLAR`
 
 #### `ServiceLineOut`
 

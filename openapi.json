@@ -1771,7 +1771,7 @@
     "/api/admin/pricing-config": {
       "get": {
         "operationId": "apps_services_api_catalog_retrieve_pricing_config",
-        "summary": "Retrieve the global price_per_km (admin only)",
+        "summary": "Retrieve the global pricing configuration (admin only)",
         "parameters": [],
         "responses": {
           "200": {
@@ -1795,7 +1795,7 @@
             }
           }
         },
-        "description": "**Who may call:** `ADMIN` only.\n\nReturns the single system-wide travel rate used in every price calculation. This is one value for the whole platform, not one per service, and the configuration row is created on first access if it does not exist yet.\n\n**Side effects:** none — read-only.",
+        "description": "**Who may call:** `ADMIN` only.\n\nReturns the single system-wide travel pricing used in every price calculation: travel fee = max(0, distance - `included_distance_km`) x `price_per_km`, capped at `maximum_travel_fee`. The customer's pre-request maximum is services total + `maximum_travel_fee`. One configuration for the whole platform, created on first access.\n\n**Side effects:** none — read-only.",
         "tags": [
           "Admin — Service Catalog"
         ],
@@ -1807,7 +1807,7 @@
       },
       "patch": {
         "operationId": "apps_services_api_catalog_update_pricing_config",
-        "summary": "Update the global price_per_km (admin only)",
+        "summary": "Update the global pricing configuration (admin only)",
         "parameters": [],
         "responses": {
           "200": {
@@ -1831,7 +1831,7 @@
             }
           },
           "422": {
-            "description": "`price_per_km` failed validation.",
+            "description": "A field failed validation, or no field was sent.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1841,7 +1841,7 @@
             }
           }
         },
-        "description": "**Who may call:** `ADMIN` only.\n\nSets the single system-wide travel rate (§5). There is no per-service override.\n\n**Side effects:** the new rate applies to **future** price calculations only. Bookings whose price was already frozen at acceptance are never recalculated.",
+        "description": "**Who may call:** `ADMIN` only.\n\nPartial update: send only the fields to change (at least one). There is no per-service override. `currency` is not editable.\n\n**Side effects:** applies to **future** quotes and offers only; frozen prices are never recalculated. Any pricing change increments `pricing_version` (`dispatch_offer_ttl_seconds` alone does not). Recorded in the audit log.",
         "tags": [
           "Admin — Service Catalog"
         ],
@@ -9056,7 +9056,7 @@
         "type": "object"
       },
       "PricingConfigOut": {
-        "description": "سعر الكيلومتر العام — قيمة واحدة للنظام كله.",
+        "description": "إعداد التسعير العام — قيمة واحدة للنظام كله.\n\nرسم المسافة = max(0, المسافة − included_distance_km) × price_per_km،\nمسقوفًا بـmaximum_travel_fee. السقف المعروض للعميل قبل البحث =\nمجموع الخدمات + maximum_travel_fee.",
         "properties": {
           "price_per_km": {
             "anyOf": [
@@ -9070,6 +9070,51 @@
             ],
             "title": "Price Per Km"
           },
+          "included_distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Included Distance Km"
+          },
+          "maximum_travel_fee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Maximum Travel Fee"
+          },
+          "rounding_rule": {
+            "title": "Rounding Rule",
+            "type": "string"
+          },
+          "dispatch_offer_ttl_seconds": {
+            "title": "Dispatch Offer Ttl Seconds",
+            "type": "integer"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "pricing_version": {
+            "title": "Pricing Version",
+            "type": "integer"
+          },
+          "active_from": {
+            "format": "date-time",
+            "title": "Active From",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -9078,12 +9123,20 @@
         },
         "required": [
           "price_per_km",
+          "included_distance_km",
+          "maximum_travel_fee",
+          "rounding_rule",
+          "dispatch_offer_ttl_seconds",
+          "currency",
+          "pricing_version",
+          "active_from",
           "updated_at"
         ],
         "title": "PricingConfigOut",
         "type": "object"
       },
       "PricingConfigPatch": {
+        "description": "تحديث جزئي: أرسل ما تريد تغييره فقط (حقل واحد على الأقل).",
         "properties": {
           "price_per_km": {
             "anyOf": [
@@ -9094,16 +9147,86 @@
               {
                 "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
                 "type": "string"
+              },
+              {
+                "type": "null"
               }
             ],
+            "description": "Travel rate per kilometre.",
             "title": "Price Per Km"
+          },
+          "included_distance_km": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,7}0*$)\\d{0,3}\\.\\d{0,3}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free distance; only the excess is charged.",
+            "title": "Included Distance Km"
+          },
+          "maximum_travel_fee": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cap on the travel component. Also sets the customer's pre-request maximum: services total + this cap.",
+            "title": "Maximum Travel Fee"
+          },
+          "rounding_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundingRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Applied once, to the final total."
+          },
+          "dispatch_offer_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long a contractor can answer an offer. Not a pricing change.",
+            "title": "Dispatch Offer Ttl Seconds"
           }
         },
-        "required": [
-          "price_per_km"
-        ],
         "title": "PricingConfigPatch",
         "type": "object"
+      },
+      "RoundingRule": {
+        "description": "كيف يُقرَّب الإجمالي النهائي (§7).\n\n⚠️ يُطبَّق مرة واحدة على الإجمالي وحده — لا على المكوّنات. التقريب\n   المزدوج يُدخل انحرافًا تراكميًا ويجعل المجموع لا يطابق أجزاءه.\n\n📌 NEAREST_CENT هو الافتراضي وهو السلوك القائم حرفيًا\n   (quantize إلى 0.01)، فالترقية لا تغيّر أي سعر.",
+        "enum": [
+          "NEAREST_CENT",
+          "NEAREST_5C",
+          "NEAREST_10C",
+          "NEAREST_DOLLAR"
+        ],
+        "title": "RoundingRule",
+        "type": "string"
       },
       "ServicePublicOut": {
         "description": "الشكل العام لنوع الخدمة — المعرّف والاسم والوصف فقط.\n\n🔒 ثلاثة حقول لا رابع لها. أي حقل يُضاف هنا مستقبلًا يجب أن يُسأل\n   عنه: هل يراه العميل قبل معرفة سعره؟",

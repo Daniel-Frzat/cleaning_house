@@ -63,7 +63,7 @@ def test_non_admin_rejected_by_service_layer(db, role):
     with pytest.raises(svc.CatalogPermissionError):
         svc.get_pricing_config(user)
     with pytest.raises(svc.CatalogPermissionError):
-        svc.update_pricing_config(user, Decimal("5"))
+        svc.update_pricing_config(user, price_per_km=Decimal("5"))
 
     assert ServiceType.objects.count() == 0
 
@@ -239,7 +239,7 @@ def test_pricing_config_cannot_be_deleted(admin_user):
 
 @pytest.mark.django_db
 def test_update_pricing_config_persists(admin_user):
-    svc.update_pricing_config(admin_user, Decimal("3.25"))
+    svc.update_pricing_config(admin_user, price_per_km=Decimal("3.25"))
 
     assert PricingConfig.objects.get().price_per_km == Decimal("3.25")
 
@@ -247,7 +247,7 @@ def test_update_pricing_config_persists(admin_user):
 @pytest.mark.django_db
 def test_negative_price_per_km_rejected(admin_user):
     with pytest.raises(ValidationError):
-        svc.update_pricing_config(admin_user, Decimal("-0.01"))
+        svc.update_pricing_config(admin_user, price_per_km=Decimal("-0.01"))
 
 
 # ============================================================

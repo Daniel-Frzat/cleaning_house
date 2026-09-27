@@ -14,6 +14,7 @@ Service Catalog Service — Services Domain (Change Set §36.2، §5)
 
 import logging
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.accounts.roles import ConfirmedRole
@@ -257,13 +258,40 @@ def get_pricing_config(user):
     return config
 
 
+# ما يضبطه الداشبورد. currency خارجها عمدًا: منتج بعملة واحدة، وتغييرها
+# يفصل كل المبالغ المجمَّدة عن معناها.
+PRICING_EDITABLE_FIELDS = (
+    "price_per_km",
+    "included_distance_km",
+    "maximum_travel_fee",
+    "rounding_rule",
+    "dispatch_offer_ttl_seconds",
+)
+
+
 @transaction.atomic
-def update_pricing_config(user, price_per_km, request=None):
-    """يحدّث سعر الكيلومتر العام — قيمة واحدة للنظام كله."""
+def update_pricing_config(user, request=None, **changes):
+    """
+    تحديث جزئي لإعداد التسعير العام — قيمة واحدة للنظام كله.
+
+    📌 كل الحقول قابلة للضبط من الداشبورد (§7). كان price_per_km وحده متاحًا،
+       فبقي maximum_travel_fee على افتراضيه 9999.99 وظهر للعميل سقف
+       "Up to A$10,124.99" لتنظيف بـ125 (تقرير التطبيق B17).
+    ⚠️ الأثر على الحسابات المستقبلية وحدها: الاقتباسات والعروض المجمّدة لا
+       تُعاد. نسخة التسعير تُرقّى تلقائيًا في PricingConfig.save.
+    """
     config = get_pricing_config(user)
 
-    before = config.price_per_km
-    config.price_per_km = price_per_km
+    unknown = set(changes) - set(PRICING_EDITABLE_FIELDS)
+    if unknown:
+        raise ValidationError(f"Cannot change: {', '.join(sorted(unknown))}.")
+    changes = {k: v for k, v in changes.items() if v is not None}
+    if not changes:
+        raise ValidationError("Provide at least one field to update.")
+
+    before = {field: getattr(config, field) for field in changes}
+    for field, value in changes.items():
+        setattr(config, field, value)
     config.full_clean()
     config.save()
 
@@ -272,12 +300,15 @@ def update_pricing_config(user, price_per_km, request=None):
         "pricing_config.update",
         target=config,
         details={
-            "price_per_km": {"from": _audit_value(before), "to": _audit_value(price_per_km)}
+            field: {"from": _audit_value(before[field]), "to": _audit_value(getattr(config, field))}
+            for field in changes
+            if before[field] != getattr(config, field)
         },
         request=request,
     )
 
     logger.info(
-        "PricingConfig updated (price_per_km=%s, by=%s)", config.price_per_km, user.id
+        "PricingConfig updated (fields=%s, version=%s, by=%s)",
+        ",".join(sorted(changes)), config.pricing_version, user.id,
     )
     return config
