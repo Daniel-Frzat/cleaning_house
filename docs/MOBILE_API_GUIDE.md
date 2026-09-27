@@ -275,6 +275,7 @@ Stepper mapping:
 - **Accept:** `POST .../accept`. `409 offer_not_actionable` if the offer has expired or was already answered. The expired banner applies.
 - **Decline:** `POST .../decline`.
 - Offer statuses: `PENDING, ACCEPTED_PENDING_PAYMENT, ACCEPTED, DECLINED, EXPIRED`.
+- **Why an offer closed:** `close_reason` on every offer (list and detail) is `DECLINED`, `TIMED_OUT` or `BOOKING_CANCELLED`, and `null` while the offer is open or accepted. A cancelled booking also sets the offer to `EXPIRED`, so read `close_reason` to tell a cancellation from a timeout. On app open, re-fetch any offer the cleaner was waiting on, including one at `ACCEPTED_PENDING_PAYMENT`, in case the `offer.cancelled` push was missed.
 - An offer expires after a server-side TTL (`expires_at`). It never expires later than the booking's scheduled time.
 - Dispatch radius: 50 km.
 
@@ -1323,6 +1324,7 @@ Responses: `200`, `503`
 | `booking_id` | string (uuid) | yes |  |
 | `contractor_id` | string (uuid) | yes |  |
 | `status` | string | yes |  |
+| `close_reason` | string \| null |  | Why a DECLINED/EXPIRED offer was closed: DECLINED, TIMED_OUT or BOOKING_CANCELLED. null while the offer is open or accepted. |
 | `distance_km` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `offered_at` | string (date-time) | yes |  |
 | `responded_at` | string (date-time) \| null |  |  |
@@ -1570,6 +1572,7 @@ One of: `AVAILABLE`, `UNAVAILABLE`
 | `booking_id` | string (uuid) | yes |  |
 | `contractor_id` | string (uuid) | yes |  |
 | `status` | string | yes |  |
+| `close_reason` | string \| null |  | Why a DECLINED/EXPIRED offer was closed: DECLINED, TIMED_OUT or BOOKING_CANCELLED. null while the offer is open or accepted. |
 | `distance_km` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `offered_at` | string (date-time) | yes |  |
 | `responded_at` | string (date-time) \| null |  |  |

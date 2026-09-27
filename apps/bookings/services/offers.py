@@ -18,7 +18,7 @@ from django.db import transaction
 from django.utils import timezone
 
 
-from ..models import Booking, BookingStatus, DispatchOffer, DispatchOfferStatus
+from ..models import Booking, BookingStatus, DispatchOffer, DispatchOfferStatus, OfferCloseReason
 from .dispatch import assign_next_contractor
 
 logger = logging.getLogger(__name__)
@@ -301,8 +301,9 @@ def decline_offer(user, offer_id):
     _assert_open_for_response(booking, offer, "declined")
 
     offer.status = DispatchOfferStatus.DECLINED
+    offer.close_reason = OfferCloseReason.DECLINED
     offer.responded_at = timezone.now()
-    offer.save(update_fields=["status", "responded_at"])
+    offer.save(update_fields=["status", "close_reason", "responded_at"])
 
     logger.info(
         "Offer declined (offer_id=%s, booking_id=%s, contractor_id=%s)",

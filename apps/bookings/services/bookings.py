@@ -500,7 +500,7 @@ def cancel_booking(user, booking_id, reason="", actor=None, request=None):
     """
     from apps.payments.models import Payment
 
-    from ..models import DispatchOfferStatus
+    from ..models import DispatchOfferStatus, OfferCloseReason
 
     with transaction.atomic():
         if actor is None:
@@ -527,7 +527,9 @@ def cancel_booking(user, booking_id, reason="", actor=None, request=None):
         )
         now = timezone.now()
         booking.dispatch_offers.filter(pk__in=[o.pk for o in affected]).update(
-            status=DispatchOfferStatus.EXPIRED, responded_at=now
+            status=DispatchOfferStatus.EXPIRED,
+            close_reason=OfferCloseReason.BOOKING_CANCELLED,
+            responded_at=now,
         )
 
         booking.status = BookingStatus.CANCELLED

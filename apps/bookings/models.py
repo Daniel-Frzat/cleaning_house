@@ -447,6 +447,21 @@ class DispatchOfferStatus(models.TextChoices):
     EXPIRED = "EXPIRED", "Expired"
 
 
+class OfferCloseReason(models.TextChoices):
+    """
+    لماذا أُغلق عرض لم يُسنَد به الحجز (تقرير التطبيق B15).
+
+    📌 الحالة وحدها لا تكفي: الإلغاء يضع العرض EXPIRED مثل انتهاء المهلة
+       تمامًا، فكان العامل الذي فاته إشعار offer.cancelled يرى "انتهت المهلة"
+       لحجز أُلغي. يُخزَّن لحظة الإغلاق لا يُستنتج لاحقًا: عرضٌ انتهت مهلته
+       ثم أُلغي حجزه بعدها يبقى TIMED_OUT.
+    """
+
+    DECLINED = "DECLINED", "Declined by the contractor"
+    TIMED_OUT = "TIMED_OUT", "Not answered in time"
+    BOOKING_CANCELLED = "BOOKING_CANCELLED", "Booking cancelled"
+
+
 # مهلة الرد على العرض (§36.6).
 # ⚠️ احتياطي فقط: القيمة الفعلية تأتي من PricingConfig.dispatch_offer_ttl_seconds
 #    ويضبطها الداشبورد (§11). يبقى هنا لتوافق الكود القائم ولحالة تعذّر
@@ -481,6 +496,15 @@ class DispatchOffer(models.Model):
         max_length=32,
         choices=DispatchOfferStatus.choices,
         default=DispatchOfferStatus.PENDING,
+    )
+
+    # فارغ ما دام العرض مفتوحًا أو قُبل.
+    close_reason = models.CharField(
+        max_length=32,
+        choices=OfferCloseReason.choices,
+        blank=True,
+        default="",
+        help_text="Why a DECLINED/EXPIRED offer was closed.",
     )
 
     # جولة الإسناد التي وُلد فيها هذا العرض (§4).

@@ -203,6 +203,13 @@ class OfferOut(Schema):
    booking_id: uuid.UUID
    contractor_id: uuid.UUID
    status: str
+   close_reason: Optional[str] = Field(
+       None,
+       description=(
+           "Why a DECLINED/EXPIRED offer was closed: DECLINED, TIMED_OUT or "
+           "BOOKING_CANCELLED. null while the offer is open or accepted."
+       ),
+   )
    distance_km: Optional[Decimal] = None
    offered_at: datetime
    responded_at: Optional[datetime] = None

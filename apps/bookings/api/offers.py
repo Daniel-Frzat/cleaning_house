@@ -44,6 +44,7 @@ def _serialize_offer(offer):
         "booking_id": offer.booking_id,
         "contractor_id": offer.contractor_id,
         "status": offer.status,
+        "close_reason": offer.close_reason or None,
         "distance_km": offer.distance_km,
         "offered_at": offer.offered_at,
         "responded_at": offer.responded_at,

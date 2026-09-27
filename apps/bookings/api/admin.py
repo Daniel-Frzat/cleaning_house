@@ -118,6 +118,7 @@ class DispatchOfferOut(Schema):
     offered_at: datetime
     responded_at: Optional[datetime] = None
     expires_at: datetime
+    close_reason: Optional[str] = None
 
 
 class PaymentSummaryOut(Schema):
@@ -294,6 +295,7 @@ def _serialize_detail(booking):
                 "offered_at": offer.offered_at,
                 "responded_at": offer.responded_at,
                 "expires_at": offer.expires_at,
+                "close_reason": offer.close_reason or None,
             }
             for offer in svc.dispatch_history(booking)
         ],

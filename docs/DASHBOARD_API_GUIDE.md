@@ -1648,6 +1648,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `offered_at` | string (date-time) | yes |  |
 | `responded_at` | string (date-time) \| null |  |  |
 | `expires_at` | string (date-time) | yes |  |
+| `close_reason` | string \| null |  |  |
 
 #### `JobSummaryOut`
 

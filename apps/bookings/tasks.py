@@ -19,7 +19,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Booking, BookingStatus, DispatchOffer, DispatchOfferStatus
+from .models import Booking, BookingStatus, DispatchOffer, DispatchOfferStatus, OfferCloseReason
 from .services.dispatch import assign_next_contractor, redispatch_stranded_bookings
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,11 @@ def expire_pending_offers():
             # 🔒 تحديث شرطي: يعيد 0 إن غيّر عاملٌ آخر الحالة قبلنا
             updated = DispatchOffer.objects.filter(
                 pk=offer.pk, status=DispatchOfferStatus.PENDING
-            ).update(status=DispatchOfferStatus.EXPIRED, responded_at=now)
+            ).update(
+                status=DispatchOfferStatus.EXPIRED,
+                close_reason=OfferCloseReason.TIMED_OUT,
+                responded_at=now,
+            )
 
             if not updated:
                 # عرض عولج بالتوازي — لا تتابع مكرَّر

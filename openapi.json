@@ -10553,6 +10553,18 @@
             "title": "Status",
             "type": "string"
           },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a DECLINED/EXPIRED offer was closed: DECLINED, TIMED_OUT or BOOKING_CANCELLED. null while the offer is open or accepted.",
+            "title": "Close Reason"
+          },
           "distance_km": {
             "anyOf": [
               {
@@ -10773,6 +10785,18 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a DECLINED/EXPIRED offer was closed: DECLINED, TIMED_OUT or BOOKING_CANCELLED. null while the offer is open or accepted.",
+            "title": "Close Reason"
           },
           "distance_km": {
             "anyOf": [
@@ -13889,6 +13913,17 @@
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Reason"
           }
         },
         "required": [
