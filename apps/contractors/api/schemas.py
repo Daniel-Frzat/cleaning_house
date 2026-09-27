@@ -87,6 +87,10 @@ class ContractorProfileOut(Schema):
 
     availability_status: str
 
+    # متوسط تقييمات العملاء (1–5) وعددها — None قبل أول تقييم
+    rating_average: Optional[Decimal] = None
+    rating_count: int = 0
+
     created_at: datetime
     updated_at: datetime
 

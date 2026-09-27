@@ -20,6 +20,11 @@
 | job.awaiting_confirmation   | عميل    | NORMAL   |
 | support.updated             | مقدّم الطلب | NORMAL |
 | offer.cancelled             | مقاول   | NORMAL   |
+| job.confirmation_reminder   | عميل    | NORMAL   |
+| job.auto_confirmed          | عميل    | NORMAL   |
+| payment.refunded            | عميل    | NORMAL   |
+| review.received             | مقاول   | NORMAL   |
+| reclean.updated             | عميل    | NORMAL   |
 
 ⚠️ لا إشعار عند "لم يُعثر على عامل" (NO_CONTRACTOR) — قرار PO صريح،
    والقرار المفتوح #16 باقٍ كما هو.
@@ -170,6 +175,49 @@ def payment_action_required(payment):
     )
 
 
+def review_received(review):
+    stars = "★" * review.stars
+    return notify(
+        review.contractor.user,
+        "review.received",
+        Audience.CONTRACTOR,
+        "New rating",
+        f"A customer rated your clean {stars} ({review.stars}/5).",
+        data={"booking_id": review.booking_id, "review_id": review.id},
+    )
+
+
+def reclean_decided(reclean):
+    from apps.aftercare.models import RecleanStatus
+
+    if reclean.status == RecleanStatus.APPROVED:
+        title, body = "Re-clean approved", "We'll be in touch to arrange your free re-clean."
+    else:
+        title, body = "Re-clean request reviewed", "Your re-clean request was not approved."
+    if reclean.decision_note:
+        body = f"{body} {reclean.decision_note}"
+    return notify(
+        reclean.customer,
+        "reclean.updated",
+        Audience.CUSTOMER,
+        title,
+        body,
+        data={"booking_id": reclean.booking_id, "reclean_request_id": reclean.id, "status": reclean.status},
+    )
+
+
+def payment_refunded(payment, amount):
+    """استرداد بقرار الأدمن — كامل أو جزئي (قرار PO — 2026-09-27)."""
+    return notify(
+        payment.booking.customer,
+        "payment.refunded",
+        Audience.CUSTOMER,
+        "Refund sent",
+        f"Your refund of {_money(amount)} has been sent to your payment method.",
+        data={"booking_id": payment.booking_id, "payment_id": payment.id, "amount": str(amount)},
+    )
+
+
 def job_arrived(job):
     return notify(
         job.booking.customer,
@@ -188,6 +236,35 @@ def job_started(job):
         Audience.CUSTOMER,
         "Cleaning started",
         "Your cleaner has started.",
+        data={"booking_id": job.booking_id, "job_id": job.id},
+    )
+
+
+def job_confirmation_reminder(job):
+    """بعد JOB_CONFIRM_REMINDER_HOURS بلا تأكيد (قرار PO — 2026-09-27)."""
+    from django.conf import settings
+
+    remaining = settings.JOB_AUTO_CONFIRM_HOURS - settings.JOB_CONFIRM_REMINDER_HOURS
+    return notify(
+        job.booking.customer,
+        "job.confirmation_reminder",
+        Audience.CUSTOMER,
+        "Please confirm your clean",
+        f"Review the photos and confirm. It will be confirmed automatically in {remaining} hours.",
+        data={"booking_id": job.booking_id, "job_id": job.id},
+    )
+
+
+def job_auto_confirmed(job):
+    from django.conf import settings
+
+    return notify(
+        job.booking.customer,
+        "job.auto_confirmed",
+        Audience.CUSTOMER,
+        "Clean confirmed",
+        f"We confirmed your clean automatically after {settings.JOB_AUTO_CONFIRM_HOURS} hours. "
+        "Please rate your cleaner.",
         data={"booking_id": job.booking_id, "job_id": job.id},
     )
 

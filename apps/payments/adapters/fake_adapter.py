@@ -111,6 +111,13 @@ class FakePaymentAdapter(BasePaymentProviderAdapter):
             method_summary=summary,
         )
 
+    def refund(self, provider_reference, amount, idempotency_key, currency="AUD"):
+        """⚠️ لا مال يتحرك — ينجح دائمًا بمرجع مُصطنع."""
+        return PaymentChargeResult(
+            outcome=ChargeOutcome.SUCCEEDED,
+            provider_reference=f"fake_refund_{uuid.uuid4()}",
+        )
+
     def confirm(self, provider_reference):
         """
         يحسم محاولة بعد مصادقة العميل.

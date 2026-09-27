@@ -78,6 +78,7 @@ def _serialize(service):
         "room_price": service.room_price,
         "base_price": service.base_price,
         "is_active": service.is_active,
+        "reclean_guarantee": service.reclean_guarantee,
         "created_at": service.created_at,
         "updated_at": service.updated_at,
     }

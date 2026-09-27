@@ -145,6 +145,8 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
         "access_notes": job.booking.access_notes if include_access_notes else None,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,
+        "auto_confirm_at": jobs_svc.auto_confirm_deadline(job),
+        "auto_confirmed": job.auto_confirmed,
         "photos": [
             _serialize_photo(p, url, include_storage_key=include_storage_key)
             for p, url in photos_with_urls

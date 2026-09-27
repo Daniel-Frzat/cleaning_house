@@ -90,8 +90,12 @@ class Job(models.Model):
     # يُملأ حين يعلن المقاول الإنجاز
     marked_done_at = models.DateTimeField(null=True, blank=True)
 
-    # يُملأ حين يؤكّد العميل (§36.3) — العميل وحده من يُكمل المهمة
+    # يُملأ حين يؤكّد العميل (§36.3)، أو تلقائيًا بعد JOB_AUTO_CONFIRM_HOURS
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    # True إن أكّدها النظام لا العميل (قرار PO — 2026-09-27)
+    auto_confirmed = models.BooleanField(default=False)
+    # يمنع تكرار تذكير العميل بالتأكيد
+    confirmation_reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
     # عمليًا: لحظة بدء المهمة (أي لحظة تأكيد الحجز)
     created_at = models.DateTimeField(auto_now_add=True)

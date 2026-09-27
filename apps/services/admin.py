@@ -28,7 +28,7 @@ class ServiceTypeAdmin(BackOfficeMixin, admin.ModelAdmin):
     ordering = ("name",)
     readonly_fields = ("id", "created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("id", "name", "description", "is_active")}),
+        (None, {"fields": ("id", "name", "description", "is_active", "reclean_guarantee")}),
         (
             "Pricing",
             {

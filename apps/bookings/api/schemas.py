@@ -149,11 +149,19 @@ class PaymentSummaryOut(Schema):
        بلا تغيير، وهو وحده ما يكشف provider_reference للإدارة.
     """
 
-    # PENDING | SUCCEEDED | FAILED
+    # PENDING | SUCCEEDED | FAILED | REFUNDED …
     status: str
     amount: Decimal
     # CARD | APPLE_PAY | GOOGLE_PAY
     method: str
+    # ما استُرد حتى الآن (كامل أو جزئي) — لرسالة "Your refund of A$X has been sent"
+    refunded_amount: Decimal = Decimal("0")
+
+
+class BookingReviewOut(Schema):
+    stars: int
+    comment: str
+    created_at: datetime
 
 
 class BookingOut(Schema):
@@ -209,6 +217,14 @@ class BookingOut(Schema):
     #    أن ترى ذلك لا أن يُخفى عنها.
     payment: Optional[PaymentSummaryOut] = None
     service_selections: list[ServiceSelectionOut]
+    # ما بعد التنظيف (قرارات PO — 2026-09-27)
+    review: Optional[BookingReviewOut] = None
+    review_required: bool = Field(
+        False, description="Completed and not rated yet. Rating is mandatory before a new request."
+    )
+    reclean_eligible_until: Optional[datetime] = Field(
+        None, description="Last moment to request a free re-clean; null when not covered or not completed."
+    )
     created_at: datetime
     updated_at: datetime
 

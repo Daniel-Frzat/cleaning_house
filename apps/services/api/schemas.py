@@ -32,6 +32,7 @@ class ServiceTypeIn(Schema):
     room_price: Decimal = PriceField
     base_price: Decimal = PriceField
     is_active: bool = True
+    reclean_guarantee: bool = Field(False, description="Covered by the free re-clean guarantee.")
 
 
 class ServiceTypePatch(Schema):
@@ -47,6 +48,7 @@ class ServiceTypePatch(Schema):
     room_price: Optional[Decimal] = OptionalPriceField
     base_price: Optional[Decimal] = OptionalPriceField
     is_active: Optional[bool] = None
+    reclean_guarantee: Optional[bool] = None
 
 
 class ServiceTypeOut(Schema):
@@ -56,6 +58,7 @@ class ServiceTypeOut(Schema):
     room_price: Decimal
     base_price: Decimal
     is_active: bool
+    reclean_guarantee: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -52,6 +52,8 @@ class AdminPaymentOut(Schema):
     failure_reason: Optional[str] = None
     needs_reconciliation: bool
     paid_at: Optional[datetime] = None
+    refunded_amount: Decimal = Decimal("0")
+    refunded_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -81,6 +83,14 @@ class PaymentReconcileOut(AdminPaymentDetailOut):
     booking_confirmed: bool
 
 
+class RefundIn(Schema):
+    amount: Optional[Decimal] = Field(
+        None, gt=0, max_digits=10, decimal_places=2,
+        description="Omit to refund the whole unrefunded balance.",
+    )
+    reason: str = Field(..., min_length=1, max_length=1000, pattern=r"\S")
+
+
 def _serialize(payment):
     return {
         "id": payment.id,
@@ -97,6 +107,8 @@ def _serialize(payment):
         "needs_reconciliation": payment.status == PaymentStatus.PROCESSING
         and is_unknown_outcome(payment.failure_reason),
         "paid_at": payment.paid_at,
+        "refunded_amount": payment.refunded_amount,
+        "refunded_at": payment.refunded_at,
         "created_at": payment.created_at,
         "updated_at": payment.updated_at,
     }
@@ -195,3 +207,37 @@ def reconcile_payment(request, payment_id: uuid.UUID, payload: ReconcileIn):
     except svc.NotReconcilableError as exc:
         return error(409, exc.code, str(exc))
     return 200, {**_serialize_detail(payment), "booking_confirmed": confirmed}
+
+
+@router.post(
+    "/payments/{payment_id}/refund",
+    response={200: AdminPaymentDetailOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 422: ErrorOut, 502: ErrorOut},
+    summary="Refund a customer payment, in full or in part (admin only)",
+    description=(
+        "For an unhappy clean: the admin decides the amount. Omit `amount` to "
+        "refund the whole unrefunded balance; send it for a partial refund. "
+        "Several partial refunds add up, never beyond the amount paid.\n\n"
+        "Only a `SUCCEEDED` payment can be refunded (`409 not_refundable`). A full "
+        "refund sets the status to `REFUNDED`; a partial one keeps `SUCCEEDED` "
+        "and increases `refunded_amount`.\n\n"
+        "The refund goes through the payment provider (`502 refund_failed` if it "
+        "refuses). The customer receives a `payment.refunded` notification. The "
+        "cleaner's payout is not changed. Recorded in the audit log."
+    ),
+)
+def refund_payment(request, payment_id: uuid.UUID, payload: RefundIn):
+    try:
+        payment = svc.refund_payment(
+            request.user, payment_id, reason=payload.reason.strip(), amount=payload.amount, request=request
+        )
+    except AdminRequiredError as exc:
+        return forbidden(exc)
+    except svc.PaymentNotFoundError as exc:
+        return error(404, exc.code, str(exc))
+    except svc.NotRefundableError as exc:
+        return error(409, exc.code, str(exc))
+    except svc.InvalidRefundAmountError as exc:
+        return error(422, exc.code, str(exc))
+    except svc.RefundFailedError as exc:
+        return error(502, exc.code, str(exc))
+    return 200, _serialize_detail(payment)

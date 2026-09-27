@@ -4803,6 +4803,542 @@
         ]
       }
     },
+    "/api/bookings/{booking_id}/review": {
+      "post": {
+        "operationId": "apps_aftercare_api_views_create_review",
+        "summary": "Rate the cleaner (mandatory, once, after completion)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "`stars` 1–5 and an optional `comment`. Allowed once the job is `COMPLETED` (including auto-confirmed), and only once per booking (`409 already_reviewed`); a rating cannot be edited.\\n\\n**Mandatory:** while a completed booking is unrated, `POST /api/bookings` is refused with `409 review_required`. `BookingOut.review_required` marks the booking to rate.",
+        "tags": [
+          "Aftercare"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/reclean-requests": {
+      "post": {
+        "operationId": "apps_aftercare_api_views_create_reclean_request",
+        "summary": "Request a free re-clean (guarantee window)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecleanRequestOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Within `RECLEAN_GUARANTEE_HOURS` (72) of completion, for bookings that include a service covered by the guarantee (`BookingOut.reclean_eligible_until` is set). `areas`: KITCHEN, BATHROOMS, BEDROOMS, LIVING_AREAS, WINDOWS, OTHER.\\n\\nAn admin approves or rejects it; the customer receives `reclean.updated`. No limit on requests, but only one can wait for a decision at a time (`409 reclean_already_open`). Photos will be added once storage is live.",
+        "tags": [
+          "Aftercare"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecleanRequestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "apps_aftercare_api_views_list_reclean_requests",
+        "summary": "My re-clean requests for a booking",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecleanRequestOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Aftercare"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/bookings/{booking_id}/invoice": {
+      "get": {
+        "operationId": "apps_aftercare_api_views_customer_invoice",
+        "summary": "Invoice for a paid booking",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Issued on first request once the payment has succeeded (`409 invoice_not_available` before). The number `INV-YYYY-NNNNNN` is sequential per year and never changes. Lines come from the frozen prices; no GST line. PDF download will follow.",
+        "tags": [
+          "Aftercare"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/reclean-requests": {
+      "get": {
+        "operationId": "apps_aftercare_api_views_admin_list_reclean_requests",
+        "summary": "Re-clean requests (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RecleanStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecleanListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Aftercare"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/reclean-requests/{request_id}": {
+      "get": {
+        "operationId": "apps_aftercare_api_views_admin_get_reclean_request",
+        "summary": "One re-clean request (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecleanRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Aftercare"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_aftercare_api_views_admin_decide_reclean_request",
+        "summary": "Approve or reject a re-clean request (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecleanRequestOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "`status`: APPROVED or REJECTED, with an optional `note` shown to the customer. Decided once (`409 reclean_already_decided`). The customer receives `reclean.updated`. Arranging the re-clean visit itself is done by the operations team for now. Recorded in the audit log.",
+        "tags": [
+          "Admin — Aftercare"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecleanDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/bookings/{booking_id}/invoice": {
+      "get": {
+        "operationId": "apps_aftercare_api_views_admin_invoice",
+        "summary": "Invoice for a paid booking (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Aftercare"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/earnings": {
       "get": {
         "operationId": "apps_payouts_api_payouts_retrieve_earnings",
@@ -6933,6 +7469,105 @@
         "security": [
           {
             "SuperuserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/payments/{payment_id}/refund": {
+      "post": {
+        "operationId": "apps_payments_api_admin_refund_payment",
+        "summary": "Refund a customer payment, in full or in part (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPaymentDetailOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "For an unhappy clean: the admin decides the amount. Omit `amount` to refund the whole unrefunded balance; send it for a partial refund. Several partial refunds add up, never beyond the amount paid.\n\nOnly a `SUCCEEDED` payment can be refunded (`409 not_refundable`). A full refund sets the status to `REFUNDED`; a partial one keeps `SUCCEEDED` and increases `refunded_amount`.\n\nThe refund goes through the payment provider (`502 refund_failed` if it refuses). The customer receives a `payment.refunded` notification. The cleaner's payout is not changed. Recorded in the audit log.",
+        "tags": [
+          "Admin — Payments"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
           }
         ]
       }
@@ -9135,6 +9770,11 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "reclean_guarantee": {
+            "default": false,
+            "title": "Reclean Guarantee",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -9202,6 +9842,12 @@
           "is_active": {
             "default": true,
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "reclean_guarantee": {
+            "default": false,
+            "description": "Covered by the free re-clean guarantee.",
+            "title": "Reclean Guarantee",
             "type": "boolean"
           }
         },
@@ -9282,6 +9928,17 @@
               }
             ],
             "title": "Is Active"
+          },
+          "reclean_guarantee": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reclean Guarantee"
           }
         },
         "title": "ServiceTypePatch",
@@ -9609,6 +10266,26 @@
           "availability_status": {
             "title": "Availability Status",
             "type": "string"
+          },
+          "rating_average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating Average"
+          },
+          "rating_count": {
+            "default": 0,
+            "title": "Rating Count",
+            "type": "integer"
           },
           "created_at": {
             "format": "date-time",
@@ -10463,6 +11140,35 @@
             "title": "Service Selections",
             "type": "array"
           },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookingReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_required": {
+            "default": false,
+            "description": "Completed and not rated yet. Rating is mandatory before a new request.",
+            "title": "Review Required",
+            "type": "boolean"
+          },
+          "reclean_eligible_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last moment to request a free re-clean; null when not covered or not completed.",
+            "title": "Reclean Eligible Until"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -10485,6 +11191,30 @@
           "updated_at"
         ],
         "title": "BookingOut",
+        "type": "object"
+      },
+      "BookingReviewOut": {
+        "properties": {
+          "stars": {
+            "title": "Stars",
+            "type": "integer"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stars",
+          "comment",
+          "created_at"
+        ],
+        "title": "BookingReviewOut",
         "type": "object"
       },
       "PaymentSummaryOut": {
@@ -11340,6 +12070,32 @@
             ],
             "title": "Failure Reason"
           },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "description": "Total refunded so far. A full refund also sets status REFUNDED.",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -11424,6 +12180,32 @@
             ],
             "title": "Failure Reason"
           },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "description": "Total refunded so far. A full refund also sets status REFUNDED.",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -11501,6 +12283,32 @@
               }
             ],
             "title": "Failure Reason"
+          },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "description": "Total refunded so far. A full refund also sets status REFUNDED.",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
           },
           "created_at": {
             "format": "date-time",
@@ -11599,6 +12407,25 @@
               }
             ],
             "title": "Confirmed At"
+          },
+          "auto_confirm_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While awaiting the customer: when the job will be confirmed automatically.",
+            "title": "Auto Confirm At"
+          },
+          "auto_confirmed": {
+            "default": false,
+            "description": "The system confirmed it, not the customer.",
+            "title": "Auto Confirmed",
+            "type": "boolean"
           },
           "photos": {
             "items": {
@@ -11894,6 +12721,25 @@
               }
             ],
             "title": "Confirmed At"
+          },
+          "auto_confirm_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While awaiting the customer: when the job will be confirmed automatically.",
+            "title": "Auto Confirm At"
+          },
+          "auto_confirmed": {
+            "default": false,
+            "description": "The system confirmed it, not the customer.",
+            "title": "Auto Confirmed",
+            "type": "boolean"
           },
           "photos": {
             "items": {
@@ -12261,6 +13107,473 @@
           "updated_at"
         ],
         "title": "PayoutOut",
+        "type": "object"
+      },
+      "ReviewOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "stars": {
+            "title": "Stars",
+            "type": "integer"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "stars",
+          "comment",
+          "created_at"
+        ],
+        "title": "ReviewOut",
+        "type": "object"
+      },
+      "ReviewIn": {
+        "properties": {
+          "stars": {
+            "maximum": 5,
+            "minimum": 1,
+            "title": "Stars",
+            "type": "integer"
+          },
+          "comment": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Comment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stars"
+        ],
+        "title": "ReviewIn",
+        "type": "object"
+      },
+      "RecleanRequestOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Areas",
+            "type": "array"
+          },
+          "details": {
+            "title": "Details",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "decision_note": {
+            "title": "Decision Note",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "areas",
+          "details",
+          "status",
+          "decision_note",
+          "created_at"
+        ],
+        "title": "RecleanRequestOut",
+        "type": "object"
+      },
+      "RecleanArea": {
+        "enum": [
+          "KITCHEN",
+          "BATHROOMS",
+          "BEDROOMS",
+          "LIVING_AREAS",
+          "WINDOWS",
+          "OTHER"
+        ],
+        "title": "RecleanArea",
+        "type": "string"
+      },
+      "RecleanRequestIn": {
+        "properties": {
+          "areas": {
+            "items": {
+              "$ref": "#/components/schemas/RecleanArea"
+            },
+            "minItems": 1,
+            "title": "Areas",
+            "type": "array"
+          },
+          "details": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Details",
+            "type": "string"
+          }
+        },
+        "required": [
+          "areas"
+        ],
+        "title": "RecleanRequestIn",
+        "type": "object"
+      },
+      "InvoiceLineOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          }
+        },
+        "required": [
+          "description",
+          "quantity",
+          "amount"
+        ],
+        "title": "InvoiceLineOut",
+        "type": "object"
+      },
+      "InvoiceOut": {
+        "properties": {
+          "number": {
+            "description": "INV-YYYY-NNNNNN, sequential per year; never changes once issued.",
+            "title": "Number",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
+          "service_address": {
+            "title": "Service Address",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "gst_included": {
+            "default": false,
+            "description": "Always false: no GST line (PO decision).",
+            "title": "Gst Included",
+            "type": "boolean"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/InvoicePaymentOut"
+          }
+        },
+        "required": [
+          "number",
+          "issued_at",
+          "booking_id",
+          "public_reference",
+          "service_address",
+          "lines",
+          "total",
+          "currency",
+          "payment"
+        ],
+        "title": "InvoiceOut",
+        "type": "object"
+      },
+      "InvoicePaymentOut": {
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Refunded Amount"
+          }
+        },
+        "required": [
+          "method",
+          "display_name",
+          "status",
+          "refunded_amount"
+        ],
+        "title": "InvoicePaymentOut",
+        "type": "object"
+      },
+      "RecleanListQuery": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecleanStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RecleanListQuery",
+        "type": "object"
+      },
+      "RecleanStatus": {
+        "enum": [
+          "SUBMITTED",
+          "APPROVED",
+          "REJECTED"
+        ],
+        "title": "RecleanStatus",
+        "type": "string"
+      },
+      "AdminRecleanListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRecleanRequestOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminRecleanListOut",
+        "type": "object"
+      },
+      "AdminRecleanRequestOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "booking_id": {
+            "format": "uuid",
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Areas",
+            "type": "array"
+          },
+          "details": {
+            "title": "Details",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "decision_note": {
+            "title": "Decision Note",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_id": {
+            "format": "uuid",
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "public_reference": {
+            "title": "Public Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "booking_id",
+          "areas",
+          "details",
+          "status",
+          "decision_note",
+          "created_at",
+          "customer_id",
+          "public_reference"
+        ],
+        "title": "AdminRecleanRequestOut",
+        "type": "object"
+      },
+      "RecleanDecisionIn": {
+        "properties": {
+          "status": {
+            "pattern": "^(APPROVED|REJECTED)$",
+            "title": "Status",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RecleanDecisionIn",
         "type": "object"
       },
       "EarningsItemOut": {
@@ -14816,6 +16129,11 @@
             ],
             "title": "Confirmed At"
           },
+          "auto_confirmed": {
+            "default": false,
+            "title": "Auto Confirmed",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -14921,6 +16239,11 @@
               }
             ],
             "title": "Confirmed At"
+          },
+          "auto_confirmed": {
+            "default": false,
+            "title": "Auto Confirmed",
+            "type": "boolean"
           },
           "created_at": {
             "format": "date-time",
@@ -15071,7 +16394,7 @@
         "type": "object"
       },
       "PaymentStatus": {
-        "description": "حالة الشحن المباشر (§36.4، §13).\n\n⚠️ لا حالات تفويض/حجز (HELD، AUTHORIZED، CAPTURED): الـescrow مسحوب\n   من التصميم، وإضافتها تُحيي نموذجًا مُلغى — راجع docstring الملف.\n\nNOT_CHARGED     : لم يقبل مقاول بعد، فلا محاولة شحن.\nPROCESSING      : محاولة الشحن جارية لدى المزوّد.\nREQUIRES_ACTION : البنك يطلب مصادقة العميل (3-D Secure).\nSUCCEEDED       : تأكد الشحن.\nFAILED          : فشلت آخر محاولة.\nREFUNDED        : استُرد المبلغ فعليًا.\n\n⚠️ REFUNDED معرَّفة ولا يصل إليها أي مسار اليوم: الاسترداد عملية\n   حقيقية لدى المزوّد وسياسته غير محسومة. لا تُستعمل لتلوين حالة\n   بلا استرداد فعلي (§13).\n\n📌 PENDING مُبقاة للتوافق مع الصفوف القائمة وحدها — المسارات الجديدة\n   تبدأ NOT_CHARGED. حذفها كان سيكسر حجوزات مسجَّلة.",
+        "description": "حالة الشحن المباشر (§36.4، §13).\n\n⚠️ لا حالات تفويض/حجز (HELD، AUTHORIZED، CAPTURED): الـescrow مسحوب\n   من التصميم، وإضافتها تُحيي نموذجًا مُلغى — راجع docstring الملف.\n\nNOT_CHARGED     : لم يقبل مقاول بعد، فلا محاولة شحن.\nPROCESSING      : محاولة الشحن جارية لدى المزوّد.\nREQUIRES_ACTION : البنك يطلب مصادقة العميل (3-D Secure).\nSUCCEEDED       : تأكد الشحن.\nFAILED          : فشلت آخر محاولة.\nREFUNDED        : استُرد المبلغ فعليًا.\n\n📌 REFUNDED = استُرد المبلغ **كاملًا** بقرار الأدمن (قرار PO —\n   2026-09-27). الاسترداد الجزئي يُبقي SUCCEEDED ويسجّل refunded_amount.\n\n📌 PENDING مُبقاة للتوافق مع الصفوف القائمة وحدها — المسارات الجديدة\n   تبدأ NOT_CHARGED. حذفها كان سيكسر حجوزات مسجَّلة.",
         "enum": [
           "NOT_CHARGED",
           "PENDING",
@@ -15192,6 +16515,31 @@
             ],
             "title": "Paid At"
           },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -15306,6 +16654,31 @@
               }
             ],
             "title": "Paid At"
+          },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
           },
           "created_at": {
             "format": "date-time",
@@ -15439,6 +16812,31 @@
             ],
             "title": "Paid At"
           },
+          "refunded_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Refunded Amount"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -15528,6 +16926,39 @@
         ],
         "title": "ReconcileOutcome",
         "type": "string"
+      },
+      "RefundIn": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit to refund the whole unrefunded balance.",
+            "title": "Amount"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RefundIn",
+        "type": "object"
       },
       "PayoutFilters": {
         "properties": {

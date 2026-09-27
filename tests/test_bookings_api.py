@@ -686,6 +686,7 @@ def test_payment_summary_appears_once_confirmed(client, customer_a, property_a, 
         "status": PaymentStatus.SUCCEEDED,
         "amount": "215.00",
         "method": PaymentMethod.APPLE_PAY,
+        "refunded_amount": "0.00",
     }
 
 
@@ -764,7 +765,8 @@ def test_payment_summary_schema_omits_internal_fields():
     """🔒 الحجب هيكلي: الشكل لا يعرّف الحقلين أصلًا."""
     from apps.bookings.api.schemas import PaymentSummaryOut
 
-    assert set(PaymentSummaryOut.model_fields) == {"status", "amount", "method"}
+    # refunded_amount أُضيف للاسترداد (قرار PO — 2026-09-27) — ليس حقلًا داخليًا
+    assert set(PaymentSummaryOut.model_fields) == {"status", "amount", "method", "refunded_amount"}
 
 
 @pytest.mark.django_db

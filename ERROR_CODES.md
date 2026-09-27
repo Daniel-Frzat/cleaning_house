@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**141 codes.**
+**154 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -22,13 +22,14 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `admin_not_found` | 404 |  | apps/accounts/api/admin_auth.py |
 | `admin_required` | 403, 404, 503 |  | apps/accounts/authentication.py, apps/audit/api/common.py, apps/audit/services/backoffice.py, apps/contractors/api/admin_contractors.py |
 | `admin_role_required` | 403, 422 |  | apps/contractors/services/profile.py, apps/services/services/catalog.py |
-| `already_reviewed` | 409 |  | apps/contractors/services/verification.py |
+| `aftercare_error` | 403, 404, 503 |  | apps/aftercare/services/aftercare.py |
+| `already_reviewed` | 409 | This booking has already been rated; a rating cannot be changed. | apps/aftercare/services/aftercare.py, apps/contractors/services/verification.py |
 | `booking_error` | 400 |  | apps/bookings/services/bookings.py |
 | `booking_forbidden` | 403 |  | apps/bookings/services/bookings.py |
 | `booking_has_no_price` | 422 |  | apps/payments/services/payments.py, apps/payouts/services/payouts.py |
 | `booking_not_cancellable` | 409 |  | apps/bookings/services/bookings.py |
 | `booking_not_confirmed` | 400, 409 |  | apps/jobs/services/jobs.py, apps/payments/services/payments.py |
-| `booking_not_found` | 404 |  | apps/bookings/api/bookings.py, apps/bookings/services/admin.py, apps/bookings/services/bookings.py, apps/support/api/support.py, apps/support/services/support.py |
+| `booking_not_found` | 404 |  | apps/aftercare/services/aftercare.py, apps/bookings/api/bookings.py, apps/bookings/services/admin.py, apps/bookings/services/bookings.py, apps/support/api/support.py, apps/support/services/support.py |
 | `booking_not_reschedulable` | 409 |  | apps/bookings/services/bookings.py |
 | `broadcast_invalid` | 422 |  | apps/notifications/services/broadcasts.py |
 | `cancellation_requires_support` | 409 |  | apps/bookings/services/bookings.py |
@@ -57,9 +58,12 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `invalid_owner_role` | 403 |  | apps/properties/api/properties.py, apps/properties/services/properties.py |
 | `invalid_phone` | 400 |  | apps/accounts/services/otp.py |
 | `invalid_photo_type` | 400 |  | apps/jobs/services/photos.py |
+| `invalid_reclean_request` | 422 | Choose at least one valid area. | apps/aftercare/services/aftercare.py |
+| `invalid_refund_amount` | 422 | The refund amount must be positive and at most the unrefunded balance. | apps/payments/services/admin.py |
 | `invalid_review_status` | 422 |  | apps/contractors/services/verification.py |
 | `invalid_room_count` | 400 |  | apps/bookings/services/bookings.py, apps/services/services/pricing.py |
 | `invalid_status_transition` | 403, 404, 409, 503 |  | apps/accounts/services/backoffice_users.py, apps/support/services/admin.py |
+| `invoice_not_available` | 409 | An invoice exists only once the booking is paid. | apps/aftercare/services/aftercare.py |
 | `job_already_exists` | 400, 409 |  | apps/jobs/services/jobs.py |
 | `job_error` | 400, 409 |  | apps/jobs/services/jobs.py |
 | `job_forbidden` | 403, 404 |  | apps/jobs/services/jobs.py |
@@ -71,6 +75,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `no_assigned_contractor` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
 | `not_at_property` | 409 |  | apps/jobs/services/jobs.py |
 | `not_reconcilable` | 409 |  | apps/payments/services/admin.py, apps/payouts/services/admin.py |
+| `not_refundable` | 409 | Only a succeeded payment with an unrefunded balance can be refunded. | apps/payments/services/admin.py |
 | `notification_error` | 403, 404, 503 |  | apps/notifications/services/notifications.py |
 | `notification_not_found` | 404 |  | apps/notifications/services/notifications.py |
 | `offer_error` | 422 |  | apps/bookings/services/offers.py |
@@ -120,8 +125,16 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `quote_error` | 400 |  | apps/bookings/services/quotes.py |
 | `quote_expired` | 409 |  | apps/bookings/services/quotes.py |
 | `quote_not_found` | 404 |  | apps/bookings/services/quotes.py |
+| `reclean_already_decided` | 409 | This re-clean request has already been approved or rejected. | apps/aftercare/services/aftercare.py |
+| `reclean_already_open` | 409 | A re-clean request for this booking is already waiting for a decision. | apps/aftercare/services/aftercare.py |
+| `reclean_not_eligible` | 409 | This booking is not covered by the re-clean guarantee. | apps/aftercare/services/aftercare.py |
+| `reclean_request_not_found` | 404 |  | apps/aftercare/services/aftercare.py |
+| `reclean_window_closed` | 409 | The re-clean guarantee window for this booking has closed. | apps/aftercare/services/aftercare.py |
+| `refund_failed` | 502 | The payment provider refused or could not process the refund. | apps/payments/services/admin.py |
 | `rejection_reason_required` | 400 |  | apps/contractors/services/verification.py |
 | `request_resolved` | 409 |  | apps/support/services/admin.py |
+| `review_not_allowed` | 409 | The clean is not completed yet, so it cannot be rated. | apps/aftercare/services/aftercare.py |
+| `review_required` | 409 | Rate your last completed clean before requesting a new one. | apps/aftercare/services/aftercare.py |
 | `scheduled_at_in_past` | 400 |  | apps/bookings/services/scheduling.py |
 | `scheduled_at_required` | 400 |  | apps/bookings/services/scheduling.py |
 | `scheduled_at_too_soon` | 400 |  | apps/bookings/services/scheduling.py |

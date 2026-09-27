@@ -24,6 +24,7 @@ from decimal import Decimal
 from typing import Optional
 
 from ninja import Schema
+from pydantic import Field
 
 
 class PaymentOut(Schema):
@@ -39,6 +40,10 @@ class PaymentOut(Schema):
     method: str
     status: str
     failure_reason: Optional[str] = None
+    refunded_amount: Decimal = Field(
+        Decimal("0"), description="Total refunded so far. A full refund also sets status REFUNDED."
+    )
+    refunded_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

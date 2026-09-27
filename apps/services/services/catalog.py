@@ -56,6 +56,7 @@ UPDATABLE_FIELDS = {
     "room_price",
     "base_price",
     "is_active",
+    "reclean_guarantee",
 }
 
 
@@ -83,7 +84,8 @@ def assert_is_admin(user):
 # ------------------------------------------------------------
 @transaction.atomic
 def create_service_type(
-    user, name, room_price, base_price, description="", is_active=True, request=None
+    user, name, room_price, base_price, description="", is_active=True,
+    reclean_guarantee=False, request=None
 ):
     """ينشئ نوع خدمة جديدًا في الكتالوج."""
     assert_is_admin(user)
@@ -94,6 +96,7 @@ def create_service_type(
         room_price=room_price,
         base_price=base_price,
         is_active=is_active,
+        reclean_guarantee=reclean_guarantee,
     )
     service.full_clean()
     service.save()

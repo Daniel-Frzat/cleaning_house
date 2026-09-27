@@ -39,6 +39,7 @@ class AdminJobOut(Schema):
     started_at: Optional[datetime] = None
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
+    auto_confirmed: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -75,6 +76,7 @@ def _serialize(job):
         "started_at": job.started_at,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,
+        "auto_confirmed": job.auto_confirmed,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }

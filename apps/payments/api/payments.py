@@ -57,6 +57,8 @@ def _serialize(payment, *, as_admin):
         "method": payment.method,
         "status": payment.status,
         "failure_reason": payment.failure_reason,
+        "refunded_amount": payment.refunded_amount,
+        "refunded_at": payment.refunded_at,
         "created_at": payment.created_at,
         "updated_at": payment.updated_at,
     }

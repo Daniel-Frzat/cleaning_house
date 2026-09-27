@@ -59,6 +59,8 @@ LOCAL_APPS = [
     # Job Execution Domain — Job + JobPhoto (§20، §36.3؛ Infra §7).
     # لا إلغاء (بند مفتوح #12)، ولا تخزين ملفات حقيقي.
     "apps.jobs",
+    # ما بعد التنظيف — تقييم إلزامي، ضمان إعادة التنظيف، فواتير (PO 2026-09-27)
+    "apps.aftercare",
     # Payout Domain — Payout (§36.5). دفع فوري لكل حجز، صفر عمولة،
     # لا تجميع ولا دفعات مجمَّعة (قرار محسوم).
     "apps.payouts",
@@ -380,6 +382,12 @@ DISPATCH_MAX_DISTANCE_KM = config("DISPATCH_MAX_DISTANCE_KM", default=50, cast=i
 BOOKING_MIN_LEAD_MINUTES = config("BOOKING_MIN_LEAD_MINUTES", default=120, cast=int)
 # مسافة قبول "وصلت" من العقار بالأمتار (+ حتى 100 م من دقة GPS المُبلَّغة)
 JOB_ARRIVAL_RADIUS_M = config("JOB_ARRIVAL_RADIUS_M", default=300, cast=int)
+# العميل لا يؤكد انتهاء التنظيف (قرار PO — 2026-09-27): تذكير بعد 6 ساعات
+# من "انتهيت"، وتأكيد تلقائي بعد 12 يُطلق دفعة المقاول.
+JOB_CONFIRM_REMINDER_HOURS = config("JOB_CONFIRM_REMINDER_HOURS", default=6, cast=int)
+JOB_AUTO_CONFIRM_HOURS = config("JOB_AUTO_CONFIRM_HOURS", default=12, cast=int)
+# ضمان إعادة التنظيف بعد الاكتمال (قرار PO — 2026-09-27)
+RECLEAN_GUARANTEE_HOURS = config("RECLEAN_GUARANTEE_HOURS", default=72, cast=int)
 
 # ------------------------------------------------------------
 # Job photos — حدود الرفع

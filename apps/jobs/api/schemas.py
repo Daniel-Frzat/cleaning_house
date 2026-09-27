@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Optional
 
 from ninja import Schema
+from pydantic import Field
 
 from apps.geo_fields import AccuracyMeters, Latitude, Longitude
 
@@ -45,6 +46,11 @@ class JobOut(Schema):
     access_notes: Optional[str] = None
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
+    auto_confirm_at: Optional[datetime] = Field(
+        None,
+        description="While awaiting the customer: when the job will be confirmed automatically.",
+    )
+    auto_confirmed: bool = Field(False, description="The system confirmed it, not the customer.")
     photos: list[JobPhotoOut]
     created_at: datetime
 

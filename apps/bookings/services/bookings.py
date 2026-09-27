@@ -253,8 +253,15 @@ def create_booking(
     📌 access_notes يكتبه العميل بنفسه ويصل كما هو: لا يُشتق من العنوان،
        ولا يُورَّث من حجز سابق، ولا يُولَّد من أي مصدر آخر. تركه فارغًا
        هو الحالة الطبيعية — أغلب الزيارات لا تحتاج تعليمات.
+
+    🔒 التقييم إلزامي (قرار PO — 2026-09-27): لا طلب جديد قبل تقييم آخر
+       تنظيف مكتمل — ReviewRequiredError (409 review_required).
     """
     assert_is_customer(user)
+
+    from apps.aftercare.services.aftercare import assert_no_pending_review
+
+    assert_no_pending_review(user)
 
     # يرفع PropertyPermissionError / PropertyNotFoundError عند الفشل
     prop = properties_svc.get_property(user, property_id)
@@ -368,7 +375,8 @@ def list_bookings(user):
 
     return (
         Booking.objects.filter(customer=user)
-        .select_related("property", "payment")
+        # job و review لحقول ما بعد التنظيف (التقييم، ضمان إعادة التنظيف)
+        .select_related("property", "payment", "job", "review")
         .prefetch_related("service_selections__service_type")
     )
 
@@ -379,7 +387,8 @@ def get_booking(user, booking_id):
 
     booking = (
         Booking.objects.filter(pk=booking_id)
-        .select_related("property", "payment")
+        # job و review لحقول ما بعد التنظيف (التقييم، ضمان إعادة التنظيف)
+        .select_related("property", "payment", "job", "review")
         .prefetch_related("service_selections__service_type")
         .first()
     )

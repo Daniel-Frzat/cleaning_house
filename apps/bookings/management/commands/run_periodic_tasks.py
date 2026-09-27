@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 def _tasks():
     from apps.bookings.tasks import expire_pending_offers, repair_confirmed_bookings
+    from apps.jobs.services import jobs as jobs_svc
     from apps.notifications.services import notifications as notifications_svc
 
     return [
         ("expire_pending_offers", expire_pending_offers),
+        # التأكيد التلقائي قبل التذكير: مهمة متأخرة لا تأخذ تذكيرًا بلا معنى
+        ("auto_confirm_overdue_jobs", jobs_svc.auto_confirm_overdue_jobs),
+        ("send_confirmation_reminders", jobs_svc.send_confirmation_reminders),
         ("repair_confirmed_bookings", repair_confirmed_bookings),
         ("retry_pending_notifications", notifications_svc.retry_pending),
         ("cleanup_notifications", notifications_svc.cleanup),

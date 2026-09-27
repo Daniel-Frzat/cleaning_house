@@ -8,7 +8,9 @@ Back-office — دفعات العملاء (ADMIN) ومطابقتها (Superuser)
 ⚠️ ما لا يوجد هنا عمدًا:
    - إعادة محاولة تلقائية أو إدارية: سياسة الإعادة قرار مفتوح. العميل
      وحده يعيد المحاولة من مساره بعد FAILED.
-   - الاسترداد (REFUNDED): سياسة الاسترداد/الإلغاء بند مفتوح (#12).
+
+📌 الاسترداد: الأدمن يقرر كاملًا أو جزئيًا بعد تنظيف غير مُرضٍ (قرار PO —
+   2026-09-27)، عبر المزوّد، مع إشعار للعميل وتدقيق.
 """
 
 import logging
@@ -46,6 +48,24 @@ class NotReconcilableError(PaymentAdminError):
     """الدفعة ليست PROCESSING بنتيجة مجهولة — لا شيء يُطابَق."""
 
     code = "not_reconcilable"
+
+
+class NotRefundableError(PaymentAdminError):
+    """Only a succeeded payment with an unrefunded balance can be refunded."""
+
+    code = "not_refundable"
+
+
+class InvalidRefundAmountError(PaymentAdminError):
+    """The refund amount must be positive and at most the unrefunded balance."""
+
+    code = "invalid_refund_amount"
+
+
+class RefundFailedError(PaymentAdminError):
+    """The payment provider refused or could not process the refund."""
+
+    code = "refund_failed"
 
 
 class ProviderReferenceRequiredError(PaymentAdminError):
@@ -195,6 +215,68 @@ def reconcile_payment(actor, payment_id, outcome, note, provider_reference=None,
 
     payment.refresh_from_db()
     return payment, booking_confirmed
+
+
+@transaction.atomic
+def refund_payment(actor, payment_id, reason, amount=None, request=None):
+    """
+    يسترد مبلغًا لعميل بقرار الأدمن. amount=None = كل المتبقي.
+
+    🔒 قفل الصف قبل الحساب: استردادان متزامنان لا يتجاوزان المدفوع.
+    📌 كامل → REFUNDED؛ جزئي → يبقى SUCCEEDED مع refunded_amount متراكم.
+    ⚠️ دفعة المقاول لا تُمس: الاسترداد من المنصّة للعميل، واسترجاع شيء من
+       المقاول قرار غير محسوم.
+    """
+    from apps.notifications.hooks import emit_on_commit
+
+    from ..adapters import get_payment_adapter
+
+    assert_admin(actor)
+    payment = Payment.objects.select_for_update().select_related("booking").filter(pk=payment_id).first()
+    if payment is None:
+        raise PaymentNotFoundError("Payment not found.")
+    if payment.status != PaymentStatus.SUCCEEDED:
+        raise NotRefundableError(f"Payment is {payment.status}; only a succeeded payment can be refunded.")
+
+    remaining = payment.amount - payment.refunded_amount
+    amount = remaining if amount is None else Decimal(amount)
+    if amount <= 0 or amount > remaining:
+        raise InvalidRefundAmountError(f"Refund must be more than 0 and at most {remaining}.")
+
+    sequence = int(payment.refunded_amount > 0) + 1
+    result = get_payment_adapter().refund(
+        payment.provider_reference or "",
+        amount,
+        idempotency_key=f"refund:{payment.pk}:{payment.refunded_amount}:{amount}",
+        currency=payment.booking.currency,
+    )
+    if not result.success:
+        logger.warning("Refund refused by provider (payment_id=%s, reason=%s)", payment.pk, result.failure_reason)
+        raise RefundFailedError(result.failure_reason or "The payment provider could not process the refund.")
+
+    before = payment.status
+    payment.refunded_amount += amount
+    payment.refunded_at = timezone.now()
+    payment.refund_reason = reason
+    if payment.refunded_amount >= payment.amount:
+        payment.status = PaymentStatus.REFUNDED
+    payment.save(update_fields=["refunded_amount", "refunded_at", "refund_reason", "status", "updated_at"])
+
+    record(
+        actor, "payment.refund", target=payment,
+        details={
+            "amount": str(amount),
+            "refunded_total": str(payment.refunded_amount),
+            "status": {"from": before, "to": payment.status},
+            "provider_reference": result.provider_reference,
+            "reason": reason,
+            "sequence": sequence,
+        },
+        request=request,
+    )
+    emit_on_commit("payment_refunded", payment, amount)
+    logger.info("Payment refunded (payment_id=%s, amount=%s, by=%s)", payment.pk, amount, actor.pk)
+    return payment
 
 
 def summary_counts(now=None):

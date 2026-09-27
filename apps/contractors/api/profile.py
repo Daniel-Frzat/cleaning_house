@@ -85,9 +85,17 @@ def serialize(profile):
         "latitude": profile.latitude,
         "longitude": profile.longitude,
         "availability_status": profile.availability_status,
+        **_rating(profile),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
+
+
+def _rating(profile):
+    from apps.aftercare.services.aftercare import contractor_rating
+
+    average, count = contractor_rating(profile)
+    return {"rating_average": average, "rating_count": count}
 
 
 # ------------------------------------------------------------

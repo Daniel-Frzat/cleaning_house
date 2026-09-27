@@ -48,9 +48,8 @@ class PaymentStatus(models.TextChoices):
     FAILED          : فشلت آخر محاولة.
     REFUNDED        : استُرد المبلغ فعليًا.
 
-    ⚠️ REFUNDED معرَّفة ولا يصل إليها أي مسار اليوم: الاسترداد عملية
-       حقيقية لدى المزوّد وسياسته غير محسومة. لا تُستعمل لتلوين حالة
-       بلا استرداد فعلي (§13).
+    📌 REFUNDED = استُرد المبلغ **كاملًا** بقرار الأدمن (قرار PO —
+       2026-09-27). الاسترداد الجزئي يُبقي SUCCEEDED ويسجّل refunded_amount.
 
     📌 PENDING مُبقاة للتوافق مع الصفوف القائمة وحدها — المسارات الجديدة
        تبدأ NOT_CHARGED. حذفها كان سيكسر حجوزات مسجَّلة.
@@ -138,6 +137,11 @@ class Payment(models.Model):
 
     # لحظة تأكيد الشحن — مصدرها تأكيد المزوّد لا استجابة الواجهة (§14).
     paid_at = models.DateTimeField(null=True, blank=True)
+
+    # الاسترداد بقرار الأدمن — كامل أو جزئي، ويتراكم عبر أكثر من استرداد
+    refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_reason = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -33,6 +33,8 @@ from ninja import NinjaAPI
 from apps.accounts.api.admin_auth import accounts_router as admin_accounts_router
 from apps.accounts.api.admin_auth import router as admin_auth_router
 from apps.accounts.api.auth import router as auth_router
+from apps.aftercare.api.views import admin_router as admin_aftercare_router
+from apps.aftercare.api.views import booking_router as aftercare_booking_router
 from apps.accounts.api.backoffice_users import router as admin_users_router
 from apps.audit.api.admin import audit_router as admin_audit_router
 from apps.audit.api.admin import dashboard_router as admin_dashboard_router
@@ -326,6 +328,9 @@ api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)
 # دفع المقاول — قراءة فقط (المقاول المستحِق أو الإدارة). لا مسار إطلاق يدوي.
 api.add_router("/bookings", payouts_router)
+# ما بعد التنظيف — /bookings/{id}/review و /reclean-requests و /invoice
+api.add_router("/bookings", aftercare_booking_router)
+api.add_router("/admin", admin_aftercare_router)
 api.add_router("", contractor_earnings_router)
 # الدعم — مسار مستقل تمامًا: متاح لأي دور مصادَق عليه، والصلاحية ملكية
 # لا دور. لا تعارض مع /bookings رغم أن الطلب قد يشير إلى حجز.

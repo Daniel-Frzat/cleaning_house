@@ -72,7 +72,7 @@ Everything below is in the code on `main`. Check the live `/api/openapi.json` be
 | C32, C37 documents | 🟡 | Status read works. Re-submit = a new `POST` of the same document. File upload: see B5. |
 | C35 background location | Decision for you and product | The server needs **two** location feeds (§3.8): the **online feed** (`PUT /api/contractor/location`) while the cleaner is online, which dispatch needs, and the **job feed** (`POST /api/contractor/jobs/{id}/location`) while a job is `ASSIGNED`. If the app sends neither while backgrounded, the cleaner stops receiving offers after 5 minutes. |
 | C36 offer countdown | ✅ | `expires_at` is on every offer (list, detail). The push carries only `offer_id` and `booking_id`, so fetch the detail on open. |
-| D3 "customer never confirms" | ⏳ | No auto-confirm yet. This is a product rule still to decide. |
+| D3 "customer never confirms" | ✅ | PO rule: reminder push 6 h after mark-done, auto-confirm at 12 h (payout released). `JobOut.auto_confirm_at` gives the deadline. See §3.7. |
 
 ---
 
@@ -242,6 +242,11 @@ Stepper mapping:
 - `GET /api/bookings/{id}/payment` returns the full payment.
 - `POST /api/bookings/payments/{payment_id}/retry?payment_method_reference=` works only when the payment is `FAILED` or `REQUIRES_ACTION` (`409` otherwise).
 - `POST /api/bookings/payments/{payment_id}/confirm-action` returns `501` until a real provider exists (B2).
+- **Refunds** are decided by an admin, in full or in part.
+  - A full refund sets `status: REFUNDED`.
+  - A partial refund keeps `SUCCEEDED`.
+  - In both cases `refunded_amount` and `refunded_at` are set, on the payment and on `BookingOut.payment.refunded_amount`.
+  - The customer receives `payment.refunded` (data `amount`). Show "Your refund of A$X has been sent" from `refunded_amount`.
 
 ### 3.7 Job lifecycle (cleaner)
 
@@ -253,6 +258,15 @@ Stepper mapping:
 | Remove a photo | `DELETE /api/contractor/jobs/{id}/photos/{photo_id}` → `204` | `IN_PROGRESS` only (`409` after mark-done) | — |
 | Mark done | `POST /api/contractor/jobs/{id}/mark-done` | `IN_PROGRESS` with at least one BEFORE and one AFTER photo | `job.awaiting_confirmation` |
 | Customer confirms | `POST /api/bookings/{booking_id}/job/confirm` (customer) | `AWAITING_CUSTOMER_CONFIRMATION` | The cleaner receives `job.completed`, then `payout.sent`. |
+
+**If the customer does not confirm** (PO rule):
+
+| After mark-done | What happens |
+| --- | --- |
+| 6 hours | One reminder push, `job.confirmation_reminder`. |
+| 12 hours | The job is confirmed automatically: `auto_confirmed: true`, payout released, customer receives `job.auto_confirmed`. |
+
+`JobOut.auto_confirm_at` is the deadline while the job awaits the customer; show it as "confirmed automatically at …".
 
 **Photo rules**
 
@@ -352,6 +366,11 @@ Create both channels in the app. The names can be changed by configuration if yo
 | `job.awaiting_confirmation` | customer | `booking_id`, `job_id` | Please confirm |
 | `support.updated` | either | `support_request_id` | Support update |
 | `broadcast` | per target | `broadcast_id` | Admin announcement |
+| `job.confirmation_reminder` | customer | `booking_id`, `job_id` | Please confirm your clean |
+| `job.auto_confirmed` | customer | `booking_id`, `job_id` | Clean confirmed |
+| `payment.refunded` | customer | `booking_id`, `payment_id`, `amount` | Refund sent |
+| `reclean.updated` | customer | `booking_id`, `reclean_request_id`, `status` | Re-clean approved / reviewed |
+| `review.received` | cleaner | `booking_id`, `review_id` | New rating |
 
 **In-app inbox.** Every push is also stored for 90 days.
 
@@ -372,6 +391,42 @@ In a dual-role account, filter by `audience` for the current mode.
   - Categories: `BOOKING_ISSUE, PAYMENT_ISSUE, CONTRACTOR_ISSUE, APP_ISSUE, OTHER`.
 - `GET /api/support-requests` and `GET /api/support-requests/{id}` return the history.
   - Statuses: `SUBMITTED, UNDER_REVIEW, RESOLVED`.
+
+### 3.12 After the clean: rating, re-clean, invoice
+
+**Rating (mandatory)**
+
+- `POST /api/bookings/{id}/review` with `{stars: 1–5, comment?}` returns `201`.
+- Allowed only once the job is `COMPLETED`, including auto-confirmed jobs.
+- Allowed once per booking; a rating cannot be edited.
+- **While a completed booking is unrated, `POST /api/bookings` returns `409 review_required`.** The `detail` names the booking.
+  - `BookingOut.review_required` marks the booking to rate.
+  - `BookingOut.review` holds the rating once given.
+- The cleaner sees `rating_average` and `rating_count` on `GET /api/contractor/profile`.
+
+**Re-clean guarantee (72 hours)**
+
+- `BookingOut.reclean_eligible_until` is set when the booking includes a service covered by the guarantee (set by the admin per service) and the job is completed.
+- `POST /api/bookings/{id}/reclean-requests` with `{areas: [KITCHEN|BATHROOMS|BEDROOMS|LIVING_AREAS|WINDOWS|OTHER], details}` returns `201`.
+- An admin approves or rejects the request; the customer receives `reclean.updated`.
+- There is no limit on the number of requests, but only one can wait for a decision at a time (`409 reclean_already_open`).
+- Errors:
+  - `409 reclean_not_eligible`: the booking is not covered.
+  - `409 reclean_window_closed`: the 72 hours have passed.
+- `GET /api/bookings/{id}/reclean-requests` returns the history.
+- Photos come later, with storage.
+
+**Invoice**
+
+- `GET /api/bookings/{id}/invoice` is available once the payment succeeded (`409 invoice_not_available` before).
+- It returns:
+  - `number`: `INV-YYYY-NNNNNN`, sequential and fixed once issued;
+  - `issued_at`, `service_date`, `service_address`;
+  - `lines[]`: services, then travel, then a rounding line if any;
+  - `total`, `currency`;
+  - `payment`: method display name, status, `refunded_amount`.
+- There is no GST line (`gst_included: false`).
+- PDF download will follow; render the screen from the JSON for now.
 
 ---
 
@@ -919,6 +974,52 @@ Responses: `200`, `404` → `ErrorOut`
 
 Responses: `200` → `EarningsOut`, `400` → `ErrorOut`, `403` → `ErrorOut`
 
+### Aftercare
+
+#### `POST /api/bookings/{booking_id}/review`
+
+**Rate the cleaner (mandatory, once, after completion)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `booking_id` | path | string (uuid) | yes |  |
+
+Request body (`application/json`): `ReviewIn`
+
+Responses: `201` → `ReviewOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+
+#### `POST /api/bookings/{booking_id}/reclean-requests`
+
+**Request a free re-clean (guarantee window)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `booking_id` | path | string (uuid) | yes |  |
+
+Request body (`application/json`): `RecleanRequestIn`
+
+Responses: `201` → `RecleanRequestOut`, `404` → `ErrorOut`, `409` → `ErrorOut`, `422` → `ErrorOut`
+
+#### `GET /api/bookings/{booking_id}/reclean-requests`
+
+**My re-clean requests for a booking** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `booking_id` | path | string (uuid) | yes |  |
+
+Responses: `200` → `array of RecleanRequestOut`, `404` → `ErrorOut`
+
+#### `GET /api/bookings/{booking_id}/invoice`
+
+**Invoice for a paid booking** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `booking_id` | path | string (uuid) | yes |  |
+
+Responses: `200` → `InvoiceOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+
 ### Notifications
 
 #### `POST /api/devices`
@@ -1087,6 +1188,9 @@ Responses: `200`, `503`
 | `access_notes` | string \| null |  |  |
 | `payment` | `PaymentSummaryOut` \| null |  |  |
 | `service_selections` | array of `ServiceSelectionOut` | yes |  |
+| `review` | `BookingReviewOut` \| null |  |  |
+| `review_required` | boolean |  | default `false`; Completed and not rated yet. Rating is mandatory before a new request. |
+| `reclean_eligible_until` | string (date-time) \| null |  | Last moment to request a free re-clean; null when not covered or not completed. |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1131,6 +1235,8 @@ Responses: `200`, `503`
 | `access_notes` | string \| null |  |  |
 | `marked_done_at` | string (date-time) \| null |  |  |
 | `confirmed_at` | string (date-time) \| null |  |  |
+| `auto_confirm_at` | string (date-time) \| null |  | While awaiting the customer: when the job will be confirmed automatically. |
+| `auto_confirmed` | boolean |  | default `false`; The system confirmed it, not the customer. |
 | `photos` | array of `JobPhotoOut` | yes |  |
 | `created_at` | string (date-time) | yes |  |
 | `public_reference` | string | yes |  |
@@ -1167,6 +1273,8 @@ Responses: `200`, `503`
 | `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `availability_status` | string | yes |  |
+| `rating_average` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `rating_count` | integer |  | default `0` |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1268,6 +1376,22 @@ Responses: `200`, `503`
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
+#### `InvoiceOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `number` | string | yes | INV-YYYY-NNNNNN, sequential per year; never changes once issued. |
+| `issued_at` | string (date-time) | yes |  |
+| `booking_id` | string (uuid) | yes |  |
+| `public_reference` | string | yes |  |
+| `service_date` | string (date) \| null |  |  |
+| `service_address` | string | yes |  |
+| `lines` | array of `InvoiceLineOut` | yes |  |
+| `total` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `currency` | string | yes |  |
+| `gst_included` | boolean |  | default `false`; Always false: no GST line (PO decision). |
+| `payment` | `InvoicePaymentOut` | yes |  |
+
 #### `JobArriveIn`
 
 | Field | Type | Required | Notes |
@@ -1297,6 +1421,8 @@ Responses: `200`, `503`
 | `access_notes` | string \| null |  |  |
 | `marked_done_at` | string (date-time) \| null |  |  |
 | `confirmed_at` | string (date-time) \| null |  |  |
+| `auto_confirm_at` | string (date-time) \| null |  | While awaiting the customer: when the job will be confirmed automatically. |
+| `auto_confirmed` | boolean |  | default `false`; The system confirmed it, not the customer. |
 | `photos` | array of `JobPhotoOut` | yes |  |
 | `created_at` | string (date-time) | yes |  |
 
@@ -1423,6 +1549,8 @@ Responses: `200`, `503`
 | `method` | string | yes |  |
 | `status` | string | yes |  |
 | `failure_reason` | string \| null |  |  |
+| `refunded_amount` | number \| string |  | default `"0"`; pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$; Total refunded so far. A full refund also sets status REFUNDED. |
+| `refunded_at` | string (date-time) \| null |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 | `attempt_number` | integer | yes |  |
@@ -1480,11 +1608,48 @@ Responses: `200`, `503`
 | `created_at` | string (date-time) | yes |  |
 | `service_hours` | `ServiceHoursOut` | yes |  |
 
+#### `RecleanRequestIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `areas` | array of `RecleanArea` | yes |  |
+| `details` | string |  | max len 2000 |
+
+#### `RecleanRequestOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string (uuid) | yes |  |
+| `booking_id` | string (uuid) | yes |  |
+| `areas` | array of string | yes |  |
+| `details` | string | yes |  |
+| `status` | string | yes |  |
+| `decision_note` | string | yes |  |
+| `decided_at` | string (date-time) \| null |  |  |
+| `created_at` | string (date-time) | yes |  |
+
 #### `RefreshIn`
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `refresh` | string | yes | min len 1 |
+
+#### `ReviewIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `stars` | integer | yes | ≥ 1, ≤ 5 |
+| `comment` | string |  | max len 1000 |
+
+#### `ReviewOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string (uuid) | yes |  |
+| `booking_id` | string (uuid) | yes |  |
+| `stars` | integer | yes |  |
+| `comment` | string | yes |  |
+| `created_at` | string (date-time) | yes |  |
 
 #### `ServicePublicOut`
 
@@ -1601,6 +1766,14 @@ One of: `NSW`, `VIC`, `QLD`, `WA`, `SA`, `TAS`, `ACT`, `NT`
 
 One of: `AVAILABLE`, `UNAVAILABLE`
 
+#### `BookingReviewOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `stars` | integer | yes |  |
+| `comment` | string | yes |  |
+| `created_at` | string (date-time) | yes |  |
+
 #### `ContractorLocationOut`
 
 | Field | Type | Required | Notes |
@@ -1632,6 +1805,24 @@ One of: `AVAILABLE`, `UNAVAILABLE`
 | `amount` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `currency` | string |  | default `"AUD"` |
 | `status` | string | yes |  |
+
+#### `InvoiceLineOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `description` | string | yes |  |
+| `quantity` | integer | yes |  |
+| `amount` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+
+#### `InvoicePaymentOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `method` | string | yes |  |
+| `display_name` | string | yes |  |
+| `status` | string | yes |  |
+| `paid_at` | string (date-time) \| null |  |  |
+| `refunded_amount` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 
 #### `OfferOut`
 
@@ -1686,6 +1877,10 @@ One of: `AVAILABLE`, `UNAVAILABLE`
 #### `PropertyType`
 
 One of: `HOUSE`, `UNIT`, `TOWNHOUSE`, `APARTMENT`, `OTHER`
+
+#### `RecleanArea`
+
+One of: `KITCHEN`, `BATHROOMS`, `BEDROOMS`, `LIVING_AREAS`, `WINDOWS`, `OTHER`
 
 #### `ServiceHoursOut`
 

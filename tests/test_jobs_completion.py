@@ -541,19 +541,23 @@ def test_confirm_triggers_payout_only_as_isolated_post_commit_effect():
                 f"jobs service imports {name} at module level"
             )
 
-    # 2) جسم confirm_job_completion: لا دفع مباشر ولا إشعار ولا جدولة
-    func = next(
+    # 2) جسم confirm_job_completion و_complete_job (الانتقال المشترك مع
+    #    التأكيد التلقائي): لا دفع مباشر ولا إشعار ولا جدولة
+    funcs = [
         n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "confirm_job_completion"
-    )
-    called = {
-        n.func.attr for n in ast.walk(func)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-    }
-    called |= {
-        n.func.id for n in ast.walk(func)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-    }
+        if isinstance(n, ast.FunctionDef) and n.name in ("confirm_job_completion", "_complete_job")
+    ]
+    assert len(funcs) == 2
+    called = set()
+    for func in funcs:
+        called |= {
+            n.func.attr for n in ast.walk(func)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        called |= {
+            n.func.id for n in ast.walk(func)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
 
     for forbidden in (
         "release_payout_for_booking", "send", "notify", "delay", "apply_async",

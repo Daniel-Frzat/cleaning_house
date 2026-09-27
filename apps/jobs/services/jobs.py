@@ -22,7 +22,9 @@ Job Service — Jobs Domain (Change Set §20، §36.3)
 """
 
 import logging
+from datetime import timedelta
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -445,8 +447,8 @@ def confirm_job_completion(job, customer_user):
     🔒 عميل الحجز نفسه حصرًا — لا الإدارة، ولا أي مستخدم آخر مهما كان
        دوره. §36.3 يحسم أن التحقق فعل العميل وحده.
 
-    ⚠️ لا مهلة ولا تأكيد تلقائي: لا شيء في هذه الدالة (ولا في أي مهمة
-       دورية) ينقل الحالة بمرور الوقت.
+    📌 إن لم يؤكد العميل، يؤكدها النظام بعد JOB_AUTO_CONFIRM_HOURS من
+       "انتهيت" (auto_confirm_overdue_jobs — قرار PO 2026-09-27).
 
     📌 يُطلق دفع المقاول (§36.5) بعد تثبيت المعاملة — لا داخلها. الدالة
        نفسها مسؤولة عن الانتقال وحده، والدفع أثر جانبي معزول.
@@ -472,24 +474,94 @@ def confirm_job_completion(job, customer_user):
             f"Job is {job.status} and cannot be confirmed."
         )
 
-    job.status = JobStatus.COMPLETED
-    job.confirmed_at = timezone.now()
-    job.save(update_fields=["status", "confirmed_at", "updated_at"])
-    # 📌 أثر جانبي معزول بعد الـcommit (استيراد كسول — حارس المعمارية)
-    _emit("job_completed", job)
-
+    _complete_job(job, auto=False)
     logger.info(
         "Job completion confirmed (job_id=%s, by=%s)", job.id, customer_user.id
     )
+    return job
 
-    # 📌 دفع المقاول فورًا بعد تثبيت التأكيد (§36.5) — بعد المعاملة لا
-    #    داخلها: فشل المزوّد لا يجوز أن يُلغي تأكيدًا صحيحًا.
-    # robust=True: طبقة حماية من الإطار فوق try/except الداخلي (Django 5.0+).
+
+def _complete_job(job, *, auto):
+    """
+    الانتقال إلى COMPLETED وآثاره — مشترك بين تأكيد العميل والتأكيد التلقائي.
+
+    📌 دفع المقاول بعد تثبيت المعاملة (§36.5) لا داخلها: فشل المزوّد لا يلغي
+       تأكيدًا صحيحًا. robust=True طبقة حماية فوق try/except الداخلي.
+    """
+    job.status = JobStatus.COMPLETED
+    job.confirmed_at = timezone.now()
+    job.auto_confirmed = auto
+    job.save(update_fields=["status", "confirmed_at", "auto_confirmed", "updated_at"])
+    # 📌 أثر جانبي معزول بعد الـcommit (استيراد كسول — حارس المعمارية)
+    _emit("job_completed", job)
+    if auto:
+        _emit("job_auto_confirmed", job)
+
     transaction.on_commit(
         lambda: _release_payout_after_commit(job.booking), robust=True
     )
 
-    return job
+
+# ------------------------------------------------------------
+# العميل لا يؤكد — تذكير ثم تأكيد تلقائي (قرار PO — 2026-09-27)
+# ------------------------------------------------------------
+def auto_confirm_deadline(job):
+    """متى تُؤكَّد تلقائيًا — None إن لم تكن بانتظار العميل."""
+    if job.status != JobStatus.AWAITING_CUSTOMER_CONFIRMATION or job.marked_done_at is None:
+        return None
+    return job.marked_done_at + timedelta(hours=settings.JOB_AUTO_CONFIRM_HOURS)
+
+
+def auto_confirm_overdue_jobs(now=None):
+    """
+    يؤكد كل مهمة انتظرت العميل JOB_AUTO_CONFIRM_HOURS أو أكثر. يعيد العدد.
+
+    🔒 قفل صف لكل مهمة وإعادة فحص حالتها: عميلٌ أكّد في اللحظة نفسها لا
+       يُنتج تأكيدين ولا دفعتين.
+    """
+    now = now or timezone.now()
+    cutoff = now - timedelta(hours=settings.JOB_AUTO_CONFIRM_HOURS)
+    due = list(
+        Job.objects.filter(
+            status=JobStatus.AWAITING_CUSTOMER_CONFIRMATION, marked_done_at__lte=cutoff
+        ).values_list("pk", flat=True)
+    )
+    confirmed = 0
+    for job_id in due:
+        with transaction.atomic():
+            job = Job.objects.select_for_update().select_related("booking").get(pk=job_id)
+            if job.status != JobStatus.AWAITING_CUSTOMER_CONFIRMATION:
+                continue
+            _complete_job(job, auto=True)
+            confirmed += 1
+            logger.info("Job auto-confirmed (job_id=%s)", job.id)
+    return confirmed
+
+
+def send_confirmation_reminders(now=None):
+    """
+    تذكير واحد للعميل بعد JOB_CONFIRM_REMINDER_HOURS من "انتهيت". يعيد العدد.
+
+    📌 تحديث شرطي على confirmation_reminder_sent_at: تشغيلان متزامنان لا
+       يرسلان تذكيرين.
+    """
+    now = now or timezone.now()
+    cutoff = now - timedelta(hours=settings.JOB_CONFIRM_REMINDER_HOURS)
+    due = Job.objects.filter(
+        status=JobStatus.AWAITING_CUSTOMER_CONFIRMATION,
+        marked_done_at__lte=cutoff,
+        confirmation_reminder_sent_at__isnull=True,
+    ).select_related("booking")
+    sent = 0
+    for job in due:
+        with transaction.atomic():
+            updated = Job.objects.filter(
+                pk=job.pk, confirmation_reminder_sent_at__isnull=True
+            ).update(confirmation_reminder_sent_at=now)
+            if updated:
+                _emit("job_confirmation_reminder", job)
+                sent += 1
+    return sent
 
 
 def _release_payout_after_commit(booking):

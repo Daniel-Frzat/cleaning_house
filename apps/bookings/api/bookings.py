@@ -33,6 +33,8 @@ from apps.accounts.authentication import ActiveUserJWTAuth
 from apps.properties.services import properties as properties_svc
 
 from ..models import BookingStatus
+from apps.aftercare.services import aftercare as aftercare_svc
+
 from ..services import bookings as svc
 from ..services import scheduling as scheduling_svc
 from .schemas import BookingCancelIn, BookingIn, BookingOut, BookingRescheduleIn, ErrorOut
@@ -84,6 +86,7 @@ def _serialize_payment(booking):
         "status": payment.status,
         "amount": payment.amount,
         "method": payment.method,
+        "refunded_amount": payment.refunded_amount,
     }
 
 
@@ -143,8 +146,21 @@ def _serialize(booking):
             }
             for sel in booking.service_selections.all()
         ],
+        **_aftercare(booking),
         "created_at": booking.created_at,
         "updated_at": booking.updated_at,
+    }
+
+
+def _aftercare(booking):
+    """التقييم الإلزامي وضمان إعادة التنظيف (قرارات PO — 2026-09-27)."""
+    review, required = aftercare_svc.review_summary(booking)
+    return {
+        "review": None if review is None else {
+            "stars": review.stars, "comment": review.comment, "created_at": review.created_at,
+        },
+        "review_required": required,
+        "reclean_eligible_until": aftercare_svc.reclean_deadline(booking),
     }
 
 
@@ -236,6 +252,8 @@ def create_booking(request, payload: BookingIn):
     except scheduling_svc.SchedulingError as exc:
         # 400: موعد ماضٍ أو خارج ساعات العمل — نفس رتبة بقية قواعد العمل
         return _error(400, exc.code, str(exc))
+    except aftercare_svc.ReviewRequiredError as exc:
+        return _error(409, exc.code, str(exc))
     except svc.InvalidCustomerRoleError as exc:
         return _error(403, exc.code, str(exc))
     except svc.BookingPermissionError as exc:

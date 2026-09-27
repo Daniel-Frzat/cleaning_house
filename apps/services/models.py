@@ -89,6 +89,13 @@ class ServiceType(models.Model):
     # مستقبلية قد تشير إليها.
     is_active = models.BooleanField(default=True)
 
+    # ضمان إعادة التنظيف 72 ساعة (قرار PO — 2026-09-27). الإدارة تختار أي
+    # خدمة يشملها (End of lease مثلًا) بدل تثبيت اسم خدمة في الكود.
+    reclean_guarantee = models.BooleanField(
+        default=False,
+        help_text="Customers can request a free re-clean within the guarantee window after completion.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

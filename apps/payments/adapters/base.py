@@ -119,6 +119,16 @@ class BasePaymentProviderAdapter(ABC):
             "This provider does not support deferred confirmation."
         )
 
+    def refund(self, provider_reference: str, amount: Decimal, idempotency_key: str, currency: str = "AUD"):
+        """
+        يعيد مبلغًا (كله أو بعضه) إلى وسيلة الدفع. يعيد PaymentChargeResult:
+        SUCCEEDED مع provider_reference للاسترداد، أو FAILED مع السبب.
+
+        ⚠️ غير مجرّدة عمدًا: الافتراضي يرفع NotImplementedError حتى ينفّذه
+           المزوّد الحقيقي.
+        """
+        raise NotImplementedError("This provider does not support refunds.")
+
     def setup_payment_method(self, customer_reference: str):
         """
         ينشئ جلسة إضافة طريقة دفع (§18).

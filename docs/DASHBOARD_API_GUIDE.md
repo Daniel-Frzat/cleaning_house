@@ -233,6 +233,19 @@ Refresh it every 30–60 s.
   - `SUCCEEDED` needs `provider_reference`, marks the payment paid, and confirms the booking. If the offer is no longer reserved, `booking_confirmed` is `false`.
   - `FAILED` lets the customer retry.
   - The provider is **not** called. You record what you verified in the provider's own dashboard.
+- **Refund (any admin):** `POST /api/admin/payments/{id}/refund`
+
+  ```json
+  {"amount": "50.00", "reason": "Kitchen not cleaned"}
+  ```
+
+  - Omit `amount` to refund the whole unrefunded balance.
+  - Only `SUCCEEDED` payments can be refunded.
+  - Partial refunds add up, never beyond the amount paid.
+  - A full refund sets `REFUNDED`; a partial one keeps `SUCCEEDED` and raises `refunded_amount`.
+  - The refund goes through the payment provider (`502 refund_failed` if it refuses).
+  - The customer is notified. The cleaner's payout is untouched.
+  - The refund is recorded in the audit log.
 
 **Payouts**
 
@@ -260,7 +273,8 @@ Review body: `{"status": "VERIFIED" | "REJECTED", "rejection_reason": "…"}`. A
 **Service catalog and pricing**
 
 - `GET/POST /api/admin/services`, `GET/PATCH/DELETE /api/admin/services/{id}`.
-  - Body: `{name, description, room_price, base_price, is_active}`.
+  - Body: `{name, description, room_price, base_price, is_active, reclean_guarantee}`.
+  - `reclean_guarantee: true` puts the service under the 72-hour free re-clean guarantee, for example End of lease.
   - Price per selection = `room_price × room_count + base_price`.
   - An add-on is a service with `room_price = 0`.
   - `DELETE` is a soft delete (`is_active = false`). Existing bookings keep their frozen prices.
@@ -280,6 +294,27 @@ Review body: `{"status": "VERIFIED" | "REJECTED", "rejection_reason": "…"}`. A
   - Despite the endpoint name, this is the platform-wide settings screen: pricing, offer timeout and service hours.
   - Changes apply to **new** quotes and offers only. Prices already quoted or offered stay frozen.
   - Every change is in the audit log with before and after values.
+
+**Re-clean requests**
+
+- `GET /api/admin/reclean-requests?status=SUBMITTED|APPROVED|REJECTED&limit=&offset=` and `/{id}`.
+  - Each request has `areas[]`, `details`, `public_reference` and `customer_id`.
+- `PATCH /api/admin/reclean-requests/{id}` with `{"status": "APPROVED" | "REJECTED", "note": "shown to the customer"}`.
+  - A request is decided once.
+  - The customer receives `reclean.updated`.
+  - Arranging the re-clean visit itself is manual for now.
+
+**Invoices**
+
+- `GET /api/admin/bookings/{id}/invoice` returns the same invoice the customer sees.
+  - The number is `INV-YYYY-NNNNNN`, sequential per year.
+  - The invoice is issued on first request once paid.
+  - There is no GST line.
+
+**Jobs and ratings**
+
+- `auto_confirmed: true` on a job means the customer did not confirm within 12 hours, so the system confirmed it and released the payout.
+- Customers must rate every completed clean before requesting another one. Cleaners' ratings (`rating_average`, `rating_count`) are on the contractor profile.
 
 **Support**
 
@@ -635,6 +670,18 @@ Request body (`application/json`): `ReconcileIn`
 
 Responses: `200` → `PaymentReconcileOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`, `422` → `ErrorOut`
 
+#### `POST /api/admin/payments/{payment_id}/refund`
+
+**Refund a customer payment, in full or in part (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `payment_id` | path | string (uuid) | yes |  |
+
+Request body (`application/json`): `RefundIn`
+
+Responses: `200` → `AdminPaymentDetailOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`, `422` → `ErrorOut`, `502` → `ErrorOut`
+
 ### Admin — Payouts
 
 #### `GET /api/admin/payouts`
@@ -837,6 +884,52 @@ Request body (`application/json`): `SupportStatusPatch`
 
 Responses: `200` → `AdminSupportRequestOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
 
+### Admin — Aftercare
+
+#### `GET /api/admin/reclean-requests`
+
+**Re-clean requests (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `limit` | query | integer |  | default `50`; ≥ 1, ≤ 200 |
+| `offset` | query | integer |  | default `0`; ≥ 0 |
+| `status` | query | `RecleanStatus` \| null |  |  |
+
+Responses: `200` → `AdminRecleanListOut`, `403` → `ErrorOut`
+
+#### `GET /api/admin/reclean-requests/{request_id}`
+
+**One re-clean request (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `request_id` | path | string (uuid) | yes |  |
+
+Responses: `200` → `AdminRecleanRequestOut`, `403` → `ErrorOut`, `404` → `ErrorOut`
+
+#### `PATCH /api/admin/reclean-requests/{request_id}`
+
+**Approve or reject a re-clean request (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `request_id` | path | string (uuid) | yes |  |
+
+Request body (`application/json`): `RecleanDecisionIn`
+
+Responses: `200` → `AdminRecleanRequestOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+
+#### `GET /api/admin/bookings/{booking_id}/invoice`
+
+**Invoice for a paid booking (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `booking_id` | path | string (uuid) | yes |  |
+
+Responses: `200` → `InvoiceOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+
 ### Admin — Notifications
 
 #### `POST /api/admin/broadcasts`
@@ -1008,6 +1101,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `started_at` | string (date-time) \| null |  |  |
 | `marked_done_at` | string (date-time) \| null |  |  |
 | `confirmed_at` | string (date-time) \| null |  |  |
+| `auto_confirmed` | boolean |  | default `false` |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 | `photos` | array of `AdminJobPhotoOut` | yes |  |
@@ -1075,6 +1169,8 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `failure_reason` | string \| null |  |  |
 | `needs_reconciliation` | boolean | yes |  |
 | `paid_at` | string (date-time) \| null |  |  |
+| `refunded_amount` | number \| string |  | default `"0"`; pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `refunded_at` | string (date-time) \| null |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 | `method_summary` | object \| null |  |  |
@@ -1133,6 +1229,28 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | --- | --- | --- | --- |
 | `count` | integer | yes |  |
 | `items` | array of `AdminPropertyOut` | yes |  |
+
+#### `AdminRecleanListOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `count` | integer | yes |  |
+| `items` | array of `AdminRecleanRequestOut` | yes |  |
+
+#### `AdminRecleanRequestOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string (uuid) | yes |  |
+| `booking_id` | string (uuid) | yes |  |
+| `areas` | array of string | yes |  |
+| `details` | string | yes |  |
+| `status` | string | yes |  |
+| `decision_note` | string | yes |  |
+| `decided_at` | string (date-time) \| null |  |  |
+| `created_at` | string (date-time) | yes |  |
+| `customer_id` | string (uuid) | yes |  |
+| `public_reference` | string | yes |  |
 
 #### `AdminResendIn`
 
@@ -1279,6 +1397,8 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `latitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `longitude` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `availability_status` | string | yes |  |
+| `rating_average` | number \| string \| null |  | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `rating_count` | integer |  | default `0` |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1328,6 +1448,22 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
+#### `InvoiceOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `number` | string | yes | INV-YYYY-NNNNNN, sequential per year; never changes once issued. |
+| `issued_at` | string (date-time) | yes |  |
+| `booking_id` | string (uuid) | yes |  |
+| `public_reference` | string | yes |  |
+| `service_date` | string (date) \| null |  |  |
+| `service_address` | string | yes |  |
+| `lines` | array of `InvoiceLineOut` | yes |  |
+| `total` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `currency` | string | yes |  |
+| `gst_included` | boolean |  | default `false`; Always false: no GST line (PO decision). |
+| `payment` | `InvoicePaymentOut` | yes |  |
+
 #### `PasswordChangeIn`
 
 | Field | Type | Required | Notes |
@@ -1352,6 +1488,8 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `failure_reason` | string \| null |  |  |
 | `needs_reconciliation` | boolean | yes |  |
 | `paid_at` | string (date-time) \| null |  |  |
+| `refunded_amount` | number \| string |  | default `"0"`; pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `refunded_at` | string (date-time) \| null |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 | `method_summary` | object \| null |  |  |
@@ -1395,6 +1533,13 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `service_hours_start` | string (time) \| null |  | Opening time, property-local (HH:MM). Applies when service hours are enabled. |
 | `service_hours_end` | string (time) \| null |  | Closing time, property-local, inclusive. Earlier than the start means an overnight window. Must differ from the start. |
 
+#### `RecleanDecisionIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `status` | string | yes | pattern ^(APPROVED|REJECTED)$ |
+| `note` | string |  | max len 1000 |
+
 #### `ReconcileIn`
 
 | Field | Type | Required | Notes |
@@ -1402,6 +1547,13 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `outcome` | `ReconcileOutcome` | yes |  |
 | `provider_reference` | string \| null |  | max len 255 |
 | `note` | string | yes | min len 1, max len 1000, pattern \S |
+
+#### `RefundIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `amount` | number \| string \| null |  | > 0.0; Omit to refund the whole unrefunded balance. |
+| `reason` | string | yes | min len 1, max len 1000, pattern \S |
 
 #### `ReviewPatch`
 
@@ -1419,6 +1571,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `room_price` | number \| string | yes | ≥ 0.0 |
 | `base_price` | number \| string | yes | ≥ 0.0 |
 | `is_active` | boolean |  | default `true` |
+| `reclean_guarantee` | boolean |  | default `false`; Covered by the free re-clean guarantee. |
 
 #### `ServiceTypeOut`
 
@@ -1430,6 +1583,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `room_price` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `base_price` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `is_active` | boolean | yes |  |
+| `reclean_guarantee` | boolean |  | default `false` |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1442,6 +1596,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `room_price` | number \| string \| null |  | ≥ 0.0 |
 | `base_price` | number \| string \| null |  | ≥ 0.0 |
 | `is_active` | boolean \| null |  |  |
+| `reclean_guarantee` | boolean \| null |  |  |
 
 #### `SupportStatusPatch`
 
@@ -1522,6 +1677,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `started_at` | string (date-time) \| null |  |  |
 | `marked_done_at` | string (date-time) \| null |  |  |
 | `confirmed_at` | string (date-time) \| null |  |  |
+| `auto_confirmed` | boolean |  | default `false` |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1572,6 +1728,8 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `failure_reason` | string \| null |  |  |
 | `needs_reconciliation` | boolean | yes |  |
 | `paid_at` | string (date-time) \| null |  |  |
+| `refunded_amount` | number \| string |  | default `"0"`; pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+| `refunded_at` | string (date-time) \| null |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 
@@ -1661,6 +1819,24 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `responded_at` | string (date-time) \| null |  |  |
 | `expires_at` | string (date-time) | yes |  |
 | `close_reason` | string \| null |  |  |
+
+#### `InvoiceLineOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `description` | string | yes |  |
+| `quantity` | integer | yes |  |
+| `amount` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
+
+#### `InvoicePaymentOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `method` | string | yes |  |
+| `display_name` | string | yes |  |
+| `status` | string | yes |  |
+| `paid_at` | string (date-time) \| null |  |  |
+| `refunded_amount` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 
 #### `JobSummaryOut`
 
