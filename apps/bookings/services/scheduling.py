@@ -1,18 +1,18 @@
 """
 Scheduled Visit — Booking Domain (موعد الزيارة)
 
-تطبيع موعد الزيارة والتحقق منه: تحويله إلى UTC، وفرض ساعات العمل العامة،
-وفرض أن يكون في المستقبل.
+تطبيع موعد الزيارة والتحقق منه: تحويله إلى UTC، وفرض ساعات الخدمة إن
+فُعّلت، وفرض أن يكون في المستقبل.
 
-📌 ساعات العمل ثابتة وعامة (07:00–19:00 بالتوقيت المحلي المحسوب). لا
-   يوجد هنا — ولا يجوز أن يوجد — أي فحص لتوفّر مقاول بعينه: الإسناد
-   يقع بعد الحجز لا قبله (§36.1)، فلا مقاول معروف أصلًا لحظة التحقق.
+📌 ساعات الخدمة يضبطها الداشبورد (PricingConfig.service_hours_*، قرار PO —
+   2026-09-27)، ومعطّلة افتراضيًا: الخدمة متاحة على مدار الساعة. لا يوجد
+   هنا — ولا يجوز أن يوجد — أي فحص لتوفّر مقاول بعينه: الإسناد يقع بعد
+   الحجز لا قبله (§36.1).
 
-⚠️ حدود ساعات العمل تُقارن بالتوقيت المحلي للعنوان، لا بتوقيت الخادم.
-   لحظة UTC واحدة تقع داخل الدوام في بيرث وخارجه في سيدني.
+⚠️ الحدود تُقارن بالتوقيت المحلي للعنوان، لا بتوقيت الخادم. لحظة UTC
+   واحدة تقع داخل الدوام في بيرث وخارجه في سيدني.
 
-⚠️ الحد الأعلى شامل: 19:00 بالضبط مقبولة كنقطة بداية زيارة. لا مدة
-   مخزَّنة في هذه المرحلة، فلا معنى لحساب وقت انتهاء.
+⚠️ الحد الأعلى شامل: وقت الإغلاق بالضبط مقبول كنقطة بداية زيارة.
 """
 
 import datetime
@@ -20,10 +20,6 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.utils import timezone as dj_timezone
-
-# ساعات العمل العامة بالتوقيت المحلي المحسوب
-BUSINESS_HOURS_START = datetime.time(7, 0)
-BUSINESS_HOURS_END = datetime.time(19, 0)
 
 
 class SchedulingError(Exception):
@@ -107,12 +103,10 @@ def normalize_scheduled_at(scheduled_at, timezone_name):
             f"The scheduled visit must be at least {lead} minutes from now."
         )
 
-    local_time = local.timetz().replace(tzinfo=None)
-    if not (BUSINESS_HOURS_START <= local_time <= BUSINESS_HOURS_END):
+    window = current_service_window()
+    if not _within(local, window):
         raise OutsideBusinessHoursError(
-            f"The scheduled visit must fall between "
-            f"{BUSINESS_HOURS_START.strftime('%H:%M')} and "
-            f"{BUSINESS_HOURS_END.strftime('%H:%M')} "
+            f"The scheduled visit must fall between {_label(window)} "
             f"local time ({timezone_name}); got {local.strftime('%H:%M')}."
         )
 
@@ -136,18 +130,75 @@ def assert_open_now(timezone_name, now=None):
     الطلب الفوري (بلا scheduled_at): ساعات العمل نفسها 07:00–19:00 بتوقيت
     العقار تسري على لحظة الطلب (قرار PO — 2026-09-26). لا مهلة دنيا.
 
-    ON_DEMAND_ENFORCE_BUSINESS_HOURS=False يعطّل الفحص (بيئة الاختبارات،
-    حتى لا تعتمد نتيجتها على ساعة تشغيلها).
+    ساعات الخدمة المعطّلة (الافتراضي) = لا فحص.
     """
-    if not getattr(settings, "ON_DEMAND_ENFORCE_BUSINESS_HOURS", True):
-        return
+    window = current_service_window()
+    local = (now or dj_timezone.now()).astimezone(ZoneInfo(timezone_name))
+    if not _within(local, window):
+        raise OutsideBusinessHoursError(
+            f"Cleaners can be requested between {_label(window)} local time "
+            f"({timezone_name}); it is {local.strftime('%H:%M')} there now."
+        )
+
+
+def current_service_window():
+    """
+    (بداية، نهاية) من إعداد الداشبورد، أو None حين تكون الساعات معطّلة
+    (الافتراضي: متاح على مدار الساعة).
+    """
+    from apps.services.services.travel_pricing import get_active_config
+
+    config = get_active_config()
+    if not config.service_hours_enabled:
+        return None
+    return config.service_hours_start, config.service_hours_end
+
+
+def _within(local, window):
+    if window is None:
+        return True
+    start, end = window
+    local_time = local.timetz().replace(tzinfo=None)
+    if start < end:
+        return start <= local_time <= end
+    # نافذة تعبر منتصف الليل (20:00 → 02:00)
+    return local_time >= start or local_time <= end
+
+
+def _label(window):
+    start, end = window
+    return f"{start.strftime('%H:%M')} and {end.strftime('%H:%M')}"
+
+
+def service_hours(timezone_name, now=None):
+    """
+    ساعات الخدمة كما يطبّقها الخادم — ليعرضها التطبيق ويمنع الإرسال خارجها
+    قبل أن يرسل (تقرير التطبيق B18)، بدل أن يكتشفها من 400 بعد الإرسال.
+
+    🔒 مصدر واحد: نفس الثوابت ونفس المفتاح اللذين يفحص بهما assert_open_now
+       و normalize_scheduled_at، فلا يختلف ما يُعرض عمّا يُفرض.
+    """
     tz = ZoneInfo(timezone_name)
     local = (now or dj_timezone.now()).astimezone(tz)
-    local_time = local.timetz().replace(tzinfo=None)
-    if not (BUSINESS_HOURS_START <= local_time <= BUSINESS_HOURS_END):
-        raise OutsideBusinessHoursError(
-            f"Cleaners can be requested between "
-            f"{BUSINESS_HOURS_START.strftime('%H:%M')} and "
-            f"{BUSINESS_HOURS_END.strftime('%H:%M')} local time ({timezone_name}); "
-            f"it is {local.strftime('%H:%M')} there now."
-        )
+    window = current_service_window()
+    is_open = _within(local, window)
+
+    next_open_at = None
+    if not is_open:
+        start = window[0]
+        opening = local.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
+        if opening <= local:  # الافتتاح التالي غدًا
+            opening = (local + datetime.timedelta(days=1)).replace(
+                hour=start.hour, minute=start.minute, second=0, microsecond=0
+            )
+        next_open_at = opening.astimezone(datetime.timezone.utc)
+
+    return {
+        "timezone": timezone_name,
+        "enabled": window is not None,
+        "opens_at": window[0].strftime("%H:%M") if window else None,
+        "closes_at": window[1].strftime("%H:%M") if window else None,
+        "is_open_now": is_open,
+        "next_open_at": next_open_at,
+        "min_lead_minutes": getattr(settings, "BOOKING_MIN_LEAD_MINUTES", 0),
+    }

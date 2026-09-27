@@ -187,6 +187,7 @@ Refresh it every 30–60 s.
   - The user is signed out on their next call and receives no offers.
   - Admin accounts are managed in §1.5, not here.
 - `POST /api/admin/users/{id}/reactivate` reactivates a user.
+- Status `DELETED` means the user deleted their own account from the app. Name, phone and email are erased, `deleted_at` is set, and the phone shows as `deleted:…`. Deleted accounts cannot be suspended or reactivated (`409`); their past bookings, payments and payouts remain for the records.
 - `GET /api/admin/users/{id}/notifications` shows what was sent to that user, with push status. Useful for support.
 
 **Properties**
@@ -272,8 +273,11 @@ Review body: `{"status": "VERIFIED" | "REJECTED", "rejection_reason": "…"}`. A
   | `maximum_travel_fee` | Cap on the travel component. **It also sets the customer's "Up to A$…" figure** (services total + this cap), so keep it realistic. |
   | `rounding_rule` | `NEAREST_CENT`, `NEAREST_5C`, `NEAREST_10C` or `NEAREST_DOLLAR`, applied once to the final total. |
   | `dispatch_offer_ttl_seconds` | How long a cleaner can answer an offer. |
+  | `service_hours_enabled` | **Off by default: cleaners can be requested at any hour.** On: on-demand requests and scheduled visits must fall inside the window. |
+  | `service_hours_start` / `service_hours_end` | The window, property-local (`HH:MM`). The end is inclusive and may be earlier than the start for an overnight window, for example `20:00` to `02:00`. Start and end must differ. |
 
-  - Read-only in the response: `currency`, `pricing_version` (goes up on every pricing change, not on a TTL change), `active_from`, `updated_at`.
+  - Read-only in the response: `currency`, `pricing_version` (goes up on every pricing change, not on a TTL or service-hours change), `active_from`, `updated_at`.
+  - Despite the endpoint name, this is the platform-wide settings screen: pricing, offer timeout and service hours.
   - Changes apply to **new** quotes and offers only. Prices already quoted or offered stay frozen.
   - Every change is in the audit log with before and after values.
 
@@ -1175,6 +1179,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `is_active` | boolean | yes |  |
 | `is_superuser` | boolean | yes |  |
 | `date_joined` | string (date-time) | yes |  |
+| `deleted_at` | string (date-time) \| null |  |  |
 | `last_login` | string (date-time) \| null |  |  |
 | `contractor_status` | string | yes |  |
 | `contractor_profile_id` | string (uuid) \| null |  |  |
@@ -1369,6 +1374,9 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `maximum_travel_fee` | number \| string | yes | pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$ |
 | `rounding_rule` | string | yes |  |
 | `dispatch_offer_ttl_seconds` | integer | yes |  |
+| `service_hours_enabled` | boolean | yes |  |
+| `service_hours_start` | string (time) | yes |  |
+| `service_hours_end` | string (time) | yes |  |
 | `currency` | string | yes |  |
 | `pricing_version` | integer | yes |  |
 | `active_from` | string (date-time) | yes |  |
@@ -1383,6 +1391,9 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `maximum_travel_fee` | number \| string \| null |  | ≥ 0.0; Cap on the travel component. Also sets the customer's pre-request maximum: services total + this cap. |
 | `rounding_rule` | `RoundingRule` \| null |  | Applied once, to the final total. |
 | `dispatch_offer_ttl_seconds` | integer \| null |  | ≥ 1; How long a contractor can answer an offer. Not a pricing change. |
+| `service_hours_enabled` | boolean \| null |  | false (default): cleaners can be requested at any hour. |
+| `service_hours_start` | string (time) \| null |  | Opening time, property-local (HH:MM). Applies when service hours are enabled. |
+| `service_hours_end` | string (time) \| null |  | Closing time, property-local, inclusive. Earlier than the start means an overnight window. Must differ from the start. |
 
 #### `ReconcileIn`
 
@@ -1595,6 +1606,7 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | `is_active` | boolean | yes |  |
 | `is_superuser` | boolean | yes |  |
 | `date_joined` | string (date-time) | yes |  |
+| `deleted_at` | string (date-time) \| null |  |  |
 | `last_login` | string (date-time) \| null |  |  |
 
 #### `AuditEntryOut`

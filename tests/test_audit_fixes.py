@@ -279,7 +279,7 @@ def test_one_failing_cascade_does_not_strand_the_others(customer, prop, general,
 # ============================================================
 # 3) المهلة الدنيا والمنطقة الزمنية وعقار محذوف
 # ============================================================
-def test_booking_too_soon_is_refused(settings, monkeypatch):
+def test_booking_too_soon_is_refused(settings, monkeypatch, db):
     """الساعة مثبّتة على 10:00 بسيدني حتى لا يعتمد الاختبار على وقت تشغيله."""
     import datetime
     from zoneinfo import ZoneInfo

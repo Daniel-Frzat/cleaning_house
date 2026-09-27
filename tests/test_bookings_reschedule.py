@@ -451,7 +451,7 @@ def test_past_time_is_rejected(client, customer, prop, service_type):
 
 
 @pytest.mark.django_db
-def test_time_outside_business_hours_is_rejected(client, customer, prop, service_type):
+def test_time_outside_business_hours_is_rejected(client, customer, prop, service_type, business_hours):
     booking = make_booking(customer, prop, service_type)
     late = next_business_time(days=2, hour=22)
 

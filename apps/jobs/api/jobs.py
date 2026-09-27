@@ -4,6 +4,7 @@ Jobs API — Jobs Domain (Change Set §36.3؛ Infra §7)
 نقاط النهاية (محمية بـJWT):
     POST /api/contractor/jobs/{job_id}/start      إعلان بدء العمل (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/photos     رفع صورة (المقاول المُسنَد)
+    DELETE /api/contractor/jobs/{job_id}/photos/{photo_id}  إزالة صورة قبل الإنجاز
     POST /api/contractor/jobs/{job_id}/mark-done  إعلان الإنجاز (المقاول المُسنَد)
     POST /api/contractor/jobs/{job_id}/location   تحديث الموقع (المقاول المُسنَد)
     GET  /api/bookings/{id}/job                   عرض المهمة (عميل/إدارة/مقاول)
@@ -216,8 +217,10 @@ def list_contractor_jobs(request, status: str | None = None):
         "The response carries a `signed_url` for viewing the photo. The raw "
         "`storage_key` is returned to administrators only and is `null` for "
         "everyone else.\n\n"
-        "**Note:** no storage provider ships with this build, so uploads fail "
-        "until one is configured."
+        "**Note:** uploads need a storage provider (`JOB_STORAGE_ADAPTER_CLASS`). "
+        "Until one is configured they fail, unless the test-phase switch "
+        "`JOBS_ALLOW_FAKE_STORAGE_ADAPTER` is on; the fake adapter discards the "
+        "bytes and returns a placeholder `signed_url`."
     ),
     openapi_extra={
         "responses": {
@@ -276,6 +279,45 @@ def upload_photo(
     is_admin = request.user.has_admin_access()
 
     return 201, _serialize_photo(photo, signed_url, include_storage_key=is_admin)
+
+
+# ------------------------------------------------------------
+# DELETE /contractor/jobs/{job_id}/photos/{photo_id}
+# ------------------------------------------------------------
+@contractor_router.delete(
+    "/jobs/{job_id}/photos/{photo_id}",
+    response={204: None, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    summary="Remove a before/after photo (assigned contractor only)",
+    description=(
+        "**Who may call:** the `CONTRACTOR` assigned to this job.\n\n"
+        "**Preconditions:** the job must still be `IN_PROGRESS`. Once it is "
+        "marked done the photos are the evidence the customer confirms, and "
+        "they can no longer be removed (`409 job_not_accepting_photos`).\n\n"
+        "To replace a photo, delete it and upload the new one. `mark-done` "
+        "still requires at least one `BEFORE` and one `AFTER` photo, so "
+        "removing the last one of a type means uploading another before "
+        "marking the job done."
+    ),
+    openapi_extra={
+        "responses": {
+            403: {"description": "The caller is not the contractor assigned to this job."},
+            404: {"description": "No such job, or no such photo on this job."},
+            409: {"description": "The job is no longer in progress."},
+        }
+    },
+)
+def delete_photo(request, job_id: uuid.UUID, photo_id: uuid.UUID):
+    try:
+        photos_svc.delete_job_photo(request.user, job_id, photo_id)
+    except jobs_svc.JobPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    except jobs_svc.JobNotFoundError as exc:
+        return _error(404, exc.code, "Job not found.")
+    except photos_svc.PhotoNotFoundError as exc:
+        return _error(404, exc.code, str(exc))
+    except photos_svc.JobNotAcceptingPhotosError as exc:
+        return _error(409, exc.code, str(exc))
+    return 204, None
 
 
 # ------------------------------------------------------------

@@ -50,6 +50,7 @@ class AdminUserOut(Schema):
     is_active: bool
     is_superuser: bool
     date_joined: datetime
+    deleted_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
 
@@ -87,6 +88,7 @@ def _serialize(user):
         "is_active": user.is_active,
         "is_superuser": bool(user.is_superuser),
         "date_joined": user.date_joined,
+        "deleted_at": user.deleted_at,
         "last_login": user.last_login,
     }
 

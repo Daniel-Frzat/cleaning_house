@@ -266,6 +266,9 @@ PRICING_EDITABLE_FIELDS = (
     "maximum_travel_fee",
     "rounding_rule",
     "dispatch_offer_ttl_seconds",
+    "service_hours_enabled",
+    "service_hours_start",
+    "service_hours_end",
 )
 
 

@@ -59,6 +59,34 @@ class QuoteIn(Schema):
    service_selections: list[ServiceSelectionIn]
 
 
+class ServiceHoursOut(Schema):
+   """ساعات الخدمة بتوقيت العقار — نفس القاعدة التي يفرضها الخادم."""
+
+   timezone: str = Field(..., description="The property's IANA timezone, e.g. Australia/Sydney.")
+   enabled: bool = Field(
+       ..., description="false (the default): cleaners can be requested at any hour."
+   )
+   opens_at: Optional[str] = Field(
+       None, description="Local opening time, HH:MM; null when hours are not enabled."
+   )
+   closes_at: Optional[str] = Field(
+       None,
+       description=(
+           "Local closing time, HH:MM, inclusive; null when hours are not enabled. "
+           "Earlier than opens_at means the window runs past midnight."
+       ),
+   )
+   is_open_now: bool = Field(
+       ..., description="An on-demand request (no scheduled_at) is accepted right now."
+   )
+   next_open_at: Optional[datetime] = Field(
+       None, description="UTC instant of the next opening; null while open."
+   )
+   min_lead_minutes: int = Field(
+       ..., description="Minimum lead time for a scheduled booking (with scheduled_at)."
+   )
+
+
 class QuoteOut(Schema):
    id: uuid.UUID
    property_id: uuid.UUID
@@ -68,6 +96,7 @@ class QuoteOut(Schema):
    pricing_version: int
    expires_at: datetime
    created_at: datetime
+   service_hours: ServiceHoursOut
 
 
 class BookingRescheduleIn(Schema):

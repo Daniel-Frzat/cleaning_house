@@ -9,7 +9,7 @@ API Schemas — Services Catalog & Pricing Domain
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from typing import Optional
 
@@ -74,6 +74,9 @@ class PricingConfigOut(Schema):
     maximum_travel_fee: Decimal
     rounding_rule: str
     dispatch_offer_ttl_seconds: int
+    service_hours_enabled: bool
+    service_hours_start: time
+    service_hours_end: time
     currency: str
     pricing_version: int
     active_from: datetime
@@ -100,6 +103,19 @@ class PricingConfigPatch(Schema):
     rounding_rule: Optional[RoundingRule] = Field(None, description="Applied once, to the final total.")
     dispatch_offer_ttl_seconds: Optional[int] = Field(
         None, ge=1, description="How long a contractor can answer an offer. Not a pricing change."
+    )
+    service_hours_enabled: Optional[bool] = Field(
+        None, description="false (default): cleaners can be requested at any hour."
+    )
+    service_hours_start: Optional[time] = Field(
+        None, description="Opening time, property-local (HH:MM). Applies when service hours are enabled."
+    )
+    service_hours_end: Optional[time] = Field(
+        None,
+        description=(
+            "Closing time, property-local, inclusive. Earlier than the start means "
+            "an overnight window. Must differ from the start."
+        ),
     )
 
 

@@ -156,6 +156,13 @@ class PricingConfigAdmin(BackOfficeMixin, admin.ModelAdmin):
             {"fields": ("price_per_km", "included_distance_km", "maximum_travel_fee", "rounding_rule")},
         ),
         ("Dispatch", {"fields": ("dispatch_offer_ttl_seconds",)}),
+        (
+            "Service hours",
+            {
+                "fields": ("service_hours_enabled", "service_hours_start", "service_hours_end"),
+                "description": "Off: cleaners can be requested at any hour. Times are property-local.",
+            },
+        ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 

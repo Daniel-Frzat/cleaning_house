@@ -411,6 +411,105 @@
         ]
       }
     },
+    "/api/auth/me/deletion": {
+      "get": {
+        "operationId": "apps_accounts_api_auth_deletion_status",
+        "summary": "Can my account be deleted now?",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeletionStatusOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any app user, about their own account.\n\nFor the confirmation screen before deleting. `blockers` lists unfinished activity that must end first: a confirmed clean that is not finished, a payment in progress, a job the cleaner accepted or is doing, or earnings not yet paid out. Unpaid requests are **not** blockers; deleting cancels them.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/me/delete": {
+      "post": {
+        "operationId": "apps_accounts_api_auth_delete_me",
+        "summary": "Delete my account (permanent)",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any app user (customer or cleaner), on their own account. Administrators cannot (`403 admin_account_not_deletable`).\n\nBody `{\"confirmation\": \"DELETE\"}` — the app sends it only after the user confirms (`400 deletion_confirmation_required` otherwise).\n\n**Refused** with `409 account_deletion_blocked` while anything in `GET /api/auth/me/deletion` blocks it.\n\n**Effects (permanent):** unpaid requests are cancelled; a cleaner goes offline and open offers are declined; saved properties are removed from use; name, phone and email are erased; Apple/Google links, devices and notifications are deleted; every session ends, so the current tokens stop working at once. Completed bookings, payments and payouts are kept without the person's identity, as financial records. The phone number can sign up again as a brand-new account.",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/admin/auth/login": {
       "post": {
         "operationId": "apps_accounts_api_admin_auth_admin_login",
@@ -1841,7 +1940,7 @@
             }
           }
         },
-        "description": "**Who may call:** `ADMIN` only.\n\nPartial update: send only the fields to change (at least one). There is no per-service override. `currency` is not editable.\n\n**Side effects:** applies to **future** quotes and offers only; frozen prices are never recalculated. Any pricing change increments `pricing_version` (`dispatch_offer_ttl_seconds` alone does not). Recorded in the audit log.",
+        "description": "**Who may call:** `ADMIN` only.\n\nPartial update: send only the fields to change (at least one). There is no per-service override. `currency` is not editable.\n\n**Service hours:** off by default (requests accepted at any hour). With `service_hours_enabled: true`, on-demand requests and scheduled visits must fall between `service_hours_start` and `service_hours_end`, property-local; an end earlier than the start is an overnight window.\n\n**Side effects:** applies to **future** quotes and offers only; frozen prices are never recalculated. Any pricing change increments `pricing_version` (offer TTL and service hours do not). Recorded in the audit log.",
         "tags": [
           "Admin — Service Catalog"
         ],
@@ -3400,7 +3499,7 @@
             }
           }
         },
-        "description": "Creates a short-lived, single-use quote for the selected property and services. The maximum is frozen from the current pricing configuration; it is not the final price because travel distance is unknown until a contractor is assigned. Use the returned `id` as `quote_id` when creating the booking.",
+        "description": "Creates a short-lived, single-use quote for the selected property and services. The maximum is frozen from the current pricing configuration; it is not the final price because travel distance is unknown until a contractor is assigned. Use the returned `id` as `quote_id` when creating the booking.\n\n`service_hours` gives the rule the server enforces at the property: an on-demand request is accepted only while `is_open_now` is true, and a scheduled visit must fall between `opens_at` and `closes_at` local time, at least `min_lead_minutes` ahead.",
         "tags": [
           "Booking Quotes"
         ],
@@ -4197,7 +4296,7 @@
             }
           }
         },
-        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC image (checked from its content, not the declared type), at most `JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most `JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** no storage provider ships with this build, so uploads fail until one is configured.",
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC image (checked from its content, not the declared type), at most `JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most `JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** uploads need a storage provider (`JOB_STORAGE_ADAPTER_CLASS`). Until one is configured they fail, unless the test-phase switch `JOBS_ALLOW_FAKE_STORAGE_ADAPTER` is on; the fake adapter discards the bytes and returns a placeholder `signed_url`.",
         "tags": [
           "Contractor Jobs"
         ],
@@ -4222,6 +4321,78 @@
           },
           "required": true
         },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/jobs/{job_id}/photos/{photo_id}": {
+      "delete": {
+        "operationId": "apps_jobs_api_jobs_delete_photo",
+        "summary": "Remove a before/after photo (assigned contractor only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "photo_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Photo Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "The caller is not the contractor assigned to this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or no such photo on this job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job is no longer in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job.\n\n**Preconditions:** the job must still be `IN_PROGRESS`. Once it is marked done the photos are the evidence the customer confirms, and they can no longer be removed (`409 job_not_accepting_photos`).\n\nTo replace a photo, delete it and upload the new one. `mark-done` still requires at least one `BEFORE` and one `AFTER` photo, so removing the last one of a type means uploading another before marking the job done.",
+        "tags": [
+          "Contractor Jobs"
+        ],
         "security": [
           {
             "ActiveUserJWTAuth": []
@@ -7836,6 +8007,67 @@
         "title": "UserProfilePatch",
         "type": "object"
       },
+      "AccountDeletionStatusOut": {
+        "properties": {
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/DeletionBlockerOut"
+            },
+            "title": "Blockers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "can_delete",
+          "blockers"
+        ],
+        "title": "AccountDeletionStatusOut",
+        "type": "object"
+      },
+      "DeletionBlockerOut": {
+        "properties": {
+          "reason": {
+            "description": "active_booking (a confirmed clean is not finished), payment_in_progress, active_job (the cleaner accepted or is doing a job) or payout_pending.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "DeletionBlockerOut",
+        "type": "object"
+      },
+      "AccountDeletionIn": {
+        "properties": {
+          "confirmation": {
+            "description": "Must be exactly \"DELETE\".",
+            "title": "Confirmation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation"
+        ],
+        "title": "AccountDeletionIn",
+        "type": "object"
+      },
       "AdminLoginOut": {
         "description": "state = \"authenticated\" → tokens موجودة (جهاز موثوق).\nstate = \"otp_required\"  → challenge_id + phone_hint؛ أكمل بـ /verify.",
         "properties": {
@@ -9102,6 +9334,20 @@
             "title": "Dispatch Offer Ttl Seconds",
             "type": "integer"
           },
+          "service_hours_enabled": {
+            "title": "Service Hours Enabled",
+            "type": "boolean"
+          },
+          "service_hours_start": {
+            "format": "time",
+            "title": "Service Hours Start",
+            "type": "string"
+          },
+          "service_hours_end": {
+            "format": "time",
+            "title": "Service Hours End",
+            "type": "string"
+          },
           "currency": {
             "title": "Currency",
             "type": "string"
@@ -9127,6 +9373,9 @@
           "maximum_travel_fee",
           "rounding_rule",
           "dispatch_offer_ttl_seconds",
+          "service_hours_enabled",
+          "service_hours_start",
+          "service_hours_end",
           "currency",
           "pricing_version",
           "active_from",
@@ -9212,6 +9461,44 @@
             ],
             "description": "How long a contractor can answer an offer. Not a pricing change.",
             "title": "Dispatch Offer Ttl Seconds"
+          },
+          "service_hours_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "false (default): cleaners can be requested at any hour.",
+            "title": "Service Hours Enabled"
+          },
+          "service_hours_start": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opening time, property-local (HH:MM). Applies when service hours are enabled.",
+            "title": "Service Hours Start"
+          },
+          "service_hours_end": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing time, property-local, inclusive. Earlier than the start means an overnight window. Must differ from the start.",
+            "title": "Service Hours End"
           }
         },
         "title": "PricingConfigPatch",
@@ -10493,6 +10780,9 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "service_hours": {
+            "$ref": "#/components/schemas/ServiceHoursOut"
           }
         },
         "required": [
@@ -10503,9 +10793,80 @@
           "currency",
           "pricing_version",
           "expires_at",
-          "created_at"
+          "created_at",
+          "service_hours"
         ],
         "title": "QuoteOut",
+        "type": "object"
+      },
+      "ServiceHoursOut": {
+        "description": "ساعات الخدمة بتوقيت العقار — نفس القاعدة التي يفرضها الخادم.",
+        "properties": {
+          "timezone": {
+            "description": "The property's IANA timezone, e.g. Australia/Sydney.",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "false (the default): cleaners can be requested at any hour.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "opens_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local opening time, HH:MM; null when hours are not enabled.",
+            "title": "Opens At"
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local closing time, HH:MM, inclusive; null when hours are not enabled. Earlier than opens_at means the window runs past midnight.",
+            "title": "Closes At"
+          },
+          "is_open_now": {
+            "description": "An on-demand request (no scheduled_at) is accepted right now.",
+            "title": "Is Open Now",
+            "type": "boolean"
+          },
+          "next_open_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC instant of the next opening; null while open.",
+            "title": "Next Open At"
+          },
+          "min_lead_minutes": {
+            "description": "Minimum lead time for a scheduled booking (with scheduled_at).",
+            "title": "Min Lead Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timezone",
+          "enabled",
+          "is_open_now",
+          "min_lead_minutes"
+        ],
+        "title": "ServiceHoursOut",
         "type": "object"
       },
       "QuoteIn": {
@@ -12667,7 +13028,8 @@
         "enum": [
           "ACTIVE",
           "INACTIVE",
-          "SUSPENDED"
+          "SUSPENDED",
+          "DELETED"
         ],
         "title": "UserStatus",
         "type": "string"
@@ -12754,6 +13116,18 @@
             "format": "date-time",
             "title": "Date Joined",
             "type": "string"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
           },
           "last_login": {
             "anyOf": [
@@ -12845,6 +13219,18 @@
             "format": "date-time",
             "title": "Date Joined",
             "type": "string"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
           },
           "last_login": {
             "anyOf": [

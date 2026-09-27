@@ -134,11 +134,16 @@ def _fake_push_adapter(settings):
     FakePushAdapter.reset()
 
 
-@pytest.fixture(autouse=True)
-def _on_demand_hours_off(settings):
-    """
-    الطلب الفوري يُرفض خارج 07:00–19:00 بتوقيت العقار — فتصبح نتيجة أي اختبار
-    ينشئ حجزًا فوريًا مرهونة بساعة تشغيله. الفحص نفسه مختبَر صراحةً (بساعة
-    مثبّتة) في test_bookings_scheduling.py.
-    """
-    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = False
+@pytest.fixture
+def business_hours(db):
+    """ساعات خدمة 07:00–19:00 مفعّلة — الافتراضي معطّل (متاح دائمًا)."""
+    import datetime
+
+    from apps.services.models import PricingConfig
+
+    config, _ = PricingConfig.objects.get_or_create(pk=PricingConfig.SINGLETON_PK)
+    config.service_hours_enabled = True
+    config.service_hours_start = datetime.time(7, 0)
+    config.service_hours_end = datetime.time(19, 0)
+    config.save()
+    return config

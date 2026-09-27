@@ -33,12 +33,15 @@ from ..roles import ConfirmedRole
 # محليًا ويتحقق عند الدخول أن الوضع ما زال ضمن available_modes.
 MODE_CUSTOMER = "CUSTOMER"
 MODE_CONTRACTOR = "CONTRACTOR"
+from ..services import account_deletion as deletion_service
 from ..services import identity as identity_service
 from ..services import otp as otp_service
 from ..services import social as social_service
 from ..services import tokens as token_service
 from ..services.tokens import issue_tokens_for_user
 from .schemas import (
+    AccountDeletionIn,
+    AccountDeletionStatusOut,
     AuthOut,
     ErrorOut,
     OTPRequestIn,
@@ -461,3 +464,61 @@ def update_me(request, payload: UserProfilePatch):
         return _error(422, exc.code, str(exc))
 
     return 200, _serialize_user(user)
+
+
+# ------------------------------------------------------------
+# حذف الحساب — GET /auth/me/deletion ثم POST /auth/me/delete
+# ------------------------------------------------------------
+@router.get(
+    "/me/deletion",
+    response={200: AccountDeletionStatusOut, 403: ErrorOut},
+    auth=ActiveUserJWTAuth(),
+    summary="Can my account be deleted now?",
+    description=(
+        "**Who may call:** any app user, about their own account.\n\n"
+        "For the confirmation screen before deleting. `blockers` lists unfinished "
+        "activity that must end first: a confirmed clean that is not finished, a "
+        "payment in progress, a job the cleaner accepted or is doing, or earnings "
+        "not yet paid out. Unpaid requests are **not** blockers; deleting cancels "
+        "them.\n\n"
+        "**Side effects:** none — read-only."
+    ),
+)
+def deletion_status(request):
+    try:
+        return 200, deletion_service.get_deletion_status(request.user)
+    except deletion_service.AdminAccountDeletionError as exc:
+        return _error(403, exc.code, str(exc))
+
+
+@router.post(
+    "/me/delete",
+    response={204: None, 400: ErrorOut, 403: ErrorOut, 409: ErrorOut},
+    auth=ActiveUserJWTAuth(),
+    summary="Delete my account (permanent)",
+    description=(
+        "**Who may call:** any app user (customer or cleaner), on their own "
+        "account. Administrators cannot (`403 admin_account_not_deletable`).\n\n"
+        "Body `{\"confirmation\": \"DELETE\"}` — the app sends it only after the "
+        "user confirms (`400 deletion_confirmation_required` otherwise).\n\n"
+        "**Refused** with `409 account_deletion_blocked` while anything in "
+        "`GET /api/auth/me/deletion` blocks it.\n\n"
+        "**Effects (permanent):** unpaid requests are cancelled; a cleaner goes "
+        "offline and open offers are declined; saved properties are removed from "
+        "use; name, phone and email are erased; Apple/Google links, devices and "
+        "notifications are deleted; every session ends, so the current tokens "
+        "stop working at once. Completed bookings, payments and payouts are kept "
+        "without the person's identity, as financial records. The phone number "
+        "can sign up again as a brand-new account."
+    ),
+)
+def delete_me(request, payload: AccountDeletionIn):
+    try:
+        deletion_service.delete_account(request.user, payload.confirmation, request=request)
+    except deletion_service.AdminAccountDeletionError as exc:
+        return _error(403, exc.code, str(exc))
+    except deletion_service.DeletionConfirmationRequiredError as exc:
+        return _error(400, exc.code, str(exc))
+    except deletion_service.AccountDeletionBlockedError as exc:
+        return _error(409, exc.code, str(exc))
+    return 204, None

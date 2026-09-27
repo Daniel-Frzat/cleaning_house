@@ -142,6 +142,8 @@ def suspend_user(actor, user_id, reason, request=None):
     assert_admin(actor)
     user = _lock_target(user_id)
 
+    if user.status == UserStatus.DELETED:
+        raise InvalidUserStatusTransitionError("This account was deleted by its owner.")
     if user.status == UserStatus.SUSPENDED:
         raise InvalidUserStatusTransitionError("This account is already suspended.")
 
@@ -188,6 +190,9 @@ def reactivate_user(actor, user_id, request=None):
     assert_admin(actor)
     user = _lock_target(user_id)
 
+    # 🔒 الحذف نهائي: الهوية مُحيت والهاتف تحرّر لحساب جديد محتمل
+    if user.status == UserStatus.DELETED:
+        raise InvalidUserStatusTransitionError("This account was deleted by its owner and cannot be reactivated.")
     if user.status == UserStatus.ACTIVE:
         raise InvalidUserStatusTransitionError("This account is already active.")
 

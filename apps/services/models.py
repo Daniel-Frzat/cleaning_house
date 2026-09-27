@@ -20,9 +20,11 @@ Service Catalog & Pricing Models — Services Domain (Change Set §36.2، §5)
      للـCUSTOMER/CONTRACTOR في هذه المرحلة.
 """
 
+import datetime
 import uuid
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -188,6 +190,26 @@ class PricingConfig(models.Model):
         help_text="How long a dispatch offer stays answerable.",
     )
 
+    # ------------------------------------------------------------
+    # ساعات الخدمة — يضبطها الداشبورد (قرار PO — 2026-09-27)
+    # ------------------------------------------------------------
+    # 📌 معطّلة افتراضيًا: الخدمة متاحة على مدار الساعة حتى تفعّلها الإدارة.
+    #    البداية والنهاية بتوقيت العقار، والنهاية شاملة. نافذة تعبر منتصف
+    #    الليل مسموحة (مثلًا 20:00 → 02:00).
+    # ⚠️ ليست من PRICING_FIELDS: سياسة إتاحة لا سعر، فلا تُرقّي نسخة التسعير.
+    service_hours_enabled = models.BooleanField(
+        default=False,
+        help_text="Off: cleaners can be requested at any hour.",
+    )
+    service_hours_start = models.TimeField(
+        default=datetime.time(7, 0),
+        help_text="Opening time, property-local. Used only when service hours are on.",
+    )
+    service_hours_end = models.TimeField(
+        default=datetime.time(19, 0),
+        help_text="Closing time, property-local and inclusive. May be earlier than the start (overnight).",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -208,6 +230,13 @@ class PricingConfig(models.Model):
         "currency",
         "rounding_rule",
     )
+
+    def clean(self):
+        super().clean()
+        if self.service_hours_start == self.service_hours_end:
+            raise ValidationError(
+                {"service_hours_end": "Closing time must differ from opening time."}
+            )
 
     def save(self, *args, **kwargs):
         """

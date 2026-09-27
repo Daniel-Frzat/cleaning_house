@@ -27,7 +27,7 @@ Source of truth, in this order:
 
 | # | Your request | Status | What changed / what to do |
 | --- | --- | --- | --- |
-| **B1** 🔴 | No booking can be created: `scheduled_at` required, 2 h lead time | ✅ **Done.** Product decision: **on-demand and scheduled both exist.** | **On-demand:** omit `scheduled_at` (or send `null`) in `POST /api/bookings`. No lead time applies. The request must still be made between **07:00 and 19:00 property-local time**; otherwise the API returns `400 outside_business_hours`. **Scheduled ahead:** send `scheduled_at`, which must be at least 2 h ahead and inside 07:00–19:00 local. `BookingOut` now has `is_on_demand` and `requested_at`. Stop sending "now + 2 min"; that is rejected as `scheduled_at_too_soon`. |
+| **B1** 🔴 | No booking can be created: `scheduled_at` required, 2 h lead time | ✅ **Done.** Product decision: **on-demand and scheduled both exist.** | **On-demand:** omit `scheduled_at` (or send `null`) in `POST /api/bookings`. No lead time applies. Service hours are **off by default** (any hour). When an admin enables them in the dashboard, a request outside them returns `400 outside_business_hours`; `QuoteOut.service_hours` gives the current rule. **Scheduled ahead:** send `scheduled_at`, which must be at least 2 h ahead, and inside the service hours when they are enabled. `BookingOut` now has `is_on_demand` and `requested_at`. Stop sending "now + 2 min"; that is rejected as `scheduled_at_too_soon`. |
 | **B2** 🔴 | Real payments, payment-method reference, 3-D Secure | ⏳ **Open. Waiting on the payment-provider contract** (Stripe is the candidate). | The retry and confirm-action endpoints already exist (§3.6). With the current test adapter every charge succeeds. `confirm-action` returns `501 payment_action_not_supported` until a real provider is plugged in. Keep the payment-method UI local for now. |
 | **B3** 🔴 | Production providers | 🟡 **Partly done.** | **Live:** FCM push (Firebase project `cleano-677af`). **Test mode:** SMS, which uses time-limited test phone numbers (§2.1); the PO gives you the numbers. **Fake, enabled for the test phase only:** payments, payouts, photo storage and directions. Social login is not configured; hide Apple/Google sign-in until we tell you. |
 | **B4** 🟠 | Payout account (BSB/account) | ⏳ **Open. Depends on B2.** | With Stripe Connect, onboarding will be a provider link, not raw BSB fields. **Do not send bank details to the backend.** Keep the W11 screen in its "coming soon" state. |
@@ -114,6 +114,27 @@ Phone OTP is the only login in production today.
 - `PATCH /api/auth/me` changes `full_name` and `email`.
 - The phone number cannot be changed.
 
+**Delete my account** (required by App Store and Google Play)
+
+1. Show the confirmation screen with `GET /api/auth/me/deletion`, which returns `{can_delete, blockers[]}`. Each blocker has a `reason` and a `booking_id`:
+   - `active_booking`: a confirmed clean is not finished;
+   - `payment_in_progress`: a payment is processing or succeeded on an unassigned request;
+   - `active_job`: the cleaner accepted or is doing a job;
+   - `payout_pending`: earnings not paid out yet.
+
+   Unpaid requests are **not** blockers; deleting cancels them.
+2. After the user confirms, `POST /api/auth/me/delete` with `{"confirmation": "DELETE"}` returns `204`.
+   - `400 deletion_confirmation_required`: the phrase is missing or wrong.
+   - `409 account_deletion_blocked`: something still blocks it.
+3. Deletion is permanent:
+   - name, phone and email are erased;
+   - unpaid requests are cancelled;
+   - a cleaner goes offline and open offers are declined;
+   - saved properties, devices, notifications and Apple/Google links are removed;
+   - every session ends, so the current tokens stop working immediately.
+
+   Clear local storage and return to the welcome screen. The same phone number can later sign up as a new account.
+
 **Roles**
 
 - One account can be `CUSTOMER` and `CONTRACTOR` at the same time. Use `roles`; the singular `role` is legacy.
@@ -151,6 +172,7 @@ Phone OTP is the only login in production today.
 - `POST /api/quotes` with `{property_id, service_selections: [{service_type_id, room_count}]}` returns `QuoteOut`.
   - Show `maximum_total` as "Up to A$…".
   - The quote has an `expires_at`. Request a new quote if it has expired.
+  - `QuoteOut.service_hours` is the rule the server enforces at that property: `timezone`, `enabled`, `opens_at` / `closes_at` (local `HH:MM`, `null` when not enabled), `is_open_now`, `next_open_at` (UTC, `null` while open) and `min_lead_minutes`. **By default service hours are off**, so requests are accepted at any hour. Admins can turn them on and set the window from the dashboard, and the window may run past midnight. Disable "Request now" while `is_open_now` is false and show the next opening, instead of waiting for `400 outside_business_hours`.
 
 ### 3.3 Request a cleaner (booking)
 
@@ -166,8 +188,8 @@ Phone OTP is the only login in production today.
 }
 ```
 
-- `scheduled_at: null` (or omitted) means **on-demand, now**. It must be made 07:00–19:00 property-local; otherwise `400 outside_business_hours`.
-- `scheduled_at: "<ISO>"` means **scheduled**. It must be at least 2 h ahead and inside 07:00–19:00 local.
+- `scheduled_at: null` (or omitted) means **on-demand, now**. If an admin has enabled service hours, the request must fall inside them (property-local); otherwise `400 outside_business_hours`. Read the current rule from `QuoteOut.service_hours`.
+- `scheduled_at: "<ISO>"` means **scheduled**. It must be at least `min_lead_minutes` ahead (2 h today) and, when service hours are enabled, inside them.
 - Returns `201 BookingOut`: `status: PENDING`, `dispatch_status: SEARCHING`, `public_reference` (show this as the booking number).
 
 **Dispatch status** is on `BookingOut.dispatch_status`. Poll `GET /api/bookings/{id}` every 10–15 s on the searching screen, and also react to push.
@@ -228,6 +250,7 @@ Stepper mapping:
 | Arrive | `POST /api/contractor/jobs/{id}/arrive` `{latitude, longitude, accuracy}` | `ASSIGNED`, payment succeeded, within 300 m (+ accuracy up to 100 m) | `job.arrived` |
 | Start | `POST /api/contractor/jobs/{id}/start` | `ARRIVED` | `job.started` |
 | Photos | `POST /api/contractor/jobs/{id}/photos?photo_type=BEFORE\|AFTER`, multipart field `file` | `IN_PROGRESS` only | — |
+| Remove a photo | `DELETE /api/contractor/jobs/{id}/photos/{photo_id}` → `204` | `IN_PROGRESS` only (`409` after mark-done) | — |
 | Mark done | `POST /api/contractor/jobs/{id}/mark-done` | `IN_PROGRESS` with at least one BEFORE and one AFTER photo | `job.awaiting_confirmation` |
 | Customer confirms | `POST /api/bookings/{booking_id}/job/confirm` (customer) | `AWAITING_CUSTOMER_CONFIRMATION` | The cleaner receives `job.completed`, then `payout.sent`. |
 
@@ -359,7 +382,7 @@ In a dual-role account, filter by `audience` for the current mode.
 Every handled error has this body:
 
 ```json
-{"code": "outside_business_hours", "detail": "Cleaners can be requested between 07:00 and 19:00 …"}
+{"code": "outside_business_hours", "detail": "Cleaners can be requested between 08:00 and 17:30 local time (Australia/Sydney); …"}
 ```
 
 - Translate by **`code`**. `detail` is English and may change.
@@ -468,6 +491,20 @@ Responses: `200` → `UserOut`
 Request body (`application/json`): `UserProfilePatch`
 
 Responses: `200` → `UserOut`, `409` → `ErrorOut`, `422` → `ErrorOut`
+
+#### `GET /api/auth/me/deletion`
+
+**Can my account be deleted now?** — Bearer token.
+
+Responses: `200` → `AccountDeletionStatusOut`, `403` → `ErrorOut`
+
+#### `POST /api/auth/me/delete`
+
+**Delete my account (permanent)** — Bearer token.
+
+Request body (`application/json`): `AccountDeletionIn`
+
+Responses: `204`, `400` → `ErrorOut`, `403` → `ErrorOut`, `409` → `ErrorOut`
 
 ### Properties
 
@@ -804,6 +841,17 @@ Request body (`multipart/form-data`): `file`
 
 Responses: `201` → `JobPhotoOut`, `400` → `ErrorOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
 
+#### `DELETE /api/contractor/jobs/{job_id}/photos/{photo_id}`
+
+**Remove a before/after photo (assigned contractor only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `job_id` | path | string (uuid) | yes |  |
+| `photo_id` | path | string (uuid) | yes |  |
+
+Responses: `204`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+
 #### `POST /api/contractor/jobs/{job_id}/arrive`
 
 **Report arrival at the property (assigned contractor only)** — Bearer token.
@@ -978,6 +1026,19 @@ Responses: `200`
 Responses: `200`, `503`
 
 ### Schemas
+
+#### `AccountDeletionIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `confirmation` | string | yes | Must be exactly "DELETE". |
+
+#### `AccountDeletionStatusOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `can_delete` | boolean | yes |  |
+| `blockers` | array of `DeletionBlockerOut` | yes |  |
 
 #### `AuthOut`
 
@@ -1417,6 +1478,7 @@ Responses: `200`, `503`
 | `pricing_version` | integer | yes |  |
 | `expires_at` | string (date-time) | yes |  |
 | `created_at` | string (date-time) | yes |  |
+| `service_hours` | `ServiceHoursOut` | yes |  |
 
 #### `RefreshIn`
 
@@ -1551,6 +1613,13 @@ One of: `AVAILABLE`, `UNAVAILABLE`
 | `age_seconds` | integer | yes |  |
 | `is_stale` | boolean | yes |  |
 
+#### `DeletionBlockerOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `reason` | string | yes | active_booking (a confirmed clean is not finished), payment_in_progress, active_job (the cleaner accepted or is doing a job) or payout_pending. |
+| `booking_id` | string (uuid) \| null |  |  |
+
 #### `EarningsItemOut`
 
 | Field | Type | Required | Notes |
@@ -1617,6 +1686,18 @@ One of: `AVAILABLE`, `UNAVAILABLE`
 #### `PropertyType`
 
 One of: `HOUSE`, `UNIT`, `TOWNHOUSE`, `APARTMENT`, `OTHER`
+
+#### `ServiceHoursOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `timezone` | string | yes | The property's IANA timezone, e.g. Australia/Sydney. |
+| `enabled` | boolean | yes | false (the default): cleaners can be requested at any hour. |
+| `opens_at` | string \| null |  | Local opening time, HH:MM; null when hours are not enabled. |
+| `closes_at` | string \| null |  | Local closing time, HH:MM, inclusive; null when hours are not enabled. Earlier than opens_at means the window runs past midnight. |
+| `is_open_now` | boolean | yes | An on-demand request (no scheduled_at) is accepted right now. |
+| `next_open_at` | string (date-time) \| null |  | UTC instant of the next opening; null while open. |
+| `min_lead_minutes` | integer | yes | Minimum lead time for a scheduled booking (with scheduled_at). |
 
 #### `ServiceSelectionIn`
 

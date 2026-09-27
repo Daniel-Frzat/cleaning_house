@@ -27,6 +27,8 @@ class UserStatus(models.TextChoices):
     ACTIVE = "ACTIVE", "Active"
     INACTIVE = "INACTIVE", "Inactive"
     SUSPENDED = "SUSPENDED", "Suspended"
+    # حذفه صاحبه — مُجهَّل ونهائي، لا يُعاد تفعيله (account_deletion.py)
+    DELETED = "DELETED", "Deleted by the user"
 
 
 class UserManager(BaseUserManager):
@@ -163,6 +165,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     date_joined = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     objects = UserManager()
 

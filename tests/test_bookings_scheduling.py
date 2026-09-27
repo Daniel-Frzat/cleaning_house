@@ -207,7 +207,7 @@ def test_explicit_offset_is_honoured_as_sent(customer, property_nsw, general):
     assert utc == datetime.datetime(2099, 7, 15, 1, 0, tzinfo=datetime.timezone.utc)
 
 
-def test_daylight_saving_shift_is_applied_by_zoneinfo():
+def test_daylight_saving_shift_is_applied_by_zoneinfo(db):
     """
     نفس ساعة الحائط في صيف/شتاء سيدني تعطي لحظتَي UTC مختلفتَين.
 
@@ -239,20 +239,20 @@ def test_past_datetime_is_rejected():
 # 3) ساعات العمل — بالتوقيت المحلي
 # ============================================================
 @pytest.mark.parametrize("hour", [7, 12, 19])
-def test_times_inside_business_hours_are_accepted(hour):
+def test_times_inside_business_hours_are_accepted(hour, business_hours):
     """الحدّان شاملان: 07:00 و19:00 مقبولتان."""
     slot = local_slot(hour=hour)
     assert sched.normalize_scheduled_at(slot, "Australia/Sydney") is not None
 
 
 @pytest.mark.parametrize("hour", [0, 6, 20, 23])
-def test_times_outside_business_hours_are_rejected(hour):
+def test_times_outside_business_hours_are_rejected(hour, business_hours):
     slot = local_slot(hour=hour)
     with pytest.raises(sched.OutsideBusinessHoursError):
         sched.normalize_scheduled_at(slot, "Australia/Sydney")
 
 
-def test_business_hours_are_checked_in_local_not_server_time():
+def test_business_hours_are_checked_in_local_not_server_time(business_hours):
     """
     🔒 نفس لحظة UTC تقع داخل الدوام في بيرث وخارجه في سيدني.
 
@@ -267,7 +267,7 @@ def test_business_hours_are_checked_in_local_not_server_time():
         sched.normalize_scheduled_at(moment, "Australia/Perth")
 
 
-def test_error_message_names_the_local_window_and_zone():
+def test_error_message_names_the_local_window_and_zone(business_hours):
     with pytest.raises(sched.OutsideBusinessHoursError) as exc:
         sched.normalize_scheduled_at(local_slot(hour=23), "Australia/Sydney")
 
@@ -379,9 +379,6 @@ def test_omitting_scheduled_at_creates_an_on_demand_request(
     client, customer, property_nsw, general, monkeypatch
 ):
     """📌 قرار PO — 2026-09-26: بلا scheduled_at = "اطلب عاملًا الآن"، بلا مهلة."""
-    from django.conf import settings
-
-    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = True
     _pin_sydney_clock(monkeypatch, 10)
     r = post(
         client,
@@ -400,9 +397,8 @@ def test_omitting_scheduled_at_creates_an_on_demand_request(
 
 @pytest.mark.django_db
 def test_on_demand_request_outside_business_hours_is_refused(
-    client, customer, property_nsw, general, monkeypatch, settings
+    client, customer, property_nsw, general, monkeypatch, business_hours
 ):
-    settings.ON_DEMAND_ENFORCE_BUSINESS_HOURS = True
     _pin_sydney_clock(monkeypatch, 21)
     r = post(
         client,
@@ -498,7 +494,7 @@ def test_past_visit_is_rejected_with_400(client, customer, property_nsw, general
 
 @pytest.mark.django_db
 def test_visit_outside_business_hours_is_rejected_with_400(
-    client, customer, property_nsw, general
+    client, customer, property_nsw, general, business_hours
 ):
     r = post(
         client,
@@ -515,7 +511,7 @@ def test_visit_outside_business_hours_is_rejected_with_400(
 
 @pytest.mark.django_db
 def test_no_booking_row_left_behind_when_schedule_is_invalid(
-    client, customer, property_nsw, general
+    client, customer, property_nsw, general, business_hours
 ):
     """🔒 التحقق يسبق الكتابة — لا صف يتيم ولا أسطر خدمات."""
     post(

@@ -58,3 +58,12 @@ class BaseStorageProviderAdapter(ABC):
     def get_signed_url(self, storage_key: str) -> str:
         """يعيد رابطًا مؤقّتًا للوصول إلى ملف مخزَّن."""
         raise NotImplementedError("Storage Provider غير محسوم بعد.")
+
+    def delete(self, storage_key: str) -> None:
+        """
+        يحذف ملفًا مخزَّنًا (صورة أزالها المقاول قبل إعلان الإنجاز).
+
+        📌 ليس abstract عمدًا: الافتراضي لا يفعل شيئًا، فلا يُكسر أي adapter
+           قائم. المزوّد الحقيقي يعيد تعريفه ليحذف الملف فعلًا.
+        """
+        return None

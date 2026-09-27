@@ -123,3 +123,26 @@ class ErrorOut(Schema):
     detail: str
     # يُستخدم فقط مع أخطاء التهدئة/الحد
     retry_after_seconds: Optional[int] = None
+
+
+# ------------------------------------------------------------
+# حذف الحساب
+# ------------------------------------------------------------
+class DeletionBlockerOut(Schema):
+    reason: str = Field(
+        ...,
+        description=(
+            "active_booking (a confirmed clean is not finished), payment_in_progress, "
+            "active_job (the cleaner accepted or is doing a job) or payout_pending."
+        ),
+    )
+    booking_id: Optional[uuid.UUID] = None
+
+
+class AccountDeletionStatusOut(Schema):
+    can_delete: bool
+    blockers: list[DeletionBlockerOut]
+
+
+class AccountDeletionIn(Schema):
+    confirmation: str = Field(..., description='Must be exactly "DELETE".')

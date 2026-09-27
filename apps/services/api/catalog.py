@@ -90,6 +90,9 @@ def _serialize_config(config):
         "maximum_travel_fee": config.maximum_travel_fee,
         "rounding_rule": config.rounding_rule,
         "dispatch_offer_ttl_seconds": config.dispatch_offer_ttl_seconds,
+        "service_hours_enabled": config.service_hours_enabled,
+        "service_hours_start": config.service_hours_start,
+        "service_hours_end": config.service_hours_end,
         "currency": config.currency,
         "pricing_version": config.pricing_version,
         "active_from": config.active_from,
@@ -302,9 +305,13 @@ def retrieve_pricing_config(request):
         "**Who may call:** `ADMIN` only.\n\n"
         "Partial update: send only the fields to change (at least one). There "
         "is no per-service override. `currency` is not editable.\n\n"
+        "**Service hours:** off by default (requests accepted at any hour). "
+        "With `service_hours_enabled: true`, on-demand requests and scheduled "
+        "visits must fall between `service_hours_start` and `service_hours_end`, "
+        "property-local; an end earlier than the start is an overnight window.\n\n"
         "**Side effects:** applies to **future** quotes and offers only; frozen "
         "prices are never recalculated. Any pricing change increments "
-        "`pricing_version` (`dispatch_offer_ttl_seconds` alone does not). "
+        "`pricing_version` (offer TTL and service hours do not). "
         "Recorded in the audit log."
     ),
     openapi_extra={

@@ -81,7 +81,7 @@ def test_default_role_and_status():
 
 @pytest.mark.django_db
 def test_status_choices():
-    assert set(UserStatus.values) == {"ACTIVE", "INACTIVE", "SUSPENDED"}
+    assert set(UserStatus.values) == {"ACTIVE", "INACTIVE", "SUSPENDED", "DELETED"}
     user = User.objects.create_user(phone="+96550000011", status=UserStatus.SUSPENDED)
     assert user.status == UserStatus.SUSPENDED
 

@@ -6,13 +6,16 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**136 codes.**
+**141 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
+| `account_deletion_blocked` | 409 | Unfinished bookings, jobs, payments or payouts block deletion until they end. | apps/accounts/services/account_deletion.py |
+| `account_deletion_error` | 403, 404, 503 |  | apps/accounts/services/account_deletion.py |
 | `account_inactive` | 403 |  | apps/accounts/services/admin_auth.py |
 | `account_locked` | 429 |  | apps/accounts/services/admin_auth.py |
 | `admin_account` | 403, 404, 503 |  | apps/accounts/services/backoffice_users.py |
+| `admin_account_not_deletable` | 403 | Administrator accounts are managed by a superuser, not deleted from the app. | apps/accounts/services/account_deletion.py |
 | `admin_auth_error` | 400 |  | apps/accounts/services/admin_auth.py |
 | `admin_login_required` | 403 |  | apps/accounts/api/auth.py |
 | `admin_management_error` | 409 |  | apps/accounts/services/admin_auth.py |
@@ -36,6 +39,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `contractor_profile_forbidden` | 403 |  | apps/contractors/services/profile.py |
 | `contractor_profile_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/contractors/services/profile.py |
 | `customer_payment_not_settled` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
+| `deletion_confirmation_required` | 400 | The request did not carry the confirmation phrase. | apps/accounts/services/account_deletion.py |
 | `device_not_found` | 404 |  | apps/accounts/api/admin_auth.py |
 | `document_expired` | 409, 422 |  | apps/contractors/services/verification.py |
 | `email_already_used` | 409 |  | apps/accounts/services/identity.py |
@@ -100,6 +104,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `payout_forbidden` | 403 |  | apps/payouts/services/payouts.py |
 | `payout_not_found` | 404 |  | apps/payouts/api/payouts.py, apps/payouts/services/admin.py, apps/payouts/services/payouts.py |
 | `photo_error` | 400, 409 |  | apps/jobs/services/photos.py |
+| `photo_not_found` | 404 | No photo with this id on this job. | apps/jobs/services/photos.py |
 | `photo_too_large` | 400, 409 |  | apps/jobs/services/photos.py |
 | `pricing_error` | 403, 404, 503 |  | apps/services/services/pricing.py |
 | `profile_update_error` | 422 |  | apps/accounts/services/identity.py |

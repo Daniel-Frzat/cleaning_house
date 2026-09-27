@@ -67,6 +67,12 @@ class TooManyPhotosError(PhotoError):
     code = "too_many_photos"
 
 
+class PhotoNotFoundError(PhotoError):
+    """No photo with this id on this job."""
+
+    code = "photo_not_found"
+
+
 def max_photo_bytes():
     return getattr(settings, "JOB_PHOTO_MAX_BYTES", 10 * 1024 * 1024)
 
@@ -150,6 +156,43 @@ def upload_job_photo(user, job_id, photo_type, file_bytes, content_type):
         user.id,
     )
     return photo
+
+
+@transaction.atomic
+def delete_job_photo(user, job_id, photo_id):
+    """
+    يزيل صورة رفعها المقاول بالخطأ أو يريد استبدالها (تقرير التطبيق B21).
+
+    🔒 نفس بوابة الرفع: المقاول المُسنَد، والمهمة IN_PROGRESS بعد قفل الصف.
+       بعد mark-done الصور دليلٌ يؤكد عليه العميل فلا تُمس.
+    📌 لا فحص لـ"صورة قبل وبعد" هنا: الشرط يُفرض عند mark-done، فحذف آخر
+       صورة BEFORE مسموح ثم يجب رفع غيرها قبل الإنجاز.
+    ⚠️ حذف الملف من التخزين بعد نجاح المعاملة فقط، وفشله لا يُفشل الطلب:
+       السجل هو مصدر الحقيقة، والملف اليتيم أهون من صورة معروضة بلا ملف.
+    """
+    job = get_job_for_contractor(user, job_id, lock=True)
+
+    if not job.accepts_photos():
+        raise JobNotAcceptingPhotosError(
+            f"Job is {job.status} and its photos can no longer be changed."
+        )
+
+    photo = job.photos.filter(pk=photo_id).first()
+    if photo is None:
+        raise PhotoNotFoundError("Photo not found.")
+
+    storage_key = photo.storage_key
+    photo.delete()
+
+    def _delete_file():
+        try:
+            get_storage_adapter().delete(storage_key)
+        except Exception:
+            logger.exception("Storage delete failed (job_id=%s, photo_id=%s)", job.id, photo_id)
+
+    transaction.on_commit(_delete_file)
+
+    logger.info("Job photo deleted (photo_id=%s, job_id=%s, by=%s)", photo_id, job.id, user.id)
 
 
 def build_signed_url(storage_key):
