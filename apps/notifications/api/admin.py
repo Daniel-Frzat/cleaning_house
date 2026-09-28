@@ -21,6 +21,8 @@ from .schemas import (
     BroadcastListOut,
     BroadcastOut,
     ErrorOut,
+    TestNotificationIn,
+    TestNotificationOut,
 )
 
 router = Router(tags=["Admin — Notifications"], auth=AdminJWTAuth())
@@ -76,6 +78,39 @@ def retrieve_broadcast(request, broadcast_id: uuid.UUID):
     if broadcast is None:
         return 404, {"code": "broadcast_not_found", "detail": "Broadcast not found."}
     return 200, _broadcast(broadcast, with_stats=True)
+
+
+@router.post(
+    "/users/{user_id}/test-notification",
+    response={200: TestNotificationOut, 404: ErrorOut},
+    summary="Send a test push to one user and return the result (admin only)",
+    description=(
+        "Sends immediately (not after commit) and returns the real `push_status`: "
+        "`SENT`, `PARTIAL`, `NO_DEVICE` (the app has not registered a device), or "
+        "`PENDING`/`FAILED` with `push_error` (check the Firebase credentials). "
+        "`priority: HIGH` uses the Android `offers` channel, `NORMAL` uses `general`. "
+        "The notification is also stored in the user's inbox with `type: test`. "
+        "Recorded in the audit log."
+    ),
+)
+def send_test_notification(request, user_id: uuid.UUID, payload: TestNotificationIn):
+    from ..services import notifications as nsvc
+
+    try:
+        notification, devices = nsvc.send_test_notification(
+            request.user, user_id, priority=payload.priority, title=payload.title,
+            body=payload.body, request=request,
+        )
+    except nsvc.NotificationTargetNotFoundError as exc:
+        return 404, {"code": exc.code, "detail": str(exc)}
+    return 200, {
+        **serialize(notification),
+        "push_status": notification.push_status,
+        "push_attempts": notification.push_attempts,
+        "pushed_at": notification.pushed_at,
+        "push_error": notification.push_error,
+        "devices": devices,
+    }
 
 
 @router.get(

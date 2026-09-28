@@ -6039,6 +6039,65 @@
         ]
       }
     },
+    "/api/admin/users/{user_id}/test-notification": {
+      "post": {
+        "operationId": "apps_notifications_api_admin_send_test_notification",
+        "summary": "Send a test push to one user and return the result (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestNotificationOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sends immediately (not after commit) and returns the real `push_status`: `SENT`, `PARTIAL`, `NO_DEVICE` (the app has not registered a device), or `PENDING`/`FAILED` with `push_error` (check the Firebase credentials). `priority: HIGH` uses the Android `offers` channel, `NORMAL` uses `general`. The notification is also stored in the user's inbox with `type: test`. Recorded in the audit log.",
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestNotificationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/admin/users/{user_id}/notifications": {
       "get": {
         "operationId": "apps_notifications_api_admin_user_notifications",
@@ -14123,6 +14182,132 @@
           "items"
         ],
         "title": "BroadcastListOut",
+        "type": "object"
+      },
+      "TestNotificationOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "string"
+          },
+          "read": {
+            "title": "Read",
+            "type": "boolean"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "push_status": {
+            "title": "Push Status",
+            "type": "string"
+          },
+          "push_attempts": {
+            "title": "Push Attempts",
+            "type": "integer"
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          },
+          "push_error": {
+            "default": "",
+            "title": "Push Error",
+            "type": "string"
+          },
+          "devices": {
+            "description": "Registered devices for this user at send time.",
+            "title": "Devices",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "audience",
+          "title",
+          "body",
+          "priority",
+          "read",
+          "created_at",
+          "push_status",
+          "push_attempts",
+          "devices"
+        ],
+        "title": "TestNotificationOut",
+        "type": "object"
+      },
+      "TestNotificationIn": {
+        "properties": {
+          "priority": {
+            "default": "NORMAL",
+            "description": "HIGH uses the Android `offers` channel.",
+            "pattern": "^(NORMAL|HIGH)$",
+            "title": "Priority",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Title",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "title": "TestNotificationIn",
         "type": "object"
       },
       "AdminNotificationListOut": {

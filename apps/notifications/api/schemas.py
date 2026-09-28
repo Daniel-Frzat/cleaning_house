@@ -85,6 +85,16 @@ class AdminNotificationOut(NotificationOut):
     push_error: str = ""
 
 
+class TestNotificationIn(Schema):
+    priority: str = Field("NORMAL", pattern="^(NORMAL|HIGH)$", description="HIGH uses the Android `offers` channel.")
+    title: str = Field("", max_length=120)
+    body: str = Field("", max_length=500)
+
+
+class TestNotificationOut(AdminNotificationOut):
+    devices: int = Field(..., description="Registered devices for this user at send time.")
+
+
 class AdminNotificationListOut(Schema):
     count: int
     items: list[AdminNotificationOut]

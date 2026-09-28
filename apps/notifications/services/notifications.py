@@ -84,6 +84,42 @@ def notify(user, type, audience, title, body, data=None, priority=Priority.NORMA
     return notification
 
 
+class NotificationTargetNotFoundError(NotificationError):
+    code = "user_not_found"
+
+
+def send_test_notification(actor, user_id, priority=Priority.NORMAL, title="", body="", request=None):
+    """
+    إشعار تجريبي لمستخدم واحد، يُرسل فورًا وتُعاد نتيجته (للأدمن).
+
+    📌 لفحص الإعداد على الإنتاج (مفتاح Firebase، تسجيل الجهاز، قناة offers
+       للأولوية العالية) دون بث لكل العملاء. الإرسال متزامن هنا لا بعد
+       الـcommit، كي تعود push_status الحقيقية في الرد نفسه.
+    """
+    from apps.accounts.models import User
+    from apps.audit.services.audit import record
+
+    user = User.objects.filter(pk=user_id).first()
+    if user is None:
+        raise NotificationTargetNotFoundError("User not found.")
+    notification = Notification.objects.create(
+        user=user,
+        audience=Audience.ALL,
+        type="test",
+        title=(title or "Test notification")[:120],
+        body=(body or "If you can read this, push notifications work.")[:500],
+        data={},
+        priority=priority,
+    )
+    notification = deliver(notification.id)
+    record(
+        actor, "notification.test", target=user,
+        details={"priority": priority, "push_status": notification.push_status, "push_error": notification.push_error},
+        request=request,
+    )
+    return notification, user.device_tokens.count()
+
+
 def schedule_delivery(notification_ids):
     ids = [str(i) for i in notification_ids]
 
@@ -109,11 +145,16 @@ def _message_for(notification):
     return PushMessage(
         title=notification.title,
         body=notification.body,
+        # 📌 title/body داخل data أيضًا (طلب فريق الموبايل 2026-09-28): التطبيق
+        #    يقرؤهما من data حين يعالج الرسالة بنفسه (في المقدمة أو data-only)،
+        #    وكتلة notification تبقى لعرض النظام في الخلفية.
         data={
             **notification.data,
             "type": notification.type,
             "audience": notification.audience,
             "notification_id": str(notification.id),
+            "title": notification.title,
+            "body": notification.body,
         },
         priority="high" if notification.priority == Priority.HIGH else "normal",
         android_channel_id=channels.get(notification.priority, ""),

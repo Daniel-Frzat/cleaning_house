@@ -236,6 +236,13 @@ SOCIAL_AUTH_ADAPTER = config(
 # فُعّل هذا الخيار صراحةً (مطلوب في بيئة الاختبارات الآلية).
 SOCIAL_AUTH_ALLOW_FAKE = config("SOCIAL_AUTH_ALLOW_FAKE", default=False, cast=bool)
 
+# Sign in with Google — معرّفات OAuth client المقبولة في aud (ليست سرًا).
+# الإنتاج: SOCIAL_AUTH_ADAPTER=adapters.social_auth.google.GoogleSocialAuthAdapter
+GOOGLE_OAUTH_CLIENT_IDS = config(
+    "GOOGLE_OAUTH_CLIENT_IDS", default="",
+    cast=lambda v: [s.strip() for s in v.split(",") if s.strip()],
+)
+
 # ------------------------------------------------------------
 # Payment Provider (Payment Domain — §36.4، §8؛ Infra §2)
 # ------------------------------------------------------------

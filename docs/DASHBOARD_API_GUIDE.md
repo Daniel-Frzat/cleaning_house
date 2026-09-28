@@ -189,6 +189,10 @@ Refresh it every 30–60 s.
 - `POST /api/admin/users/{id}/reactivate` reactivates a user.
 - Status `DELETED` means the user deleted their own account from the app. Name, phone and email are erased, `deleted_at` is set, and the phone shows as `deleted:…`. Deleted accounts cannot be suspended or reactivated (`409`); their past bookings, payments and payouts remain for the records.
 - `GET /api/admin/users/{id}/notifications` shows what was sent to that user, with push status. Useful for support.
+- `POST /api/admin/users/{id}/test-notification` with `{priority: NORMAL|HIGH, title?, body?}` sends a test push to that user **now** and returns the result.
+  - `push_status`: `SENT`, `NO_DEVICE` (the app has not registered a device), or `PENDING`/`FAILED` with `push_error`.
+  - `devices`: the user's registered device count.
+  - `HIGH` uses the Android `offers` channel.
 
 **Properties**
 
@@ -961,6 +965,18 @@ Responses: `200` → `BroadcastListOut`
 
 Responses: `200` → `BroadcastOut`, `404` → `ErrorOut`
 
+#### `POST /api/admin/users/{user_id}/test-notification`
+
+**Send a test push to one user and return the result (admin only)** — Bearer token.
+
+| Parameter | In | Type | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `user_id` | path | string (uuid) | yes |  |
+
+Request body (`application/json`): `TestNotificationIn`
+
+Responses: `200` → `TestNotificationOut`, `404` → `ErrorOut`
+
 #### `GET /api/admin/users/{user_id}/notifications`
 
 **A user's notifications with push delivery status** — Bearer token.
@@ -1609,6 +1625,34 @@ Responses: `200` → `AuditEntryListOut`, `403` → `ErrorOut`
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `reason` | string | yes | min len 1, max len 1000, pattern \S |
+
+#### `TestNotificationIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `priority` | string |  | default `"NORMAL"`; pattern ^(NORMAL|HIGH)$; HIGH uses the Android `offers` channel. |
+| `title` | string |  | max len 120 |
+| `body` | string |  | max len 500 |
+
+#### `TestNotificationOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string (uuid) | yes |  |
+| `type` | string | yes |  |
+| `audience` | string | yes |  |
+| `title` | string | yes |  |
+| `body` | string | yes |  |
+| `data` | object |  |  |
+| `priority` | string | yes |  |
+| `read` | boolean | yes |  |
+| `read_at` | string (date-time) \| null |  |  |
+| `created_at` | string (date-time) | yes |  |
+| `push_status` | string | yes |  |
+| `push_attempts` | integer | yes |  |
+| `pushed_at` | string (date-time) \| null |  |  |
+| `push_error` | string |  |  |
+| `devices` | integer | yes | Registered devices for this user at send time. |
 
 #### `TokenPairOut`
 

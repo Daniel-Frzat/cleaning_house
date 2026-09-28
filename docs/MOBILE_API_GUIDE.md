@@ -29,7 +29,7 @@ Source of truth, in this order:
 | --- | --- | --- | --- |
 | **B1** 🔴 | No booking can be created: `scheduled_at` required, 2 h lead time | ✅ **Done.** Product decision: **on-demand and scheduled both exist.** | **On-demand:** omit `scheduled_at` (or send `null`) in `POST /api/bookings`. No lead time applies. Service hours are **off by default** (any hour). When an admin enables them in the dashboard, a request outside them returns `400 outside_business_hours`; `QuoteOut.service_hours` gives the current rule. **Scheduled ahead:** send `scheduled_at`, which must be at least 2 h ahead, and inside the service hours when they are enabled. `BookingOut` now has `is_on_demand` and `requested_at`. Stop sending "now + 2 min"; that is rejected as `scheduled_at_too_soon`. |
 | **B2** 🔴 | Real payments, payment-method reference, 3-D Secure | ⏳ **Open. Waiting on the payment-provider contract** (Stripe is the candidate). | The retry and confirm-action endpoints already exist (§3.6). With the current test adapter every charge succeeds. `confirm-action` returns `501 payment_action_not_supported` until a real provider is plugged in. Keep the payment-method UI local for now. |
-| **B3** 🔴 | Production providers | 🟡 **Partly done.** | **Live:** FCM push (Firebase project `cleano-677af`). **Test mode:** SMS, which uses time-limited test phone numbers (§2.1); the PO gives you the numbers. **Fake, enabled for the test phase only:** payments, payouts, photo storage and directions. Social login is not configured; hide Apple/Google sign-in until we tell you. |
+| **B3** 🔴 | Production providers | 🟡 **Partly done.** | **Live:** FCM push (Firebase project `cleano-677af`). **Test mode:** SMS, which uses time-limited test phone numbers (§2.1); the PO gives you the numbers. **Fake, enabled for the test phase only:** payments, payouts, photo storage and directions. **Sign in with Google** is implemented (server verifies the ID token against the app's client ID) and goes live with the next deploy; **Apple** is not configured, so keep its button hidden. See §2.1. |
 | **B4** 🟠 | Payout account (BSB/account) | ⏳ **Open. Depends on B2.** | With Stripe Connect, onboarding will be a provider link, not raw BSB fields. **Do not send bank details to the backend.** Keep the W11 screen in its "coming soon" state. |
 | **B5** 🟠 | Document upload | ⏳ **Open.** | For now keep the ABN, policy reference and expiry fields. File upload needs real storage, which is part of B3. |
 | **B6** 🟠 | No "arrived" step | ✅ **Done.** New job status **`ARRIVED`**. | Lifecycle is now `ASSIGNED → ARRIVED → IN_PROGRESS → AWAITING_CUSTOMER_CONFIRMATION → COMPLETED`. Call `POST /api/contractor/jobs/{id}/arrive` with the device's `latitude`, `longitude` and `accuracy`. The server accepts it within **300 m** of the property plus up to 100 m of reported accuracy; otherwise it returns `409 not_at_property`. `/start` now requires `ARRIVED` (`409 invalid_job_status` otherwise). Arrival sets `arrived_at`, sends `job.arrived` to the customer, and closes live tracking. **Remove the 200 m device-side guess.** The server now owns this rule. |
@@ -80,7 +80,7 @@ Everything below is in the code on `main`. Check the live `/api/openapi.json` be
 
 ### 2.1 Authentication (customers and cleaners)
 
-Phone OTP is the only login in production today.
+Phone OTP is the main login. Sign in with Google is available as well (below).
 
 1. `POST /api/auth/otp/request` with `{"phone": "+614XXXXXXXX"}` returns `{detail, expires_in_seconds}`.
    - The code is 6 digits and valid for 5 minutes.
@@ -88,6 +88,18 @@ Phone OTP is the only login in production today.
    - Daily and per-IP limits apply.
 2. `POST /api/auth/otp/verify` with `{"phone", "code"}` returns `AuthOut {tokens: {access, refresh}, user: UserOut}`. It creates the account on first login.
 3. Send `Authorization: Bearer <access>` on every call.
+
+**Sign in with Google** 🚀
+
+- In `google_sign_in`, set `serverClientId` to **`461684012123-23e09b4q707qbjoknhc40jsvosojda1r.apps.googleusercontent.com`**. The ID token Google gives the app then carries this client ID in `aud`, which is what the server checks.
+- Send the **ID token** (not the access token or the server auth code): `POST /api/auth/social/google` with `{"token": "<idToken>"}`.
+- The response is the same `AuthOut` as OTP login.
+  - The first sign-in creates a customer account.
+  - A later sign-in with the same Google account logs into that account.
+- Errors:
+  - `401 social_auth_failed`: the token is invalid, expired, or issued for another client ID.
+  - `401 provider_not_configured`: the server is not set up for this provider.
+- **Apple is not configured yet:** `POST /api/auth/social/apple` returns `401 provider_not_configured`. Keep the Apple button hidden.
 
 **Tokens**
 
@@ -336,6 +348,7 @@ Stepper mapping:
 - FCM `notification` has a title and body, in English.
 - `data` values are all strings:
   - `type`, `audience` (`CUSTOMER` | `CONTRACTOR` | `ALL`), `notification_id`;
+  - `title` and `body` (the same text as the FCM `notification` block, for foreground and data-only handling) 🚀;
   - plus the ids listed below.
 
 **Android channels**

@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**154 codes.**
+**156 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -120,6 +120,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `property_not_found` | 404 |  | apps/bookings/api/bookings.py, apps/bookings/api/quotes.py, apps/properties/api/properties.py, apps/properties/services/admin.py, apps/properties/services/properties.py |
 | `property_not_serviceable` | 400 |  | apps/bookings/services/quotes.py |
 | `provider_already_linked` | 400 |  | apps/accounts/services/social.py |
+| `provider_not_configured` | 401 | This sign-in provider is not configured on the server yet. | adapters/social_auth/google.py |
 | `provider_reference_required` | 422 |  | apps/payments/services/admin.py, apps/payouts/services/admin.py |
 | `quote_already_used` | 409 |  | apps/bookings/services/quotes.py |
 | `quote_error` | 400 |  | apps/bookings/services/quotes.py |
@@ -143,6 +144,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `self_assignment_forbidden` | 403 |  | apps/bookings/services/offers.py |
 | `self_review_forbidden` | 403 |  | apps/contractors/services/verification.py |
 | `service_not_found` | 400, 404 |  | apps/bookings/services/bookings.py, apps/services/api/catalog.py, apps/services/services/catalog.py, apps/services/services/pricing.py |
+| `social_auth_failed` | 401 |  | adapters/social_auth/base.py |
 | `social_login_error` | 400 |  | apps/accounts/services/social.py |
 | `submission_pending` | 409 |  | apps/contractors/services/verification.py |
 | `superuser_required` | 403 |  | apps/accounts/authentication.py, apps/audit/services/backoffice.py |
@@ -159,7 +161,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `unsupported_photo_format` | 400, 409 |  | apps/jobs/services/photos.py |
 | `unsupported_provider` | 400 |  | apps/accounts/api/auth.py, apps/accounts/services/social.py |
 | `user_admin_error` | 403, 404, 503 |  | apps/accounts/services/backoffice_users.py |
-| `user_not_found` | 404 |  | apps/accounts/services/backoffice_users.py |
+| `user_not_found` | 404 |  | apps/accounts/services/backoffice_users.py, apps/notifications/services/notifications.py |
 | `validation_error` | 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/support/api/support.py, config/urls.py |
 | `verification_error` | 403, 404, 503 |  | apps/contractors/services/verification.py |
 | `verification_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/services/verification.py |

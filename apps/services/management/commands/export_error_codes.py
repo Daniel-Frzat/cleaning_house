@@ -63,7 +63,14 @@ def collect(base):
     def entry(code):
         return codes.setdefault(code, {"statuses": set(), "meaning": "", "sources": set()})
 
-    for path in sorted(base.glob("apps/**/*.py")) + sorted(base.glob("config/**/*.py")):
+    # adapters/social_auth: رموزها تصل إلى التطبيق عبر /auth/social (بقية
+    # الـadapters داخلية لا تُعاد للعميل)
+    sources = (
+        sorted(base.glob("apps/**/*.py"))
+        + sorted(base.glob("config/**/*.py"))
+        + sorted(base.glob("adapters/social_auth/*.py"))
+    )
+    for path in sources:
         if "migrations" in path.parts or "tests" in path.parts:
             continue
         rel = path.relative_to(base).as_posix()
