@@ -4387,9 +4387,19 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
           }
         },
-        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC image (checked from its content, not the declared type), at most `JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most `JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\n**Note:** uploads need a storage provider (`JOB_STORAGE_ADAPTER_CLASS`). Until one is configured they fail, unless the test-phase switch `JOBS_ALLOW_FAKE_STORAGE_ADAPTER` is on; the fake adapter discards the bytes and returns a placeholder `signed_url`.",
+        "description": "**Who may call:** the `CONTRACTOR` assigned to this job, and no one else.\n\n**Preconditions:** the job must still be in progress — photos are refused with `409` once it has been marked done. `photo_type` must be `BEFORE` or `AFTER`. The file must be a real JPEG, PNG, WebP or HEIC image (checked from its content, not the declared type), at most `JOB_PHOTO_MAX_BYTES` (default 10 MB), and a job holds at most `JOB_PHOTO_MAX_PER_JOB` (default 30) photos.\n\nMultipart upload. The bytes are handed to the configured storage provider and are not written by this endpoint.\n\n**Side effects:** the photo counts towards the proof required by `mark-done`, which needs at least one `BEFORE` and one `AFTER` photo.\n\nThe response carries a `signed_url` for viewing the photo. The raw `storage_key` is returned to administrators only and is `null` for everyone else.\n\nFiles are stored privately (Cloudflare R2 / S3); `signed_url` is a temporary link (1 hour by default), so re-fetch the job for fresh links rather than caching them. `503 photo_storage_unavailable` means storage did not accept the file; retry.",
         "tags": [
           "Contractor Jobs"
         ],

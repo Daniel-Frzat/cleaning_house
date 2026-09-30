@@ -201,7 +201,7 @@ def list_contractor_jobs(request, status: str | None = None):
 # ------------------------------------------------------------
 @contractor_router.post(
     "/jobs/{job_id}/photos",
-    response={201: JobPhotoOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    response={201: JobPhotoOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut, 503: ErrorOut},
     summary="Upload a before/after photo (assigned contractor only)",
     description=(
         "**Who may call:** the `CONTRACTOR` assigned to this job, and no one "
@@ -219,10 +219,10 @@ def list_contractor_jobs(request, status: str | None = None):
         "The response carries a `signed_url` for viewing the photo. The raw "
         "`storage_key` is returned to administrators only and is `null` for "
         "everyone else.\n\n"
-        "**Note:** uploads need a storage provider (`JOB_STORAGE_ADAPTER_CLASS`). "
-        "Until one is configured they fail, unless the test-phase switch "
-        "`JOBS_ALLOW_FAKE_STORAGE_ADAPTER` is on; the fake adapter discards the "
-        "bytes and returns a placeholder `signed_url`."
+        "Files are stored privately (Cloudflare R2 / S3); `signed_url` is a "
+        "temporary link (1 hour by default), so re-fetch the job for fresh links "
+        "rather than caching them. `503 photo_storage_unavailable` means storage "
+        "did not accept the file; retry."
     ),
     openapi_extra={
         "responses": {
@@ -272,6 +272,8 @@ def upload_photo(
     except photos_svc.JobNotAcceptingPhotosError as exc:
         # 409: تعارض مع حالة المورد الحالية
         return _error(409, exc.code, str(exc))
+    except photos_svc.PhotoStorageUnavailableError as exc:
+        return _error(503, exc.code, str(exc))
     except (photos_svc.InvalidPhotoTypeError, photos_svc.EmptyPhotoError) as exc:
         return _error(400, exc.code, str(exc))
     except jobs_svc.JobError as exc:

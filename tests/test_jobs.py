@@ -575,7 +575,8 @@ def test_fake_signed_url_is_obviously_not_real():
 
 def test_no_real_storage_sdk_anywhere():
     """
-    ⚠️ لا boto3 ولا S3 SDK ولا كتابة قرص — الفحص على الاستيرادات (AST).
+    ⚠️ الـSDK في ملف الـadapter وحده (s3_adapter.py — R2/S3). بقية نطاق
+       المهام لا تستورد boto3 ولا مكتبة HTTP ولا تكتب على القرص (AST).
     """
     import ast
     import pathlib
@@ -583,8 +584,10 @@ def test_no_real_storage_sdk_anywhere():
     banned = ("boto3", "botocore", "s3transfer", "google.cloud", "azure",
               "requests", "httpx", "urllib", "shutil", "tempfile")
 
+    provider_adapters = {pathlib.Path("apps/jobs/adapters/s3_adapter.py")}
+
     for path in sorted(pathlib.Path("apps/jobs").rglob("*.py")):
-        if "__pycache__" in str(path):
+        if "__pycache__" in str(path) or path in provider_adapters:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported = set()

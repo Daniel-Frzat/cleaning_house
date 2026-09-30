@@ -310,6 +310,8 @@ Stepper mapping:
 - 10 MB maximum per photo.
 - 30 photos maximum per job.
 - The photo counter can read "@count added"; more than one photo of each type is allowed.
+- **Storage** 🚀: photos are stored privately in Cloudflare R2. `signed_url` is a temporary link, valid 1 hour by default. Re-fetch the job for fresh links; don't cache the URLs.
+- `503 photo_storage_unavailable` means storage did not accept the file. Keep the photo on the device and retry.
 
 **Errors to handle:** `not_at_property`, `invalid_job_status`, `payment_not_settled` (payment gate at arrive and start), `job_not_accepting_photos`, `missing_proof_photos`, `photo_too_large`, `too_many_photos`, `unsupported_photo_format`.
 
@@ -945,7 +947,7 @@ Responses: `200` → `array of ContractorJobOut`, `403` → `ErrorOut`
 
 Request body (`multipart/form-data`): `file`
 
-Responses: `201` → `JobPhotoOut`, `400` → `ErrorOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`
+Responses: `201` → `JobPhotoOut`, `400` → `ErrorOut`, `403` → `ErrorOut`, `404` → `ErrorOut`, `409` → `ErrorOut`, `503` → `ErrorOut`
 
 #### `DELETE /api/contractor/jobs/{job_id}/photos/{photo_id}`
 

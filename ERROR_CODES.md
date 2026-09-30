@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**158 codes.**
+**159 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -111,6 +111,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `payout_not_found` | 404 |  | apps/payouts/api/payouts.py, apps/payouts/services/admin.py, apps/payouts/services/payouts.py |
 | `photo_error` | 400, 409 |  | apps/jobs/services/photos.py |
 | `photo_not_found` | 404 | No photo with this id on this job. | apps/jobs/services/photos.py |
+| `photo_storage_unavailable` | 503 | The photo could not be stored right now; try again. | apps/jobs/services/photos.py |
 | `photo_too_large` | 400, 409 |  | apps/jobs/services/photos.py |
 | `pricing_error` | 403, 404, 503 |  | apps/services/services/pricing.py |
 | `profile_update_error` | 422 |  | apps/accounts/services/identity.py |

@@ -283,6 +283,15 @@ JOBS_ALLOW_FAKE_STORAGE_ADAPTER = config(
     "JOBS_ALLOW_FAKE_STORAGE_ADAPTER", default=False, cast=bool
 )
 
+# تخزين حقيقي متوافق مع S3 (Cloudflare R2 أو AWS S3) — apps/jobs/adapters/s3_adapter.py
+# JOB_STORAGE_ADAPTER_CLASS=apps.jobs.adapters.s3_adapter.S3StorageAdapter
+STORAGE_S3_BUCKET = config("STORAGE_S3_BUCKET", default="")
+STORAGE_S3_ENDPOINT_URL = config("STORAGE_S3_ENDPOINT_URL", default="")
+STORAGE_S3_ACCESS_KEY_ID = config("STORAGE_S3_ACCESS_KEY_ID", default="")
+STORAGE_S3_SECRET_ACCESS_KEY = config("STORAGE_S3_SECRET_ACCESS_KEY", default="")
+STORAGE_S3_REGION = config("STORAGE_S3_REGION", default="auto")
+STORAGE_SIGNED_URL_SECONDS = config("STORAGE_SIGNED_URL_SECONDS", default=3600, cast=int)
+
 # ------------------------------------------------------------
 # Payout Provider (Payout Domain — §36.5)
 # ------------------------------------------------------------

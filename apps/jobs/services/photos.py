@@ -15,6 +15,7 @@ from django.conf import settings
 from django.db import transaction
 
 from ..adapters import get_storage_adapter
+from ..adapters.base import StorageUnavailableError
 from ..models import JobPhoto, PhotoType
 from .jobs import JobError, get_job_for_contractor
 
@@ -65,6 +66,12 @@ class UnsupportedPhotoFormatError(PhotoError):
 
 class TooManyPhotosError(PhotoError):
     code = "too_many_photos"
+
+
+class PhotoStorageUnavailableError(PhotoError):
+    """The photo could not be stored right now; try again."""
+
+    code = "photo_storage_unavailable"
 
 
 class PhotoNotFoundError(PhotoError):
@@ -132,12 +139,16 @@ def upload_job_photo(user, job_id, photo_type, file_bytes, content_type):
         raise TooManyPhotosError(f"A job can have at most {limit} photos.")
 
     adapter = get_storage_adapter()
-    result = adapter.upload(
-        file_bytes=file_bytes,
-        # النوع المكتشف من المحتوى لا ما أرسله العميل
-        content_type=detected_type,
-        path_hint=f"jobs/{job.id}/{photo_type.lower()}",
-    )
+    try:
+        result = adapter.upload(
+            file_bytes=file_bytes,
+            # النوع المكتشف من المحتوى لا ما أرسله العميل
+            content_type=detected_type,
+            path_hint=f"jobs/{job.id}/{photo_type.lower()}",
+        )
+    except StorageUnavailableError as exc:
+        # لا صف بلا ملف: الرفض قبل إنشاء JobPhoto
+        raise PhotoStorageUnavailableError("The photo could not be stored. Please try again.") from exc
 
     photo = JobPhoto(
         job=job,

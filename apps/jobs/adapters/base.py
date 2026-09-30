@@ -1,9 +1,8 @@
 """
 Storage Provider Adapter — Abstract Interface ONLY (Infra §7)
 
-🟢 مزوّد التخزين (S3 أو مشابه) قرار مفتوح. لا تنفيذ فعلي هنا ولا في أي
-   مكان في كود الإنتاج: لا boto3، ولا S3 SDK، ولا كتابة ملفات على القرص
-   كمسار إنتاجي.
+📌 التنفيذ الحقيقي في s3_adapter.py وحده (R2 أو S3 — قرار 2026-09-30).
+   هذا الملف عقد محايد، وبقية النطاق لا تستورد أي SDK.
 
 الاختيار عبر settings.JOB_STORAGE_ADAPTER_CLASS (مسار نصي لكلاس) — نفس نمط
 PAYMENT_PROVIDER_ADAPTER_CLASS و SMS_ADAPTER.
@@ -16,6 +15,10 @@ PAYMENT_PROVIDER_ADAPTER_CLASS و SMS_ADAPTER.
 """
 
 from abc import ABC, abstractmethod
+
+
+class StorageUnavailableError(Exception):
+    """المزوّد لم يقبل الرفع أو الحذف (شبكة، صلاحيات، bucket)."""
 
 
 class StorageUploadResult:
