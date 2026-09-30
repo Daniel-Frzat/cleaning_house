@@ -30,6 +30,7 @@ from .base import (
     BasePaymentProviderAdapter,
     ChargeOutcome,
     PaymentChargeResult,
+    PaymentProviderUnavailableError,
     ProviderWebhookEvent,
     WebhookSignatureError,
 )
@@ -84,7 +85,20 @@ class StripePaymentAdapter(BasePaymentProviderAdapter):
         self.webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", "") or ""
 
     # ------------------------------------------------------------ العملاء والبطاقات
+    def _unavailable(self, exc):
+        """خطأ Stripe → رسالة تشخيص آمنة (Stripe يحجب المفتاح في رسائله)."""
+        code = getattr(exc, "code", None) or ""
+        message = getattr(exc, "user_message", None) or str(exc)
+        logger.error("Stripe request failed: %s %s", type(exc).__name__, message)
+        return PaymentProviderUnavailableError(f"{type(exc).__name__}{f' ({code})' if code else ''}: {message}")
+
     def create_customer(self, user_reference, email=None, name=""):
+        try:
+            return self._create_customer(user_reference, email, name)
+        except self.stripe.StripeError as exc:
+            raise self._unavailable(exc) from exc
+
+    def _create_customer(self, user_reference, email=None, name=""):
         customer = self.stripe.Customer.create(
             api_key=self.api_key,
             email=email or None,
@@ -99,6 +113,12 @@ class StripePaymentAdapter(BasePaymentProviderAdapter):
         SetupIntent لحفظ بطاقة للاستعمال اللاحق بلا حضور العميل. مع
         stripe_version (من SDK التطبيق) يُنشأ ephemeral key لـPaymentSheet.
         """
+        try:
+            return self._setup_payment_method(customer_reference, stripe_version)
+        except self.stripe.StripeError as exc:
+            raise self._unavailable(exc) from exc
+
+    def _setup_payment_method(self, customer_reference, stripe_version=None):
         setup = self.stripe.SetupIntent.create(
             api_key=self.api_key,
             customer=customer_reference,

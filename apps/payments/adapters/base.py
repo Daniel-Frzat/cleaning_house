@@ -34,6 +34,10 @@ class ChargeOutcome:
     FAILED = "FAILED"
 
 
+class PaymentProviderUnavailableError(Exception):
+    """المزوّد رفض طلبًا إداريًا (مفتاح خاطئ، معامل غير صالح، انقطاع) — لا شحن هنا."""
+
+
 class WebhookSignatureError(Exception):
     """توقيع حدث المزوّد غير صالح أو الحمولة تالفة."""
 

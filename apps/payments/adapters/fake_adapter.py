@@ -117,13 +117,12 @@ class FakePaymentAdapter(BasePaymentProviderAdapter):
         return f"fake_cus_{user_reference}"
 
     def setup_payment_method(self, customer_reference, stripe_version=None):
-        """⚠️ جلسة وهمية واضحة الزيف — لا تصلح لـPaymentSheet حقيقي."""
-        return {
-            "client_secret": f"fake_seti_secret_{uuid.uuid4().hex}",
-            "setup_intent_reference": f"fake_seti_{uuid.uuid4().hex}",
-            "customer_reference": customer_reference,
-            "ephemeral_key": f"fake_ek_{uuid.uuid4().hex}" if stripe_version else None,
-        }
+        """
+        ⚠️ لا جلسة وهمية: قيمة fake_seti_secret_… كانت تصل التطبيق فيرفضها
+           Stripe SDK برسالة مربكة. الرفض هنا يتحول إلى 503 واضح
+           (payment_setup_unavailable) يقول إن الخادم ليس على Stripe.
+        """
+        raise NotImplementedError("The fake payment adapter cannot save real cards.")
 
     def parse_webhook(self, payload, headers):
         """⚠️ بلا توقيع — JSON {kind, provider_reference, …} للاختبار وحده."""

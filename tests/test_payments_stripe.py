@@ -296,3 +296,31 @@ def test_decline_at_attach_is_a_known_failure(stripe_settings, calls):
     result = StripePaymentAdapter().charge(Decimal("10"), "CARD", "k", "pm_card", customer_reference="cus_1")
     assert result.outcome == ChargeOutcome.FAILED and result.error_code == "insufficient_funds"
     assert "PaymentIntent.create" not in calls
+
+
+# ------------------------------------------------------------ أعطال الإعداد → 503 واضح لا 500
+@pytest.mark.django_db
+def test_setup_with_the_fake_adapter_is_a_clear_503(client, customer, settings):
+    """كانت تعيد fake_seti_secret_… فيرفضه Stripe SDK في التطبيق برسالة مربكة."""
+    settings.PAYMENT_PROVIDER_ADAPTER_CLASS = "apps.payments.adapters.fake_adapter.FakePaymentAdapter"
+    r = client.post("/api/payments/setup-intent", data="{}", content_type="application/json", **auth(customer))
+    assert r.status_code == 503 and r.json()["code"] == "payment_setup_unavailable"
+    assert "not using a real payment provider" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_missing_stripe_key_is_a_clear_503(client, customer, stripe_settings):
+    stripe_settings.STRIPE_SECRET_KEY = ""
+    r = client.post("/api/payments/setup-intent", data="{}", content_type="application/json", **auth(customer))
+    assert r.status_code == 503 and "STRIPE_SECRET_KEY" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_stripe_rejection_is_a_clear_503(client, customer, stripe_settings, calls):
+    def reject(*a, **k):
+        raise stripe.AuthenticationError("Invalid API Key provided: sk_test_*rong")
+
+    calls["install"]("Customer.create", reject)
+    r = client.post("/api/payments/setup-intent", data="{}", content_type="application/json", **auth(customer))
+    assert r.status_code == 503
+    assert "AuthenticationError" in r.json()["detail"] and "Invalid API Key" in r.json()["detail"]

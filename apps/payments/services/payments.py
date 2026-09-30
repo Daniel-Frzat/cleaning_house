@@ -25,6 +25,7 @@ Payment Service — Payment Domain (Change Set §36.4، §8؛ Infra §2، §14/�
 
 import logging
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -36,7 +37,7 @@ from apps.bookings.models import (
 )
 
 from ..adapters import get_payment_adapter
-from ..adapters.base import WebhookSignatureError
+from ..adapters.base import PaymentProviderUnavailableError, WebhookSignatureError
 from ..models import (
     RETRYABLE_PAYMENT_STATUSES,
     Payment,
@@ -178,12 +179,21 @@ def create_payment_setup(user, stripe_version=None):
     """
     if not user.has_customer_access():
         raise PaymentPermissionError("Only customers save payment methods.")
-    adapter = get_payment_adapter()
+    # 📌 كل فشل هنا إعداد خادم أو رفض من المزوّد — 503 برسالة تشخيص، لا 500
+    try:
+        adapter = get_payment_adapter()
+    except ImproperlyConfigured as exc:
+        logger.error("Payment provider misconfigured: %s", exc)
+        raise PaymentSetupError(f"The payment provider is not configured on the server: {exc}") from exc
     try:
         reference = get_or_create_customer_reference(user, adapter)
         return adapter.setup_payment_method(reference, stripe_version=stripe_version)
     except NotImplementedError as exc:
-        raise PaymentSetupError("Saving a card is not available with the current payment provider.") from exc
+        raise PaymentSetupError(
+            "Saving a card is not available: the server is not using a real payment provider."
+        ) from exc
+    except PaymentProviderUnavailableError as exc:
+        raise PaymentSetupError(f"The payment provider refused the request: {exc}") from exc
 
 
 def _accepted_offer(booking):
