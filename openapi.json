@@ -4079,6 +4079,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
           }
         },
         "description": "For Stripe only. Handles `payment_intent.succeeded` and `payment_intent.payment_failed`; other events are acknowledged and ignored. The `Stripe-Signature` header is verified with `STRIPE_WEBHOOK_SECRET` (`400 webhook_signature_invalid` otherwise). Idempotent.",

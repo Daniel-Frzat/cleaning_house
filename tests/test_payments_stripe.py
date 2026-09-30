@@ -324,3 +324,19 @@ def test_stripe_rejection_is_a_clear_503(client, customer, stripe_settings, call
     r = client.post("/api/payments/setup-intent", data="{}", content_type="application/json", **auth(customer))
     assert r.status_code == 503
     assert "AuthenticationError" in r.json()["detail"] and "Invalid API Key" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_webhook_without_signing_secret_is_503_not_500(client, stripe_settings):
+    """على الإنتاج قبل ضبط STRIPE_WEBHOOK_SECRET كان الطلب يعيد 500."""
+    stripe_settings.STRIPE_WEBHOOK_SECRET = ""
+    r = client.post("/api/payments/webhooks/stripe", data="{}", content_type="application/json")
+    assert r.status_code == 503 and r.json()["code"] == "webhook_not_configured"
+    assert "STRIPE_WEBHOOK_SECRET" in r.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_webhook_without_stripe_key_is_503_not_500(client, stripe_settings):
+    stripe_settings.STRIPE_SECRET_KEY = ""
+    r = client.post("/api/payments/webhooks/stripe", data="{}", content_type="application/json")
+    assert r.status_code == 503 and "STRIPE_SECRET_KEY" in r.json()["detail"]

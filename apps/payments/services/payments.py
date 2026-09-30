@@ -137,6 +137,12 @@ class WebhookRejectedError(PaymentError):
     code = "webhook_signature_invalid"
 
 
+class WebhookNotConfiguredError(PaymentError):
+    """The server cannot verify webhooks yet (provider or signing secret not configured)."""
+
+    code = "webhook_not_configured"
+
+
 # ------------------------------------------------------------
 # عميل المزوّد وحفظ البطاقة (Stripe — قرار PO 2026-09-30)
 # ------------------------------------------------------------
@@ -607,6 +613,10 @@ def handle_provider_webhook(payload, headers):
         event = get_payment_adapter().parse_webhook(payload, headers)
     except WebhookSignatureError as exc:
         raise WebhookRejectedError("Invalid webhook signature.") from exc
+    except (ImproperlyConfigured, NotImplementedError) as exc:
+        # 503 لا 500: Stripe يعيد المحاولة لاحقًا، والسبب يظهر في سجل الـwebhook
+        logger.error("Webhook received but not configured: %s", exc)
+        raise WebhookNotConfiguredError(f"Webhooks are not configured on the server: {exc}") from exc
 
     if event.kind == "ignored":
         return "ignored"

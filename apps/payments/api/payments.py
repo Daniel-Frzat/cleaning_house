@@ -218,7 +218,7 @@ def create_payment_setup(request, payload: PaymentSetupIn):
 @webhook_router.post(
     "/webhooks/stripe",
     auth=None,
-    response={200: dict, 400: ErrorOut},
+    response={200: dict, 400: ErrorOut, 503: ErrorOut},
     summary="Stripe webhook (signature-verified)",
     description=(
         "For Stripe only. Handles `payment_intent.succeeded` and "
@@ -232,4 +232,6 @@ def stripe_webhook(request):
         outcome = svc.handle_provider_webhook(request.body, request.headers)
     except svc.WebhookRejectedError as exc:
         return _error(400, exc.code, str(exc))
+    except svc.WebhookNotConfiguredError as exc:
+        return _error(503, exc.code, str(exc))
     return 200, {"received": True, "outcome": outcome}
