@@ -251,9 +251,33 @@ Stepper mapping:
 
 ### 3.6 Payments (customer)
 
-- `GET /api/bookings/{id}/payment` returns the full payment.
-- `POST /api/bookings/payments/{payment_id}/retry?payment_method_reference=` works only when the payment is `FAILED` or `REQUIRES_ACTION` (`409` otherwise).
-- `POST /api/bookings/payments/{payment_id}/confirm-action` returns `501` until a real provider exists (B2).
+**Stripe flow** 🚀 (the charge happens when a cleaner accepts, possibly while the app is closed):
+
+1. **Before the card form:** `POST /api/payments/setup-intent` with `{"stripe_version": "<your SDK's API version>"}`.
+   - It returns `client_secret` (a SetupIntent), `customer_reference` (`cus_…`) and `ephemeral_key`.
+   - Present **PaymentSheet in setup mode** with these values. Google Pay and Apple Pay work inside it.
+   - Any 3-D Secure check happens here, while the customer is present.
+2. **Create the booking** with the saved `pm_…` in `payment_method_reference`. If it is omitted, the customer's most recently saved card is used.
+3. **When a cleaner accepts,** the backend charges the saved card off-session. The payment becomes `SUCCEEDED`, `FAILED` (with `failure_reason`) or, rarely, `REQUIRES_ACTION`.
+4. **On `REQUIRES_ACTION`** (push `payment.action_required`):
+   - `GET /api/bookings/{id}/payment` returns `action_payload: {type, client_secret, payment_method}` to the booking's customer, only while that status lasts.
+   - Call `confirmPayment(client_secret)` with the returned `payment_method`.
+   - Then call `POST /api/bookings/payments/{payment_id}/confirm-action`.
+5. **Polling:** keep polling the booking or payment as today. A Stripe webhook also settles payments on the server.
+
+**Other notes**
+
+- `payment.method` is set from the card itself: `GOOGLE_PAY`, `APPLE_PAY` or `CARD`.
+- `method_summary` gives the display name, for example "Visa •••• 4242".
+- `POST /api/bookings/payments/{payment_id}/retry?payment_method_reference=` works only when the payment is `FAILED` or `REQUIRES_ACTION` (`409` otherwise). Send a new `pm_…` to use a different saved card.
+- Test cards (Stripe test mode):
+
+  | Card | Result |
+  | --- | --- |
+  | `4242 4242 4242 4242` | Success |
+  | `4000 0027 6000 3184` | 3-D Secure |
+  | `4000 0000 0000 9995` | Declined |
+
 - **Refunds** are decided by an admin, in full or in part.
   - A full refund sets `status: REFUNDED`.
   - A partial refund keeps `SUCCEEDED`.
@@ -735,6 +759,20 @@ Responses: `200` → `PaymentActionOut`, `404` → `ErrorOut`, `409` → `ErrorO
 | `booking_id` | path | string (uuid) | yes |  |
 
 Responses: `200`, `404` → `ErrorOut`
+
+#### `POST /api/payments/setup-intent`
+
+**Start saving a card for later charges (customer)** — Bearer token.
+
+Request body (`application/json`): `PaymentSetupIn`
+
+Responses: `200` → `PaymentSetupOut`, `403` → `ErrorOut`, `503` → `ErrorOut`
+
+#### `POST /api/payments/webhooks/stripe`
+
+**Stripe webhook (signature-verified)** — public (no token).
+
+Responses: `200`, `400` → `ErrorOut`
 
 ### Jobs
 
@@ -1564,10 +1602,25 @@ Responses: `200`, `503`
 | `failure_reason` | string \| null |  |  |
 | `refunded_amount` | number \| string |  | default `"0"`; pattern ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$; Total refunded so far. A full refund also sets status REFUNDED. |
 | `refunded_at` | string (date-time) \| null |  |  |
+| `action_payload` | object \| null |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
 | `attempt_number` | integer | yes |  |
-| `action_payload` | object \| null |  |  |
+
+#### `PaymentSetupIn`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `stripe_version` | string \| null |  | max len 32; The Stripe API version of the app's SDK; when sent, an ephemeral key for PaymentSheet is returned. |
+
+#### `PaymentSetupOut`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `client_secret` | string | yes | SetupIntent client secret for PaymentSheet / confirmSetupIntent. |
+| `setup_intent_reference` | string | yes |  |
+| `customer_reference` | string | yes | The customer id at the payment provider (Stripe cus_…). |
+| `ephemeral_key` | string \| null |  | Present when stripe_version was sent. |
 
 #### `PropertyIn`
 

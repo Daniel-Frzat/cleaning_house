@@ -3994,6 +3994,99 @@
         ]
       }
     },
+    "/api/payments/setup-intent": {
+      "post": {
+        "operationId": "apps_payments_api_payments_create_payment_setup",
+        "summary": "Start saving a card for later charges (customer)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSetupOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Call before the card form. The charge happens later, when a cleaner accepts, possibly while the app is closed, so the card must be saved for off-session use now, and any 3-D Secure check happens now.\n\nWith Stripe: present PaymentSheet (or confirmSetupIntent) with `client_secret`, `customer_reference` and `ephemeral_key` (send `stripe_version` to get one). The resulting `pm_…` goes into `payment_method_reference` when creating the booking; if omitted, the customer's most recently saved card is used.",
+        "tags": [
+          "Payments"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentSetupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/payments/webhooks/stripe": {
+      "post": {
+        "operationId": "apps_payments_api_payments_stripe_webhook",
+        "summary": "Stripe webhook (signature-verified)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "For Stripe only. Handles `payment_intent.succeeded` and `payment_intent.payment_failed`; other events are acknowledged and ignored. The `Stripe-Signature` header is verified with `STRIPE_WEBHOOK_SECRET` (`400 webhook_signature_invalid` otherwise). Idempotent.",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
     "/api/bookings/{booking_id}/job": {
       "get": {
         "operationId": "apps_jobs_api_jobs_retrieve_job",
@@ -12155,6 +12248,18 @@
             ],
             "title": "Refunded At"
           },
+          "action_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Payload"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -12168,18 +12273,6 @@
           "attempt_number": {
             "title": "Attempt Number",
             "type": "integer"
-          },
-          "action_payload": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Action Payload"
           }
         },
         "required": [
@@ -12264,6 +12357,19 @@
               }
             ],
             "title": "Refunded At"
+          },
+          "action_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only while status is REQUIRES_ACTION: {type, client_secret, payment_method}. Open the bank's verification with client_secret, then call confirm-action.",
+            "title": "Action Payload"
           },
           "created_at": {
             "format": "date-time",
@@ -12369,6 +12475,19 @@
             ],
             "title": "Refunded At"
           },
+          "action_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only while status is REQUIRES_ACTION: {type, client_secret, payment_method}. Open the bank's verification with client_secret, then call confirm-action.",
+            "title": "Action Payload"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -12390,6 +12509,62 @@
           "updated_at"
         ],
         "title": "PaymentOut",
+        "type": "object"
+      },
+      "PaymentSetupOut": {
+        "properties": {
+          "client_secret": {
+            "description": "SetupIntent client secret for PaymentSheet / confirmSetupIntent.",
+            "title": "Client Secret",
+            "type": "string"
+          },
+          "setup_intent_reference": {
+            "title": "Setup Intent Reference",
+            "type": "string"
+          },
+          "customer_reference": {
+            "description": "The customer id at the payment provider (Stripe cus_…).",
+            "title": "Customer Reference",
+            "type": "string"
+          },
+          "ephemeral_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when stripe_version was sent.",
+            "title": "Ephemeral Key"
+          }
+        },
+        "required": [
+          "client_secret",
+          "setup_intent_reference",
+          "customer_reference"
+        ],
+        "title": "PaymentSetupOut",
+        "type": "object"
+      },
+      "PaymentSetupIn": {
+        "properties": {
+          "stripe_version": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Stripe API version of the app's SDK; when sent, an ephemeral key for PaymentSheet is returned.",
+            "title": "Stripe Version"
+          }
+        },
+        "title": "PaymentSetupIn",
         "type": "object"
       },
       "JobOut": {

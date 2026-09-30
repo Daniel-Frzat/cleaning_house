@@ -1,8 +1,8 @@
 """
 Payment Provider Adapter — Abstract Interface ONLY (Change Set §8؛ Infra §2)
 
-🟡 مزوّد الدفع (PSP) قرار مفتوح. لا تنفيذ فعلي هنا ولا في أي مكان في كود
-   الإنتاج: لا Stripe SDK، ولا استدعاءات HTTP، ولا أي تكامل حقيقي.
+📌 المزوّد المعتمد Stripe (قرار PO — 2026-09-30) في stripe_adapter.py وحده.
+   هذا الملف عقد محايد لا يعرف أي مزوّد، وبقية النطاق لا تتعامل إلا معه.
 
 الاختيار يتم عبر settings.PAYMENT_PROVIDER_ADAPTER_CLASS (مسار نصي لكلاس)،
 بحيث لا تعرف طبقة الـDomain أي مزوّد بعينه — نفس نمط SMS_ADAPTER و
@@ -32,6 +32,29 @@ class ChargeOutcome:
     SUCCEEDED = "SUCCEEDED"
     REQUIRES_ACTION = "REQUIRES_ACTION"
     FAILED = "FAILED"
+
+
+class WebhookSignatureError(Exception):
+    """توقيع حدث المزوّد غير صالح أو الحمولة تالفة."""
+
+
+class ProviderWebhookEvent:
+    """
+    حدث مُتحقَّق من توقيعه من المزوّد، بشكل محايد.
+
+    kind: "succeeded" | "failed" | "ignored"
+    idempotency_key: مفتاح المحاولة المحفوظ عند الشحن — يربط الحدث بالدفعة
+        حتى لو لم يصل provider_reference (استثناء بعد خصم فعلي).
+    """
+
+    def __init__(self, kind, event_id=None, provider_reference=None, idempotency_key=None,
+                 failure_reason=None, error_code=""):
+        self.kind = kind
+        self.event_id = event_id
+        self.provider_reference = provider_reference
+        self.idempotency_key = idempotency_key
+        self.failure_reason = failure_reason
+        self.error_code = error_code
 
 
 class PaymentChargeResult:
@@ -129,14 +152,20 @@ class BasePaymentProviderAdapter(ABC):
         """
         raise NotImplementedError("This provider does not support refunds.")
 
-    def setup_payment_method(self, customer_reference: str):
-        """
-        ينشئ جلسة إضافة طريقة دفع (§18).
+    def create_customer(self, user_reference, email=None, name=""):
+        """ينشئ عميلًا لدى المزوّد ويعيد معرّفه (لحفظ البطاقات والشحن اللاحق)."""
+        raise NotImplementedError("This provider does not support saved customers.")
 
-        🔴 غير منفَّذة: تحتاج مزوّدًا حقيقيًا. لا تُكشف كـendpoint قبل
-           اختياره — رمز وهمي تظنّه الواجهة حقيقيًا أسوأ من غيابه.
+    def setup_payment_method(self, customer_reference: str, stripe_version=None):
+        """
+        جلسة حفظ بطاقة للشحن اللاحق بلا حضور العميل (§18). يعيد قاموسًا:
+        client_secret، setup_intent_reference، customer_reference، ephemeral_key.
         """
         raise NotImplementedError("Payment method setup requires a real provider.")
+
+    def parse_webhook(self, payload: bytes, headers) -> "ProviderWebhookEvent":
+        """يتحقق من توقيع حدث المزوّد ويعيده محايدًا — يرفع عند توقيع خاطئ."""
+        raise NotImplementedError("This provider does not send webhooks.")
 
     def list_payment_methods(self, customer_reference: str):
         """يسرد طرق الدفع المحفوظة (§18). 🔴 غير منفَّذة — تحتاج مزوّدًا."""

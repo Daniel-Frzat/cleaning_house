@@ -19,7 +19,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from .base import BasePaymentProviderAdapter, ChargeOutcome, PaymentChargeResult
+from .base import BasePaymentProviderAdapter, ChargeOutcome, PaymentChargeResult, ProviderWebhookEvent
 
 # 📌 المبلغ الذي يُحاكي فشل المزوّد في الاختبارات.
 FAILURE_SENTINEL_AMOUNT = Decimal("0.01")
@@ -109,6 +109,34 @@ class FakePaymentAdapter(BasePaymentProviderAdapter):
             outcome=ChargeOutcome.SUCCEEDED,
             provider_reference=f"fake_{uuid.uuid4()}",
             method_summary=summary,
+        )
+
+    provider_name = "fake"
+
+    def create_customer(self, user_reference, email=None, name=""):
+        return f"fake_cus_{user_reference}"
+
+    def setup_payment_method(self, customer_reference, stripe_version=None):
+        """⚠️ جلسة وهمية واضحة الزيف — لا تصلح لـPaymentSheet حقيقي."""
+        return {
+            "client_secret": f"fake_seti_secret_{uuid.uuid4().hex}",
+            "setup_intent_reference": f"fake_seti_{uuid.uuid4().hex}",
+            "customer_reference": customer_reference,
+            "ephemeral_key": f"fake_ek_{uuid.uuid4().hex}" if stripe_version else None,
+        }
+
+    def parse_webhook(self, payload, headers):
+        """⚠️ بلا توقيع — JSON {kind, provider_reference, …} للاختبار وحده."""
+        import json
+
+        body = json.loads(payload or b"{}")
+        return ProviderWebhookEvent(
+            kind=body.get("kind", "ignored"),
+            event_id=body.get("event_id"),
+            provider_reference=body.get("provider_reference"),
+            idempotency_key=body.get("idempotency_key"),
+            failure_reason=body.get("failure_reason"),
+            error_code=body.get("error_code", ""),
         )
 
     def refund(self, provider_reference, amount, idempotency_key, currency="AUD"):

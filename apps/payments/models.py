@@ -219,3 +219,27 @@ class Payment(models.Model):
             return accepted.total_amount
 
         return booking.computed_price
+
+
+class PaymentCustomer(models.Model):
+    """
+    عميل المستخدم لدى مزوّد الدفع — البطاقات المحفوظة تعيش عليه.
+
+    📌 واحد لكل مستخدم ومزوّد. يُنشأ عند أول حفظ بطاقة أو أول شحن.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, related_name="payment_customers"
+    )
+    provider = models.CharField(max_length=32)
+    customer_reference = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "provider"], name="one_payment_customer_per_provider"),
+        ]
+
+    def __str__(self):
+        return f"{self.provider}:{self.customer_reference}"

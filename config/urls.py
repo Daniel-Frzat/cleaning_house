@@ -52,6 +52,8 @@ from apps.bookings.api.offers import router as contractor_offers_router
 from apps.jobs.api.jobs import booking_router as jobs_booking_router
 from apps.jobs.api.jobs import contractor_router as jobs_contractor_router
 from apps.payments.api.payments import router as payments_router
+from apps.payments.api.payments import setup_router as payment_setup_router
+from apps.payments.api.payments import webhook_router as payment_webhook_router
 from apps.payouts.api.payouts import earnings_router as contractor_earnings_router
 from apps.payouts.api.payouts import router as payouts_router
 from apps.properties.api.properties import router as properties_router
@@ -323,6 +325,9 @@ api.add_router("/contractor", contractor_offers_router)
 # الدفع — يُركَّب على /bookings لأن المسار /bookings/{id}/payment.
 # لا تعارض مع مسارات الحجوزات: تلك /bookings و /bookings/{id} فقط.
 api.add_router("/bookings", payments_router)
+# حفظ البطاقة وwebhook المزوّد (Stripe — قرار PO 2026-09-30)
+api.add_router("/payments", payment_setup_router)
+api.add_router("/payments", payment_webhook_router)
 # تنفيذ المهام — عرض المهمة عبر الحجز، ورفع الصور للمقاول المُسنَد.
 api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)

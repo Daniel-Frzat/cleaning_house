@@ -36,9 +36,11 @@ from apps.bookings.models import (
 )
 
 from ..adapters import get_payment_adapter
+from ..adapters.base import WebhookSignatureError
 from ..models import (
     RETRYABLE_PAYMENT_STATUSES,
     Payment,
+    PaymentCustomer,
     PaymentMethod,
     PaymentStatus,
 )
@@ -122,6 +124,68 @@ class PaymentActionNotAvailableError(PaymentError):
     code = "payment_action_not_available"
 
 
+class PaymentSetupError(PaymentError):
+    """The payment provider could not start a card setup session."""
+
+    code = "payment_setup_unavailable"
+
+
+class WebhookRejectedError(PaymentError):
+    """The webhook signature is invalid."""
+
+    code = "webhook_signature_invalid"
+
+
+# ------------------------------------------------------------
+# عميل المزوّد وحفظ البطاقة (Stripe — قرار PO 2026-09-30)
+# ------------------------------------------------------------
+def _provider_name(adapter):
+    return getattr(adapter, "provider_name", type(adapter).__name__)
+
+
+def get_or_create_customer_reference(user, adapter=None):
+    """
+    معرّف المستخدم لدى المزوّد، يُنشأ أول مرة.
+
+    📌 مزوّد لا يدعم العملاء يرجع إلى معرّف المستخدم الداخلي (السلوك السابق).
+    """
+    adapter = adapter or get_payment_adapter()
+    provider = _provider_name(adapter)
+    existing = PaymentCustomer.objects.filter(user=user, provider=provider).first()
+    if existing is not None:
+        return existing.customer_reference
+    create = getattr(adapter, "create_customer", None)
+    if create is None:
+        return str(user.pk)
+    try:
+        reference = create(user.pk, email=user.email, name=user.full_name)
+    except NotImplementedError:
+        return str(user.pk)
+    try:
+        with transaction.atomic():
+            PaymentCustomer.objects.create(user=user, provider=provider, customer_reference=reference)
+    except IntegrityError:  # طلبان متزامنان — الأول فاز
+        return PaymentCustomer.objects.get(user=user, provider=provider).customer_reference
+    return reference
+
+
+def create_payment_setup(user, stripe_version=None):
+    """
+    جلسة حفظ بطاقة قبل الطلب (SetupIntent لدى Stripe).
+
+    📌 الشحن يقع لاحقًا عند قبول العامل وقد يكون العميل خارج التطبيق،
+       فالبطاقة تُحفظ الآن و3-D Secure يُجرى الآن والعميل حاضر.
+    """
+    if not user.has_customer_access():
+        raise PaymentPermissionError("Only customers save payment methods.")
+    adapter = get_payment_adapter()
+    try:
+        reference = get_or_create_customer_reference(user, adapter)
+        return adapter.setup_payment_method(reference, stripe_version=stripe_version)
+    except NotImplementedError as exc:
+        raise PaymentSetupError("Saving a card is not available with the current payment provider.") from exc
+
+
 def _accepted_offer(booking):
     """العرض الذي يحجز هذا الحجز حاليًا، أو None."""
     return booking.dispatch_offers.filter(
@@ -203,13 +267,14 @@ def _attempt_charge(payment, booking):
        السبب مسجَّلًا للمطابقة، ولا تُعلَّم FAILED ولا يُعاد الشحن تلقائيًا.
     """
     try:
-        result = get_payment_adapter().charge(
+        adapter = get_payment_adapter()
+        result = adapter.charge(
             amount=payment.amount,
             method=payment.method,
             idempotency_key=build_idempotency_key(booking, payment.attempt_number),
             payment_method_reference=booking.payment_method_reference,
             currency=CURRENCY,
-            customer_reference=str(booking.customer_id),
+            customer_reference=get_or_create_customer_reference(booking.customer, adapter),
         )
     except Exception as exc:  # noqa: BLE001 — النتيجة مجهولة، لا فاشلة
         logger.exception(
@@ -226,6 +291,10 @@ def _attempt_charge(payment, booking):
     payment.provider_reference = result.provider_reference
     payment.method_summary = result.method_summary
     payment.provider_error_code = result.error_code or ""
+    # 📌 النوع الفعلي من المزوّد: Google Pay / Apple Pay / بطاقة (BookingIn لا يحمله)
+    reported = (result.method_summary or {}).get("type")
+    if reported in PaymentMethod.values:
+        payment.method = reported
 
     if result.success:
         payment.status = PaymentStatus.SUCCEEDED
@@ -243,6 +312,7 @@ def _attempt_charge(payment, booking):
     payment.save(
         update_fields=[
             "status",
+            "method",
             "provider_reference",
             "failure_reason",
             "provider_error_code",
@@ -492,6 +562,76 @@ def confirm_payment_action(user, payment_id):
         transaction.on_commit(lambda: confirm_payment(payment.id), robust=True)
     _emit_payment_outcome(payment)
     return payment
+
+
+# ------------------------------------------------------------
+# Webhook المزوّد — حسم ما بقي معلّقًا
+# ------------------------------------------------------------
+def _payment_for_event(event):
+    if event.provider_reference:
+        payment = Payment.objects.select_for_update().filter(provider_reference=event.provider_reference).first()
+        if payment is not None:
+            return payment
+    # مفتاح المحاولة: booking-<id>-payment-attempt-<n> (build_idempotency_key)
+    key = event.idempotency_key or ""
+    if key.startswith("booking-") and "-payment-attempt-" in key:
+        booking_id, _, attempt = key[len("booking-"):].rpartition("-payment-attempt-")
+        return (
+            Payment.objects.select_for_update()
+            .filter(booking_id=booking_id, attempt_number=int(attempt) if attempt.isdigit() else -1)
+            .first()
+        )
+    return None
+
+
+@transaction.atomic
+def handle_provider_webhook(payload, headers):
+    """
+    يطبّق حدثًا مُتحقَّقًا منه. يعيد وصفًا قصيرًا للنتيجة.
+
+    🔒 التوقيع أولًا (الـadapter). ثم تكرارية كاملة: الحدث نفسه مرتين، أو
+       حدث عن دفعة محسومة، لا يغيّر شيئًا. النجاح يمر بـconfirm_payment
+       نفسها (بعد الـcommit)، فلا مسار إسناد ثانٍ.
+    """
+    try:
+        event = get_payment_adapter().parse_webhook(payload, headers)
+    except WebhookSignatureError as exc:
+        raise WebhookRejectedError("Invalid webhook signature.") from exc
+
+    if event.kind == "ignored":
+        return "ignored"
+    payment = _payment_for_event(event)
+    if payment is None:
+        logger.warning("Webhook for unknown payment (event_id=%s, ref=%s)", event.event_id, event.provider_reference)
+        return "unknown_payment"
+
+    if event.kind == "succeeded":
+        # فقط المعلّقة أو الفاشلة تنتقل للنجاح؛ المحسومة (ناجحة/مستردة) لا تُمس
+        if payment.status not in (PaymentStatus.PROCESSING, PaymentStatus.REQUIRES_ACTION, PaymentStatus.FAILED):
+            return "already_settled"
+        payment.status = PaymentStatus.SUCCEEDED
+        payment.provider_reference = payment.provider_reference or event.provider_reference
+        payment.failure_reason = None
+        payment.action_payload = None
+        payment.save(update_fields=["status", "provider_reference", "failure_reason", "action_payload", "updated_at"])
+        transaction.on_commit(lambda: confirm_payment(payment.id), robust=True)
+        logger.info("Payment settled by webhook (payment_id=%s)", payment.id)
+        return "succeeded"
+
+    if event.kind == "failed":
+        if payment.status not in (PaymentStatus.PROCESSING, PaymentStatus.REQUIRES_ACTION):
+            return "already_settled"
+        payment.status = PaymentStatus.FAILED
+        payment.provider_reference = payment.provider_reference or event.provider_reference
+        payment.failure_reason = event.failure_reason or "The payment was not completed."
+        payment.provider_error_code = event.error_code or ""
+        payment.action_payload = None
+        payment.save(update_fields=[
+            "status", "provider_reference", "failure_reason", "provider_error_code", "action_payload", "updated_at",
+        ])
+        _emit_payment_outcome(payment)
+        return "failed"
+    return "ignored"
 
 
 def get_payment_by_booking_id(user, booking_id):

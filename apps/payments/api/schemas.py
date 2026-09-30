@@ -44,6 +44,13 @@ class PaymentOut(Schema):
         Decimal("0"), description="Total refunded so far. A full refund also sets status REFUNDED."
     )
     refunded_at: Optional[datetime] = None
+    action_payload: Optional[dict] = Field(
+        None,
+        description=(
+            "Only while status is REQUIRES_ACTION: {type, client_secret, payment_method}. "
+            "Open the bank's verification with client_secret, then call confirm-action."
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -53,6 +60,20 @@ class PaymentActionOut(PaymentOut):
 
     attempt_number: int
     action_payload: Optional[dict] = None
+
+
+class PaymentSetupIn(Schema):
+    stripe_version: Optional[str] = Field(
+        None, max_length=32,
+        description="The Stripe API version of the app's SDK; when sent, an ephemeral key for PaymentSheet is returned.",
+    )
+
+
+class PaymentSetupOut(Schema):
+    client_secret: str = Field(..., description="SetupIntent client secret for PaymentSheet / confirmSetupIntent.")
+    setup_intent_reference: str
+    customer_reference: str = Field(..., description="The customer id at the payment provider (Stripe cus_…).")
+    ephemeral_key: Optional[str] = Field(None, description="Present when stripe_version was sent.")
 
 
 class PaymentAdminOut(PaymentOut):

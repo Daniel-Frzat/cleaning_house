@@ -28,10 +28,14 @@ from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.accounts.roles import ConfirmedRole
 
+from ..models import PaymentStatus
 from ..services import payments as svc
-from .schemas import ErrorOut, PaymentActionOut, PaymentAdminOut, PaymentOut
+from .schemas import ErrorOut, PaymentActionOut, PaymentAdminOut, PaymentOut, PaymentSetupIn, PaymentSetupOut
 
 router = Router(tags=["Payments"], auth=ActiveUserJWTAuth())
+# /api/payments/* — حفظ البطاقة (مصادَق) والـwebhook (بلا JWT؛ التوقيع هو المصادقة)
+setup_router = Router(tags=["Payments"], auth=ActiveUserJWTAuth())
+webhook_router = Router(tags=["Payments"])
 
 
 def _error(status, code, detail):
@@ -59,6 +63,10 @@ def _serialize(payment, *, as_admin):
         "failure_reason": payment.failure_reason,
         "refunded_amount": payment.refunded_amount,
         "refunded_at": payment.refunded_at,
+        # 📌 مفتاح شاشة البنك — ما دامت المصادقة مطلوبة وحدها (طلب التطبيق 4.2)
+        "action_payload": (
+            payment.action_payload if payment.status == PaymentStatus.REQUIRES_ACTION else None
+        ),
         "created_at": payment.created_at,
         "updated_at": payment.updated_at,
     }
@@ -175,3 +183,53 @@ def retrieve_payment(request, booking_id: uuid.UUID):
 
     is_admin = request.user.has_admin_access()
     return 200, _serialize(payment, as_admin=is_admin)
+
+
+# ------------------------------------------------------------
+# POST /payments/setup-intent — حفظ البطاقة قبل الطلب
+# ------------------------------------------------------------
+@setup_router.post(
+    "/setup-intent",
+    response={200: PaymentSetupOut, 403: ErrorOut, 503: ErrorOut},
+    summary="Start saving a card for later charges (customer)",
+    description=(
+        "Call before the card form. The charge happens later, when a cleaner "
+        "accepts, possibly while the app is closed, so the card must be saved "
+        "for off-session use now, and any 3-D Secure check happens now.\n\n"
+        "With Stripe: present PaymentSheet (or confirmSetupIntent) with "
+        "`client_secret`, `customer_reference` and `ephemeral_key` (send "
+        "`stripe_version` to get one). The resulting `pm_…` goes into "
+        "`payment_method_reference` when creating the booking; if omitted, the "
+        "customer's most recently saved card is used."
+    ),
+)
+def create_payment_setup(request, payload: PaymentSetupIn):
+    try:
+        return 200, svc.create_payment_setup(request.user, stripe_version=payload.stripe_version)
+    except svc.PaymentPermissionError as exc:
+        return _error(403, exc.code, str(exc))
+    except svc.PaymentSetupError as exc:
+        return _error(503, exc.code, str(exc))
+
+
+# ------------------------------------------------------------
+# POST /payments/webhooks/stripe — أحداث المزوّد
+# ------------------------------------------------------------
+@webhook_router.post(
+    "/webhooks/stripe",
+    auth=None,
+    response={200: dict, 400: ErrorOut},
+    summary="Stripe webhook (signature-verified)",
+    description=(
+        "For Stripe only. Handles `payment_intent.succeeded` and "
+        "`payment_intent.payment_failed`; other events are acknowledged and ignored. "
+        "The `Stripe-Signature` header is verified with `STRIPE_WEBHOOK_SECRET` "
+        "(`400 webhook_signature_invalid` otherwise). Idempotent."
+    ),
+)
+def stripe_webhook(request):
+    try:
+        outcome = svc.handle_provider_webhook(request.body, request.headers)
+    except svc.WebhookRejectedError as exc:
+        return _error(400, exc.code, str(exc))
+    return 200, {"received": True, "outcome": outcome}

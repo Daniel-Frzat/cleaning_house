@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**156 codes.**
+**158 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -99,10 +99,11 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `payment_admin_error` | 403, 404, 503 |  | apps/payments/services/admin.py |
 | `payment_already_exists` | 422 |  | apps/payments/services/payments.py |
 | `payment_error` | 422 |  | apps/payments/services/payments.py |
-| `payment_forbidden` | 422 |  | apps/payments/services/payments.py |
+| `payment_forbidden` | 403 |  | apps/payments/services/payments.py |
 | `payment_not_found` | 404 |  | apps/payments/api/payments.py, apps/payments/services/admin.py, apps/payments/services/payments.py |
 | `payment_not_retryable` | 409 |  | apps/payments/services/payments.py |
 | `payment_not_settled` | 409 |  | apps/jobs/services/jobs.py |
+| `payment_setup_unavailable` | 503 | The payment provider could not start a card setup session. | apps/payments/services/payments.py |
 | `payout_admin_error` | 403, 404, 503 |  | apps/payouts/services/admin.py |
 | `payout_already_exists` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
 | `payout_error` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
@@ -165,4 +166,5 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `validation_error` | 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/support/api/support.py, config/urls.py |
 | `verification_error` | 403, 404, 503 |  | apps/contractors/services/verification.py |
 | `verification_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/services/verification.py |
+| `webhook_signature_invalid` | 400 | The webhook signature is invalid. | apps/payments/services/payments.py |
 | `wrong_password` | 400 |  | apps/accounts/services/admin_auth.py |

@@ -261,6 +261,11 @@ PAYMENTS_ALLOW_FAKE_ADAPTER = config(
     "PAYMENTS_ALLOW_FAKE_ADAPTER", default=False, cast=bool
 )
 
+# Stripe (قرار PO — 2026-09-30). المفاتيح السرية في متغيرات البيئة وحدها.
+# PAYMENT_PROVIDER_ADAPTER_CLASS=apps.payments.adapters.stripe_adapter.StripePaymentAdapter
+STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = config("STRIPE_WEBHOOK_SECRET", default="")
+
 # ------------------------------------------------------------
 # Storage Provider (Jobs Domain — Infra §7)
 # ------------------------------------------------------------

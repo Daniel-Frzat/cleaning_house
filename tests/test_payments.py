@@ -478,17 +478,19 @@ def test_fake_adapter_failure_sentinel():
 
 def test_no_real_psp_integration_anywhere():
     """
-    ⚠️ لا Stripe SDK ولا HTTP ولا أي تكامل حقيقي في كود الإنتاج.
-       الفحص على الاستيرادات الفعلية (AST) لا على النص.
+    ⚠️ مزوّد الدفع يعيش في ملف الـadapter وحده (Stripe — قرار PO 2026-09-30).
+       بقية نطاق الدفع لا تستورد أي SDK ولا مكتبة HTTP: تتعامل مع العقد
+       المحايد في adapters/base.py فقط. الفحص على الاستيرادات (AST).
     """
     import ast
     import pathlib
 
     banned = ("stripe", "requests", "httpx", "urllib", "http.client", "braintree",
               "paypal", "adyen", "square")
+    provider_adapters = {pathlib.Path("apps/payments/adapters/stripe_adapter.py")}
 
     for path in sorted(pathlib.Path("apps/payments").rglob("*.py")):
-        if "__pycache__" in str(path):
+        if "__pycache__" in str(path) or path in provider_adapters:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported = set()
