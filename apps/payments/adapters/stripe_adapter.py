@@ -245,8 +245,9 @@ class StripePaymentAdapter(BasePaymentProviderAdapter):
             provider_reference, api_key=self.api_key, expand=["payment_method"]
         )
         payment_method = _get(intent, "payment_method")
-        return self._result_from_intent(intent, payment_method if isinstance(payment_method, dict) or
-                                        hasattr(payment_method, "get") else None)
+        # 📌 Stripe ≥15 يعيد كائنات ليست dict؛ المعرّف النصي وحده يعني "غير موسَّع"
+        expanded = payment_method if payment_method is not None and not isinstance(payment_method, str) else None
+        return self._result_from_intent(intent, expanded)
 
     def refund(self, provider_reference, amount, idempotency_key, currency="AUD"):
         try:

@@ -340,3 +340,13 @@ def test_webhook_without_stripe_key_is_503_not_500(client, stripe_settings):
     stripe_settings.STRIPE_SECRET_KEY = ""
     r = client.post("/api/payments/webhooks/stripe", data="{}", content_type="application/json")
     assert r.status_code == 503 and "STRIPE_SECRET_KEY" in r.json()["detail"]
+
+
+def test_confirm_keeps_the_card_summary_with_real_stripe_objects(stripe_settings, calls):
+    """Stripe ≥15: الكائنات ليست dict — كان confirm يُسقط ملخص البطاقة."""
+    intent = stripe.PaymentIntent.construct_from(
+        {"id": "pi_5", "status": "succeeded", "payment_method": CARD}, "sk_test_dummy"
+    )
+    calls["install"]("PaymentIntent.retrieve", intent)
+    result = StripePaymentAdapter().confirm("pi_5")
+    assert result.success and result.method_summary["display_name"] == "Visa •••• 4242"
