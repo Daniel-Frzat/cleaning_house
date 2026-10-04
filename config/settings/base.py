@@ -98,10 +98,12 @@ ROOT_URLCONF = "config.urls"
 # 📌 بلا credentials: التوكن في ترويسة Authorization لا في كوكي، فلا يحتاج
 #    المتصفح إرسال كوكيز — ولا تُفعَّل CORS_ALLOW_CREDENTIALS.
 CORS_URLS_REGEX = r"^/api/.*$"
-CORS_ALLOWED_ORIGINS = config(
-    "CORS_ALLOWED_ORIGINS", default="",
-    cast=lambda v: [s.strip().rstrip("/") for s in v.split(",") if s.strip()],
-)
+# Origins must use scheme + host only, with no path; for example: https://example.com.
+def _parse_cors_allowed_origins(value):
+    return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+
+
+CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=_parse_cors_allowed_origins)
 # تطوير اللوحة محليًا (Vite يبدأ من 5173 ويزيد المنفذ إن كان مشغولًا):
 # يسمح بـhttp://localhost:<أي منفذ> و127.0.0.1. للمرحلة التجريبية فقط —
 # يُطفأ على الإنتاج قبل الإطلاق.

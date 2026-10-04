@@ -5,6 +5,7 @@ CORS للوحة التحكم — موقع منفصل يستدعي /api/admin/* �
 """
 
 import pytest
+from config.settings.base import _parse_cors_allowed_origins
 
 ADMIN_ORIGIN = "https://admin.example.com"
 
@@ -37,6 +38,17 @@ def test_listed_origin_passes_preflight_with_authorization_header(client, cors):
 def test_unlisted_origin_gets_no_cors_headers(client, cors):
     r = preflight(client, "/api/admin/auth/login", "https://evil.example.com")
     assert "Access-Control-Allow-Origin" not in r
+
+
+def test_cors_allow_all_origins_is_not_enabled(settings):
+    assert getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False) is False
+
+
+def test_allowed_origins_parsing_strips_spaces_empty_entries_and_trailing_slashes():
+    assert _parse_cors_allowed_origins(" https://one.example.com/ , , https://two.example.com/ ") == [
+        "https://one.example.com",
+        "https://two.example.com",
+    ]
 
 
 def test_cors_applies_to_the_api_only(client, cors):
