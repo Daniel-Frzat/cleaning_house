@@ -103,13 +103,14 @@ def _rating(profile):
 # ------------------------------------------------------------
 @router.post(
     "/profile",
-    response={201: ContractorProfileOut, 403: ErrorOut, 409: ErrorOut, 422: ErrorOut},
+    response={200: ContractorProfileOut, 201: ContractorProfileOut, 403: ErrorOut, 422: ErrorOut},
     summary="Create own contractor profile (contractor only)",
     description=(
         "**Who may call:** `CONTRACTOR` only. The profile is always created for "
         "the caller — this endpoint accepts no contractor id.\n\n"
-        "**Preconditions:** the caller must not already have a profile; each "
-        "contractor has exactly one.\n\n"
+        "If the caller already has a profile, the existing profile is returned "
+        "so retries after a network interruption are safe. Each contractor still "
+        "has exactly one profile.\n\n"
         "The profile carries the business name and the address the contractor "
         "works from, including the coordinates used to measure distance when "
         "dispatching bookings.\n\n"
@@ -121,7 +122,6 @@ def _rating(profile):
     openapi_extra={
         "responses": {
             403: {"description": "The caller is not a `CONTRACTOR`."},
-            409: {"description": "This contractor already has a profile."},
             422: {"description": "The submitted profile fields failed validation."},
         }
     },
@@ -138,8 +138,12 @@ def create_profile(request, payload: ContractorProfileIn):
         return _error(403, exc.code, str(exc))
     except svc.ContractorProfilePermissionError as exc:
         return _error(403, exc.code, str(exc))
-    except svc.ProfileAlreadyExistsError as exc:
-        return _error(409, exc.code, str(exc))
+    except svc.ProfileAlreadyExistsError:
+        # إنشاء الملف قد يُعاد بعد انقطاع الشبكة أو بعد تسجيل الدخول بالرقم
+        # نفسه. العملية idempotent: الملف الموجود هو النتيجة الصحيحة، وليس
+        # خطأً يمنع التطبيق من فتح وضع العامل.
+        profile = svc.get_own_profile(request.user)
+        return 200, serialize(profile)
     except ValidationError as exc:
         return _validation_error(exc)
     except svc.ContractorProfileError as exc:
