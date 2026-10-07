@@ -215,7 +215,20 @@ def test_no_notification_when_no_contractor_is_found(customer, prop, general, dj
 
 @pytest.mark.django_db
 def test_full_job_lifecycle_notifications(customer, prop, general, pricing, django_capture_on_commit_callbacks):
+    from apps.contractors.models import (
+        ContractorPayoutAccount,
+        ContractorPayoutAccountStatus,
+    )
+
     user, _ = make_contractor("+61400900102", coords=NEAR)
+    ContractorPayoutAccount.objects.create(
+        contractor_profile=user.contractor_profile,
+        provider="fake",
+        external_account_id=f"fake_acct_{user.contractor_profile.pk}",
+        status=ContractorPayoutAccountStatus.ENABLED,
+        payouts_enabled=True,
+        details_submitted=True,
+    )
     booking = make_pending_booking(customer, prop, general)
     with django_capture_on_commit_callbacks(execute=True):
         offer = assign_next_contractor(booking)

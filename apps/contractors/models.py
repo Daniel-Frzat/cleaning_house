@@ -144,6 +144,44 @@ class ContractorProfile(models.Model):
         return self.latitude is not None and self.longitude is not None
 
 
+class ContractorPayoutAccountStatus(models.TextChoices):
+    NOT_STARTED = "NOT_STARTED", "Not started"
+    PENDING = "PENDING", "Pending"
+    ENABLED = "ENABLED", "Enabled"
+    RESTRICTED = "RESTRICTED", "Restricted"
+
+
+class ContractorPayoutAccount(models.Model):
+    """Provider-neutral payout destination and its current readiness state."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contractor_profile = models.OneToOneField(
+        ContractorProfile, on_delete=models.CASCADE, related_name="payout_account"
+    )
+    provider = models.CharField(max_length=32)
+    external_account_id = models.CharField(
+        max_length=255, null=True, blank=True, unique=True
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=ContractorPayoutAccountStatus.choices,
+        default=ContractorPayoutAccountStatus.NOT_STARTED,
+    )
+    payouts_enabled = models.BooleanField(default=False)
+    details_submitted = models.BooleanField(default=False)
+    requirements_due = models.JSONField(default=list, blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Contractor payout account"
+        verbose_name_plural = "Contractor payout accounts"
+
+    def __str__(self):
+        return f"Payout account for contractor profile ({self.contractor_profile_id})"
+
+
 # ============================================================
 # التحقق من المقاول — مراجعة يدوية بالكامل (Change Set §6، Infra §5)
 # ============================================================

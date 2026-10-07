@@ -19,7 +19,12 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from .base import BasePayoutProviderAdapter, PayoutResult
+from .base import (
+    BasePayoutProviderAdapter,
+    PayoutAccountWebhookError,
+    PayoutAccountWebhookEvent,
+    PayoutResult,
+)
 
 # 📌 المبلغ الذي يُحاكي فشل المزوّد في الاختبارات.
 FAILURE_SENTINEL_AMOUNT = Decimal("0.02")
@@ -42,7 +47,14 @@ class FakePayoutAdapter(BasePayoutProviderAdapter):
                 "تنفيذ حقيقي، أو فعّل PAYOUTS_ALLOW_FAKE_ADAPTER=True صراحةً."
             )
 
-    def payout(self, amount, contractor_reference, idempotency_key):
+    def payout(
+        self,
+        amount,
+        contractor_reference,
+        idempotency_key,
+        payout_id=None,
+        booking_id=None,
+    ):
         """
         ⚠️ لا شبكة ولا مزوّد. النتيجة تُشتق من المبلغ وحده.
         """
@@ -57,4 +69,15 @@ class FakePayoutAdapter(BasePayoutProviderAdapter):
             success=True,
             provider_reference=f"fake_payout_{uuid.uuid4()}",
             failure_reason=None,
+        )
+
+    def create_account(self, contractor):
+        return {"id": f"fake_acct_{contractor.pk}"}
+
+    def create_onboarding_link(self, account_id, return_url, refresh_url):
+        return {"url": f"https://connect.example.test/onboarding/{account_id}/{uuid.uuid4()}"}
+
+    def parse_account_event(self, payload, headers):
+        raise PayoutAccountWebhookError(
+            "The fake payout provider does not accept connected-account webhooks."
         )

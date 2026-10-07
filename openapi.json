@@ -2048,6 +2048,16 @@
         "summary": "Create own contractor profile (contractor only)",
         "parameters": [],
         "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractorProfileOut"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Created",
             "content": {
@@ -2068,16 +2078,6 @@
               }
             }
           },
-          "409": {
-            "description": "This contractor already has a profile.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          },
           "422": {
             "description": "The submitted profile fields failed validation.",
             "content": {
@@ -2089,7 +2089,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CONTRACTOR` only. The profile is always created for the caller — this endpoint accepts no contractor id.\n\n**Preconditions:** the caller must not already have a profile; each contractor has exactly one.\n\nThe profile carries the business name and the address the contractor works from, including the coordinates used to measure distance when dispatching bookings.\n\n**Side effects:** the profile always starts `UNAVAILABLE`, so no booking is dispatched to it until availability is switched on via `PATCH /api/contractor/profile/availability`. Availability is ignored if supplied here.",
+        "description": "**Who may call:** `CONTRACTOR` only. The profile is always created for the caller — this endpoint accepts no contractor id.\n\nIf the caller already has a profile, the existing profile is returned so retries after a network interruption are safe. Each contractor still has exactly one profile.\n\nThe profile carries the business name and the address the contractor works from, including the coordinates used to measure distance when dispatching bookings.\n\n**Side effects:** the profile always starts `UNAVAILABLE`, so no booking is dispatched to it until availability is switched on via `PATCH /api/contractor/profile/availability`. Availability is ignored if supplied here.",
         "tags": [
           "Contractor Profile"
         ],
@@ -2655,6 +2655,130 @@
         "description": "`204` when no location was reported yet. `is_fresh` says whether dispatch can use it.",
         "tags": [
           "Contractor Profile"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/payout-account/onboarding-link": {
+      "post": {
+        "operationId": "apps_contractors_api_payout_accounts_onboarding_link",
+        "summary": "Create a fresh connected-account onboarding link",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingLinkOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Contractor Payout Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingLinkIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/contractor/payout-account": {
+      "get": {
+        "operationId": "apps_contractors_api_payout_accounts_payout_account",
+        "summary": "Retrieve own payout-account readiness",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutAccountOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Contractor Payout Account"
         ],
         "security": [
           {
@@ -4094,6 +4218,51 @@
         "description": "For Stripe only. Handles `payment_intent.succeeded` and `payment_intent.payment_failed`; other events are acknowledged and ignored. The `Stripe-Signature` header is verified with `STRIPE_WEBHOOK_SECRET` (`400 webhook_signature_invalid` otherwise). Idempotent.",
         "tags": [
           "Payments"
+        ]
+      }
+    },
+    "/api/payments/webhooks/stripe-connect": {
+      "post": {
+        "operationId": "apps_payouts_api_connect_webhooks_stripe_connect_webhook",
+        "summary": "Stripe Connect connected-account webhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Verifies the Stripe Connect signing secret and synchronizes `account.updated`; all other verified event types are acknowledged.",
+        "tags": [
+          "Payouts"
         ]
       }
     },
@@ -11054,6 +11223,58 @@
           "recorded_at"
         ],
         "title": "CurrentLocationIn",
+        "type": "object"
+      },
+      "OnboardingLinkOut": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "OnboardingLinkOut",
+        "type": "object"
+      },
+      "OnboardingLinkIn": {
+        "properties": {
+          "return_url": {
+            "title": "Return Url",
+            "type": "string"
+          },
+          "refresh_url": {
+            "title": "Refresh Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "return_url",
+          "refresh_url"
+        ],
+        "title": "OnboardingLinkIn",
+        "type": "object"
+      },
+      "PayoutAccountOut": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "requirements_due": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements Due",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "requirements_due"
+        ],
+        "title": "PayoutAccountOut",
         "type": "object"
       },
       "ContractorVerificationsOut": {

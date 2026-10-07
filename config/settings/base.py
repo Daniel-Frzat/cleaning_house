@@ -267,6 +267,7 @@ PAYMENTS_ALLOW_FAKE_ADAPTER = config(
 # PAYMENT_PROVIDER_ADAPTER_CLASS=apps.payments.adapters.stripe_adapter.StripePaymentAdapter
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = config("STRIPE_WEBHOOK_SECRET", default="")
+STRIPE_CONNECT_WEBHOOK_SECRET = config("STRIPE_CONNECT_WEBHOOK_SECRET", default="")
 
 # ------------------------------------------------------------
 # Storage Provider (Jobs Domain — Infra §7)

@@ -24,7 +24,12 @@ from apps.accounts.models import User
 from apps.accounts.roles import ConfirmedRole
 from apps.accounts.services.tokens import issue_tokens_for_user
 from apps.bookings.models import Booking, BookingServiceSelection, BookingStatus
-from apps.contractors.models import AvailabilityStatus, ContractorProfile
+from apps.contractors.models import (
+    AvailabilityStatus,
+    ContractorPayoutAccount,
+    ContractorPayoutAccountStatus,
+    ContractorProfile,
+)
 from apps.jobs.models import Job, JobStatus, PhotoType
 from apps.jobs.services import jobs as jobs_svc
 from apps.jobs.services import photos as photos_svc
@@ -62,6 +67,14 @@ def make_contractor(phone):
         user=user,
         business_name=f"Co {phone[-3:]}",
         availability_status=AvailabilityStatus.AVAILABLE,
+    )
+    ContractorPayoutAccount.objects.create(
+        contractor_profile=profile,
+        provider="fake",
+        external_account_id=f"fake_acct_{profile.pk}",
+        status=ContractorPayoutAccountStatus.ENABLED,
+        payouts_enabled=True,
+        details_submitted=True,
     )
     return user, profile
 
@@ -138,10 +151,26 @@ class CountingAdapter(BasePayoutProviderAdapter):
     calls = 0
     keys = []
 
-    def payout(self, amount, contractor_reference, idempotency_key):
+    def payout(
+        self,
+        amount,
+        contractor_reference,
+        idempotency_key,
+        payout_id=None,
+        booking_id=None,
+    ):
         type(self).calls += 1
         type(self).keys.append(idempotency_key)
         return PayoutResult(success=True, provider_reference="counted")
+
+    def create_account(self, contractor):
+        return {"id": f"counted_{contractor.pk}"}
+
+    def create_onboarding_link(self, account_id, return_url, refresh_url):
+        return {"url": "https://example.test/onboarding"}
+
+    def parse_account_event(self, payload, headers):
+        raise NotImplementedError
 
     @classmethod
     def reset(cls):
@@ -365,14 +394,14 @@ def test_second_payout_rejected_by_db_constraint(completed, contractor):
 
 
 @pytest.mark.django_db
-def test_idempotency_key_is_stable_and_booking_derived(completed):
+def test_idempotency_key_is_stable_and_payout_derived(completed):
     booking, _ = completed
+    payout = psvc.release_payout_for_booking(booking)
 
-    first = psvc.build_idempotency_key(booking)
-    second = psvc.build_idempotency_key(booking)
+    first = psvc.build_idempotency_key(payout)
+    second = psvc.build_idempotency_key(payout)
 
-    assert first == second
-    assert str(booking.id) in first
+    assert first == second == str(payout.id)
 
 
 @pytest.mark.django_db
@@ -385,7 +414,8 @@ def test_idempotency_key_differs_from_payment_key(completed):
 
     booking, _ = completed
 
-    assert psvc.build_idempotency_key(booking) != payment_key(booking)
+    payout = psvc.release_payout_for_booking(booking)
+    assert psvc.build_idempotency_key(payout) != payment_key(booking)
 
 
 # ============================================================
@@ -504,7 +534,9 @@ def test_base_adapter_is_abstract():
 
 
 def test_base_adapter_has_real_abstract_methods():
-    assert BasePayoutProviderAdapter.__abstractmethods__ == frozenset({"payout"})
+    assert BasePayoutProviderAdapter.__abstractmethods__ == frozenset(
+        {"payout", "create_account", "create_onboarding_link", "parse_account_event"}
+    )
 
 
 def test_adapter_resolved_from_settings(settings):
@@ -515,14 +547,15 @@ def test_adapter_resolved_from_settings(settings):
     assert settings.PAYOUT_PROVIDER_ADAPTER_CLASS.endswith("FakePayoutAdapter")
 
 
-def test_fake_adapter_is_only_concrete_subclass():
+def test_payout_adapters_are_concrete_subclasses():
     subs = BasePayoutProviderAdapter.__subclasses__()
     names = {c.__name__ for c in subs}
 
     # CountingAdapter معرَّف في هذا الملف للاختبار فقط، لا في كود الإنتاج
     assert "FakePayoutAdapter" in names
+    assert "StripePayoutAdapter" in names
     production = names - {"CountingAdapter"}
-    assert production == {"FakePayoutAdapter"}, production
+    assert production == {"FakePayoutAdapter", "StripePayoutAdapter"}, production
 
 
 def test_fake_adapter_refuses_in_production(settings):
@@ -574,8 +607,9 @@ def test_no_real_psp_or_network_import_anywhere():
             elif isinstance(node, ast.Import):
                 imported.update(a.name for a in node.names)
 
+        allowed_banned = set(banned) - {"stripe"} if path.name == "stripe_payout_adapter.py" else banned
         for name in imported:
-            for bad in banned:
+            for bad in allowed_banned:
                 assert bad not in name.lower(), f"{path} imports {name}"
 
 
@@ -762,8 +796,13 @@ def test_no_manual_payout_trigger_endpoint():
     assert set(paths[reconcile]) == {"post"}
 
     for path, methods in paths.items():
-        if "payout" in path and path != reconcile:
+        if (
+            "payout" in path
+            and path != reconcile
+            and path != "/api/contractor/payout-account/onboarding-link"
+        ):
             assert set(methods) == {"get"}, f"{path} exposes {sorted(methods)}"
+    assert set(paths["/api/contractor/payout-account/onboarding-link"]) == {"post"}
 
 
 def test_api_layer_has_no_orm():

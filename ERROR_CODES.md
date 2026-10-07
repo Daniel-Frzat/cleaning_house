@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**160 codes.**
+**162 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -36,9 +36,9 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `catalog_error` | 422 |  | apps/services/services/catalog.py |
 | `challenge_invalid` | 400 |  | apps/accounts/services/admin_auth.py |
 | `contractor_profile_error` | 422 |  | apps/contractors/services/profile.py |
-| `contractor_profile_exists` | 409 |  | apps/contractors/services/profile.py |
-| `contractor_profile_forbidden` | 403 |  | apps/contractors/services/profile.py |
-| `contractor_profile_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/contractors/services/profile.py |
+| `contractor_profile_exists` | 200 |  | apps/contractors/services/profile.py |
+| `contractor_profile_forbidden` | 403 |  | apps/contractors/services/profile.py, apps/payouts/services/connect.py |
+| `contractor_profile_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/contractors/services/profile.py, apps/payouts/services/connect.py |
 | `customer_payment_not_settled` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
 | `deletion_confirmation_required` | 400 | The request did not carry the confirmation phrase. | apps/accounts/services/account_deletion.py |
 | `device_not_found` | 404 |  | apps/accounts/api/admin_auth.py |
@@ -104,6 +104,8 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `payment_not_retryable` | 409 |  | apps/payments/services/payments.py |
 | `payment_not_settled` | 409 |  | apps/jobs/services/jobs.py |
 | `payment_setup_unavailable` | 503 | The payment provider could not start a card setup session. | apps/payments/services/payments.py |
+| `payout_account_error` | 403, 404, 503 |  | apps/payouts/services/connect.py |
+| `payout_account_provider_unavailable` | 503 |  | apps/contractors/api/payout_accounts.py |
 | `payout_admin_error` | 403, 404, 503 |  | apps/payouts/services/admin.py |
 | `payout_already_exists` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
 | `payout_error` | 403, 404, 503 |  | apps/payouts/services/payouts.py |
@@ -164,9 +166,9 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `unsupported_provider` | 400 |  | apps/accounts/api/auth.py, apps/accounts/services/social.py |
 | `user_admin_error` | 403, 404, 503 |  | apps/accounts/services/backoffice_users.py |
 | `user_not_found` | 404 |  | apps/accounts/services/backoffice_users.py, apps/notifications/services/notifications.py |
-| `validation_error` | 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/support/api/support.py, config/urls.py |
+| `validation_error` | 400, 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/payouts/services/connect.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/support/api/support.py, config/urls.py |
 | `verification_error` | 403, 404, 503 |  | apps/contractors/services/verification.py |
 | `verification_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/services/verification.py |
-| `webhook_not_configured` | 503 | The server cannot verify webhooks yet (provider or signing secret not configured). | apps/payments/services/payments.py |
-| `webhook_signature_invalid` | 400 | The webhook signature is invalid. | apps/payments/services/payments.py |
+| `webhook_not_configured` | 503 | The server cannot verify webhooks yet (provider or signing secret not configured). | apps/payments/services/payments.py, apps/payouts/api/connect_webhooks.py, apps/payouts/services/connect.py |
+| `webhook_signature_invalid` | 400 | The webhook signature is invalid. | apps/payments/services/payments.py, apps/payouts/services/connect.py |
 | `wrong_password` | 400 |  | apps/accounts/services/admin_auth.py |

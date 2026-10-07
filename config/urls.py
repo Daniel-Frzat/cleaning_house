@@ -56,9 +56,11 @@ from apps.payments.api.payments import setup_router as payment_setup_router
 from apps.payments.api.payments import webhook_router as payment_webhook_router
 from apps.payouts.api.payouts import earnings_router as contractor_earnings_router
 from apps.payouts.api.payouts import router as payouts_router
+from apps.payouts.api.connect_webhooks import router as stripe_connect_webhook_router
 from apps.properties.api.properties import router as properties_router
 from apps.contractors.api.admin_contractors import router as admin_contractors_router
 from apps.contractors.api.profile import router as contractor_profile_router
+from apps.contractors.api.payout_accounts import router as contractor_payout_account_router
 from apps.services.api.catalog import router as admin_catalog_router
 from apps.services.api.public_catalog import router as public_services_router
 from apps.support.api.support import router as support_router
@@ -313,6 +315,7 @@ api.add_router("/admin", admin_catalog_router)
 api.add_router("/services", public_services_router)
 # ملف المقاول — مسارات ذاتية بالكامل (لا تقبل معرّفًا من العميل).
 api.add_router("/contractor", contractor_profile_router)
+api.add_router("/contractor", contractor_payout_account_router)
 # سجلات المقاولين للإدارة — قراءة فقط. مسارات /contractors* لا تتعارض
 # مع /services* و /pricing-config في الـrouter الآخر المركّب على /admin.
 api.add_router("/admin", admin_contractors_router)
@@ -328,6 +331,7 @@ api.add_router("/bookings", payments_router)
 # حفظ البطاقة وwebhook المزوّد (Stripe — قرار PO 2026-09-30)
 api.add_router("/payments", payment_setup_router)
 api.add_router("/payments", payment_webhook_router)
+api.add_router("/payments", stripe_connect_webhook_router)
 # تنفيذ المهام — عرض المهمة عبر الحجز، ورفع الصور للمقاول المُسنَد.
 api.add_router("/bookings", jobs_booking_router)
 api.add_router("/contractor", jobs_contractor_router)

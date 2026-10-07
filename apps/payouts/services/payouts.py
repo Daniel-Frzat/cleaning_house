@@ -37,6 +37,10 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 
 from apps.jobs.models import Job, JobStatus
+from apps.contractors.models import (
+    ContractorPayoutAccount,
+    ContractorPayoutAccountStatus,
+)
 from apps.payments.models import Payment, PaymentStatus
 
 from ..adapters import get_payout_adapter
@@ -91,16 +95,14 @@ class PayoutAlreadyExistsError(PayoutError):
     code = "payout_already_exists"
 
 
-def build_idempotency_key(booking):
+def build_idempotency_key(payout):
     """
-    مفتاح ثابت مشتق من معرّف الحجز.
+    مفتاح ثابت مشتق من معرّف سجل Payout.
 
-    ⚠️ ثابت عمدًا (لا وقت ولا عشوائية): إعادة الاستدعاء للحجز نفسه تصل
-       المزوّد بالمفتاح نفسه، فلا يتكرر التحويل حتى لو فشل الاتصال ووصل
-       الطلب مرتين. بادئة "payout-" تميّزه عن مفتاح الشحن ("booking-")
-       حتى لا يتصادم المفتاحان عند مزوّد يخدم الاتجاهين.
+    ⚠️ معرّف الدفعة ثابت وفريد: إعادة المحاولة لنفس سجل Payout تصل
+       المزوّد بالمفتاح نفسه، فلا يتكرر التحويل عند انقطاع الاتصال.
     """
-    return f"payout-booking-{booking.id}"
+    return str(payout.id)
 
 
 def release_payout_for_booking(booking):
@@ -122,13 +124,27 @@ def release_payout_for_booking(booking):
     with transaction.atomic():
         payout = _create_pending_payout(booking)
 
-    contractor_user_id = payout.contractor_id
+    payout_account = ContractorPayoutAccount.objects.filter(
+        contractor_profile__user_id=payout.contractor_id,
+        status=ContractorPayoutAccountStatus.ENABLED,
+    ).first()
+    if payout_account is None or not payout_account.external_account_id:
+        logger.info(
+            "Payout remains pending because the contractor payout account is not enabled "
+            "(payout_id=%s, booking_id=%s, contractor_id=%s)",
+            payout.id,
+            booking.id,
+            payout.contractor_id,
+        )
+        return payout
 
     try:
         result = get_payout_adapter().payout(
             amount=payout.amount,
-            contractor_reference=str(contractor_user_id),
-            idempotency_key=build_idempotency_key(booking),
+            contractor_reference=payout_account.external_account_id,
+            idempotency_key=build_idempotency_key(payout),
+            payout_id=payout.id,
+            booking_id=booking.id,
         )
     except Exception as exc:  # noqa: BLE001 — النتيجة مجهولة، لا فاشلة
         logger.exception(

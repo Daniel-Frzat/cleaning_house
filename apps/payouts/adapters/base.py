@@ -8,9 +8,8 @@ Payout Provider Adapter — Abstract Interface ONLY (Change Set §36.5)
 الاختيار عبر settings.PAYOUT_PROVIDER_ADAPTER_CLASS (مسار نصي لكلاس) —
 نفس نمط PAYMENT_PROVIDER_ADAPTER_CLASS و JOB_STORAGE_ADAPTER_CLASS.
 
-⚠️ العقد بسيط عمدًا: payout() تعيد نتيجة محايدة الشكل لا تفترض حقول أي
-   مزوّد. الدفع فوري لكل حجز، فلا يوجد في العقد أي مفهوم دفعة مجمَّعة
-   ولا جدولة — وهذا مقصود لا نقص.
+⚠️ العقد محايد للمزوّد ويغطي تحويل المبلغ وإعداد حساب الصرف ومزامنة
+   أحداث الحساب. الدفع فوري لكل حجز، بلا تجميع أو جدولة.
 """
 
 from abc import ABC, abstractmethod
@@ -41,17 +40,47 @@ class PayoutResult:
         )
 
 
+class PayoutAccountWebhookError(Exception):
+    """A connected-account webhook cannot be verified or parsed."""
+
+
+class PayoutAccountProviderError(Exception):
+    """The provider could not create an account or onboarding link."""
+
+
+class PayoutAccountWebhookEvent:
+    """Provider-neutral connected-account event."""
+
+    def __init__(
+        self,
+        kind,
+        event_id=None,
+        account_reference=None,
+        payouts_enabled=False,
+        details_submitted=False,
+        requirements_due=None,
+    ):
+        self.kind = kind
+        self.event_id = event_id
+        self.account_reference = account_reference
+        self.payouts_enabled = bool(payouts_enabled)
+        self.details_submitted = bool(details_submitted)
+        self.requirements_due = requirements_due or []
+
+
 class BasePayoutProviderAdapter(ABC):
     """
-    واجهة مزوّد الدفع للمقاولين — تجريدية بالكامل.
-
-    ⚠️ لا تُنفَّذ هنا. أي تنفيذ حقيقي يُضاف في مرحلته الخاصة بعد حسم
-       المزوّد، دون تعديل طبقة الـDomain.
+    واجهة مزوّد الدفع للمقاولين — لا تحتوي تفاصيل مزوّد بعينه.
     """
 
     @abstractmethod
     def payout(
-        self, amount: Decimal, contractor_reference: str, idempotency_key: str
+        self,
+        amount: Decimal,
+        contractor_reference: str,
+        idempotency_key: str,
+        payout_id=None,
+        booking_id=None,
     ) -> PayoutResult:
         """
         يدفع المبلغ للمقاول فورًا (لا تجميع ولا جدولة).
@@ -59,10 +88,11 @@ class BasePayoutProviderAdapter(ABC):
         Args:
             amount: المبلغ الكامل بالـDecimal (بلا عمولة — §36.5).
             contractor_reference: معرّف المقاول عند المزوّد. في هذه
-                المرحلة معرّف المستخدم الداخلي؛ حسابات المزوّد تُربط
-                عند حسمه.
-            idempotency_key: مفتاح ثابت مشتق من الحجز — إعادة الاستدعاء
+                المرحلة معرف الحساب لدى مزود الدفع.
+            idempotency_key: مفتاح ثابت مشتق من سجل الدفعة — إعادة الاستدعاء
                 بالمفتاح نفسه يجب ألا تُنتج دفعًا مزدوجًا (Infra §14/§16).
+            payout_id: سجل الدفعة الداخلي، لبيانات وصفية لدى المزود.
+            booking_id: الحجز المرتبط، لبيانات وصفية ومجموعة التحويل.
 
         Returns:
             PayoutResult
@@ -70,3 +100,15 @@ class BasePayoutProviderAdapter(ABC):
         raise NotImplementedError(
             "Payout Provider غير محسوم — لا تنفيذ فعلي في كود الإنتاج."
         )
+
+    @abstractmethod
+    def create_account(self, contractor):
+        """Create the provider-side payout account for a contractor profile."""
+
+    @abstractmethod
+    def create_onboarding_link(self, account_id, return_url, refresh_url):
+        """Create a fresh, single-use onboarding link."""
+
+    @abstractmethod
+    def parse_account_event(self, payload, headers) -> PayoutAccountWebhookEvent:
+        """Verify and parse a connected-account webhook event."""

@@ -85,7 +85,7 @@ class Payout(models.Model):
     # 🔒 مبهم: يُخزَّن ولا يُفسَّر
     provider_reference = models.TextField(null=True, blank=True)
 
-    # يُملأ عند الفشل فقط
+    # سبب فشل معلوم أو بادئة provider_error لنتيجة مجهولة ما زالت PENDING.
     failure_reason = models.TextField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -135,3 +135,15 @@ class Payout(models.Model):
                     )
                 }
             )
+
+
+class PayoutWebhookEvent(models.Model):
+    """Idempotency ledger for verified connected-account webhook events."""
+
+    external_event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=128)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Payout webhook event"
+        verbose_name_plural = "Payout webhook events"
