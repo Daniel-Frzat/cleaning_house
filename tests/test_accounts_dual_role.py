@@ -166,14 +166,41 @@ def test_rejected_document_reports_action_required(client, customer):
 
 
 @pytest.mark.django_db
-def test_expired_insurance_reports_action_required(client, customer):
+def test_expired_insurance_does_not_change_approved_status(client, customer):
     post(client, "/api/contractor/profile", PROFILE, **auth(customer))
     profile = ContractorProfile.objects.get(user=customer)
     approve_docs(profile, expired=True)
 
     body = client.get("/api/auth/me", **auth(customer)).json()
 
-    assert body["contractor_status"] == ContractorStatus.ACTION_REQUIRED
+    assert body["contractor_status"] == ContractorStatus.APPROVED
+
+
+@pytest.mark.django_db
+def test_rejected_insurance_does_not_change_approved_status(client, customer):
+    post(client, "/api/contractor/profile", PROFILE, **auth(customer))
+    profile = ContractorProfile.objects.get(user=customer)
+    approve_docs(profile, insurance=VerificationStatus.REJECTED)
+
+    body = client.get("/api/auth/me", **auth(customer)).json()
+
+    assert body["contractor_status"] == ContractorStatus.APPROVED
+
+
+@pytest.mark.django_db
+def test_approved_registration_without_insurance_reports_approved(client, customer):
+    post(client, "/api/contractor/profile", PROFILE, **auth(customer))
+    profile = ContractorProfile.objects.get(user=customer)
+    BusinessRegistration.objects.create(
+        contractor=profile,
+        abn="51824753556",
+        business_name="Sparkle Co",
+        status=VerificationStatus.VERIFIED,
+    )
+
+    body = client.get("/api/auth/me", **auth(customer)).json()
+
+    assert body["contractor_status"] == ContractorStatus.APPROVED
 
 
 # ============================================================

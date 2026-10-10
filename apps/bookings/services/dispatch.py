@@ -140,7 +140,7 @@ def find_candidates(booking):
 
     المرشَّح يجب أن يستوفي كل ما يلي:
       1) availability_status == AVAILABLE
-      2) is_contractor_eligible(profile) — تحقّق ABN وتأمين ساري (§6)
+      2) is_contractor_eligible(profile) — تحقّق من اعتماد تسجيل النشاط
       3) لم يُعرض عليه هذا الحجز من قبل
       4) مسافته قابلة للقياس (إحداثيات معلومة للطرفين)
       5) ليس صاحب الحجز نفسه

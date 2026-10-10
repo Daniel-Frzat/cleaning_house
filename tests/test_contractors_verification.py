@@ -267,8 +267,8 @@ def test_expired_insurance_cannot_be_approved(db, contractor_a, admin_user):
 
 
 @pytest.mark.django_db
-def test_pending_renewal_does_not_revoke_eligibility(db, contractor_a, admin_user):
-    """المقاول الذي جدّد تأمينه مبكرًا لا يتوقف حتى تُراجَع الوثيقة الجديدة."""
+def test_pending_insurance_does_not_change_eligibility(db, contractor_a, admin_user):
+    """مراجعة التأمين المعلّق لا تؤثر على أهلية العامل."""
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=10))
@@ -660,12 +660,11 @@ def test_eligible_false_when_both_pending(db, contractor_a):
 
 
 @pytest.mark.django_db
-def test_eligible_false_when_only_registration_verified(db, contractor_a, admin_user):
+def test_eligible_true_when_only_registration_verified(db, contractor_a, admin_user):
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
-    vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
 
-    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
 
 @pytest.mark.django_db
@@ -678,20 +677,15 @@ def test_eligible_false_when_only_insurance_verified(db, contractor_a, admin_use
 
 
 @pytest.mark.django_db
-def test_eligible_false_when_insurance_verified_but_expired(db, contractor_a, admin_user):
-    """
-    ⚠️ الحالة المحورية: الوثيقة معتمدة لكنها منتهية — غير مؤهَّل.
-       الانتهاء يسري لحظيًا بلا أي مهمة خلفية (Infra §5 بند مفتوح).
-    """
+def test_eligible_true_when_insurance_verified_but_expired(db, contractor_a, admin_user):
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
-    # اعتُمدت وهي سارية ثم انتهت — الإنشاء المباشر يحاكي مرور الزمن
     InsuranceDocument.objects.create(
         contractor=profile_of(contractor_a), document_reference="POL-1",
         expiry_date=today() - timedelta(days=1), status=VerificationStatus.VERIFIED,
     )
 
-    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
 
 @pytest.mark.django_db
@@ -708,7 +702,7 @@ def test_eligible_true_when_both_verified_and_insurance_current(
 
 @pytest.mark.django_db
 def test_eligible_true_when_insurance_expires_today(db, contractor_a, admin_user):
-    """الحد: expiry_date >= today — الوثيقة المنتهية اليوم ما زالت سارية."""
+    """تاريخ انتهاء التأمين لا يؤثر على أهلية العامل."""
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today())
@@ -730,7 +724,7 @@ def test_eligible_false_when_registration_rejected(db, contractor_a, admin_user)
 
 
 @pytest.mark.django_db
-def test_eligible_false_when_insurance_rejected(db, contractor_a, admin_user):
+def test_eligible_true_when_insurance_rejected(db, contractor_a, admin_user):
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
@@ -738,7 +732,7 @@ def test_eligible_false_when_insurance_rejected(db, contractor_a, admin_user):
         admin_user, ins.id, VerificationStatus.REJECTED, "Policy invalid."
     )
 
-    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
 
 @pytest.mark.django_db
@@ -763,8 +757,8 @@ def test_latest_record_wins_newer_rejection_revokes_eligibility(
 
 
 @pytest.mark.django_db
-def test_latest_record_wins_renewal_restores_eligibility(db, contractor_a, admin_user):
-    """تجديد التأمين بعد الانتهاء يعيد الأهلية."""
+def test_expired_insurance_does_not_change_eligibility(db, contractor_a, admin_user):
+    """تأمين العامل غير مؤثر على أهليته، حتى لو انتهت صلاحيته."""
     reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
     _verify(admin_user, "reg", reg)
     # اعتُمدت وهي سارية ثم انتهت — الإنشاء المباشر يحاكي مرور الزمن
@@ -772,7 +766,7 @@ def test_latest_record_wins_renewal_restores_eligibility(db, contractor_a, admin
         contractor=profile_of(contractor_a), document_reference="OLD",
         expiry_date=today() - timedelta(days=5), status=VerificationStatus.VERIFIED,
     )
-    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
+    assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
     renewed = vsvc.submit_insurance_document(contractor_a, "NEW", today() + timedelta(days=365))
     _verify(admin_user, "ins", renewed)
@@ -783,8 +777,7 @@ def test_latest_record_wins_renewal_restores_eligibility(db, contractor_a, admin
 @pytest.mark.django_db
 def test_eligibility_is_computed_not_stored(db, contractor_a):
     """
-    ⚠️ الأهلية دالة محسوبة لا حقل مخزَّن — لو خُزِّنت لكذبت في اليوم
-       التالي لانتهاء التأمين (لا مهمة خلفية تحدّثها — بند مفتوح).
+    ⚠️ الأهلية دالة محسوبة لا حقل مخزَّن.
     """
     field_names = {f.name for f in ContractorProfile._meta.get_fields()}
 

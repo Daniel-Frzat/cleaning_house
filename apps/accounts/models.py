@@ -132,7 +132,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     #    (زبون + عامل). قائمة عامة كانت ستسمح ضمنيًا بـADMIN+CUSTOMER،
     #    وهو تصعيد صلاحيات لم يُطلب ولا يجوز فتحه بالصدفة.
     #
-    # 🔒 منح هذا العلم لا يكفي لقبول العمل: الأهلية (ABN + تأمين معتمدان)
+    # 🔒 منح هذا العلم لا يكفي لقبول العمل: اعتماد تسجيل النشاط
     #    تبقى شرطًا مستقلًا يُحسب لحظيًا — راجع is_contractor_eligible.
     is_contractor = models.BooleanField(
         default=False,

@@ -55,7 +55,7 @@ def auth(user):
 
 
 def make_eligible_contractor(user, lat="-33.868800", lng="151.209300"):
-    """ملف مقاول مؤهّل بالكامل: متاح + ABN معتمد + تأمين ساري."""
+    """ملف مقاول مؤهّل: متاح + تسجيل نشاط معتمد."""
     profile = ContractorProfile.objects.create(
         user=user,
         business_name="Co",

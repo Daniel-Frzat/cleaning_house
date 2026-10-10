@@ -7,9 +7,8 @@ Contractor Verification Service — Contractors Domain (Change Set §6، Infra �
 ⚠️ ما لا يوجد هنا، عمدًا:
    - أي استدعاء لـadapters/business_registry — يبقى تجريديًا دون استخدام.
      التحقق من الـABN شكلي فقط (11 رقمًا) ويعيش في الـModel validator.
-   - أي جدولة إعادة تحقق أو مهمة Celery عند انتهاء صلاحية التأمين
-     (Infra §5 — "policy إعادة التحقق" بند مفتوح). الانتهاء يُقرأ لحظيًا
-     داخل is_contractor_eligible عند كل استدعاء.
+   - أي جدولة إعادة تحقق أو مهمة Celery عند انتهاء صلاحية التأمين.
+     التأمين لا يؤثر على أهلية العامل.
    - أي منطق Dispatch: الأهلية تُحسب هنا، ومن يستهلكها شأن مرحلة لاحقة.
 """
 
@@ -375,35 +374,19 @@ def _latest_reviewed(model, contractor_profile):
 
 def is_contractor_eligible(contractor_profile) -> bool:
     """
-    أهلية تشغيلية محسوبة لحظيًا (Change Set §6).
+    أهلية تشغيلية محسوبة لحظيًا.
 
-    True فقط إذا اجتمعت الثلاثة:
-      - أحدث BusinessRegistration حالته VERIFIED
-      - أحدث InsuranceDocument حالته VERIFIED
-      - تاريخ انتهاء تلك الوثيقة >= اليوم
-
-    ⚠️ ليست حقلًا مخزَّنًا عمدًا: لو خُزِّنت، لأصبحت كذبة صامتة في اليوم
-       التالي لانتهاء التأمين ما لم تُحدّثها مهمة خلفية — وتلك المهمة بند
-       مفتوح صراحةً (Infra §5). الحساب اللحظي يجعل الانتهاء يسري من تلقائه.
+    الأهلية تعتمد على أحدث BusinessRegistration صدر فيه قرار فقط.
 
     ⚠️ "الأحدث" = أحدث سجل **صدر فيه قرار** (بـcreated_at): سجل مرفوض أحدث
        يُبطل الأهلية حتى لو وُجد معتمد أقدم — فالأحدث يعكس الوضع الحالي.
-       أما التقديم المعلّق (تجديد تأمين قبل انتهائه مثلًا) فلا يُسقط أهلية
-       قائمة: المقاول الذي جدّد مبكرًا لا يُعاقَب بالتوقف حتى تُراجَع وثيقته.
+       أما التقديم المعلّق فلا يُسقط أهلية قائمة حتى تتم مراجعته.
     """
     if contractor_profile is None:
         return False
 
     registration = _latest_reviewed(BusinessRegistration, contractor_profile)
     if registration is None or registration.status != VerificationStatus.VERIFIED:
-        return False
-
-    insurance = _latest_reviewed(InsuranceDocument, contractor_profile)
-    if insurance is None or insurance.status != VerificationStatus.VERIFIED:
-        return False
-
-    # الانتهاء يُقارَن باليوم المحلي — الوثيقة المنتهية اليوم ما زالت سارية
-    if insurance.expiry_date < timezone.localdate():
         return False
 
     return True
@@ -416,14 +399,11 @@ class ContractorStatus(models.TextChoices):
     """
     حالة انضمام الحساب كعامل — للفرونت.
 
-    📌 مشتقّة بالكامل من الملف ووثيقتيه: لا حقل مخزَّن يمثّلها، تمامًا
-       كـis_contractor_eligible. تخزينها كان سيصير كذبة صامتة يوم تنتهي
-       صلاحية التأمين.
+    📌 مشتقّة بالكامل من الملف وتسجيل النشاط: لا حقل مخزَّن يمثّلها.
 
     NONE       : لم يقدّم كعامل — لا ملف أصلًا.
-    PENDING    : لديه ملف، ووثائقه لم تكتمل مراجعتها بعد.
-    ACTION_REQUIRED : رُفضت إحدى وثيقتيه، أو انتهت صلاحية تأمينه —
-                 يحتاج إعادة تقديم.
+    PENDING    : لديه ملف، وتسجيل النشاط لم تكتمل مراجعته بعد.
+    ACTION_REQUIRED : رُفض تسجيل نشاطه ويحتاج إلى إعادة تقديم.
     APPROVED   : مؤهَّل فعلًا؛ يستطيع استقبال العروض.
     SUSPENDED  : كان عاملًا، لكن حسابه لم يعد نشطًا (status != ACTIVE).
     """
@@ -458,18 +438,11 @@ def get_contractor_status(user) -> str:
         return ContractorStatus.APPROVED
 
     registration = latest_business_registration(profile)
-    insurance = latest_insurance_document(profile)
 
-    # رفض صريح لأي وثيقة، أو تأمين منتهٍ → المستخدم يحتاج إجراءً
+    # رفض صريح لتسجيل النشاط → المستخدم يحتاج إجراءً
     if (registration is not None
             and registration.status == VerificationStatus.REJECTED):
         return ContractorStatus.ACTION_REQUIRED
-    if insurance is not None:
-        if insurance.status == VerificationStatus.REJECTED:
-            return ContractorStatus.ACTION_REQUIRED
-        if (insurance.status == VerificationStatus.VERIFIED
-                and insurance.is_expired):
-            return ContractorStatus.ACTION_REQUIRED
 
-    # ملف بلا وثائق بعد، أو وثائق ما زالت PENDING
+    # ملف بلا تسجيل بعد، أو تسجيل ما زال PENDING
     return ContractorStatus.PENDING

@@ -826,19 +826,18 @@ def test_ineligible_contractor_never_selected_even_if_nearest(
 
 
 @pytest.mark.django_db
-def test_expired_insurance_makes_contractor_ineligible_for_dispatch(
+def test_missing_insurance_does_not_block_dispatch(
     customer, prop, general, pricing, django_capture_on_commit_callbacks
 ):
     _, profile = make_contractor("+61400007703", coords=NEAR, eligible=True)
-    InsuranceDocument.objects.filter(contractor=profile).update(
-        expiry_date=timezone.localdate() - timedelta(days=1)
-    )
+    InsuranceDocument.objects.filter(contractor=profile).delete()
 
     booking = create_booking(
         customer, prop, general, capture=django_capture_on_commit_callbacks
     )
 
-    assert DispatchOffer.objects.filter(booking=booking).count() == 0
+    offer = DispatchOffer.objects.get(booking=booking)
+    assert offer.contractor_id == profile.id
 
 
 @pytest.mark.django_db

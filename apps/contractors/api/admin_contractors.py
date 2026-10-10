@@ -237,7 +237,7 @@ def list_pending_verifications(request):
         "**Side effects:** the decision, the reviewing administrator and the "
         "review time are recorded on the submission. Approval contributes to the "
         "contractor's eligibility, which is computed from the current state of "
-        "their approved registration and insurance rather than stored as a flag."
+        "their approved registration rather than stored as a flag."
     ),
     openapi_extra={
         "responses": {
@@ -298,9 +298,9 @@ def review_business_registration(request, registration_id: uuid.UUID, payload: R
         "**Preconditions:** rejecting requires a `rejection_reason`; a rejection "
         "without one is refused with `400`.\n\n"
         "**Side effects:** the decision, the reviewing administrator and the "
-        "review time are recorded on the document. Approval contributes to the "
-        "contractor's eligibility. Note that nothing re-checks the expiry date "
-        "afterwards — there is no scheduled re-verification."
+        "review time are recorded on the document. Insurance approval does not "
+        "affect the contractor's eligibility, which depends on the approved "
+        "business registration."
     ),
     openapi_extra={
         "responses": {

@@ -83,7 +83,7 @@ def make_property(owner, coords=SYDNEY):
 
 
 def make_contractor(phone, coords=NEAR, available=True, eligible=True):
-    """مقاول مؤهَّل للإسناد (ABN + تأمين معتمدان)."""
+    """مقاول مؤهَّل للإسناد (تسجيل نشاط معتمد)."""
     user = make_user(phone, role=ConfirmedRole.CONTRACTOR)
     profile = ContractorProfile.objects.create(
         user=user,
