@@ -145,12 +145,13 @@ def test_customer_access_survives_joining_as_contractor(client, customer):
 
 @pytest.mark.django_db
 def test_second_profile_for_the_same_account_is_refused(client, customer):
-    """⚠️ منع تكرار إنشاء ملف عامل لنفس الحساب."""
-    post(client, "/api/contractor/profile", PROFILE, **auth(customer))
+    """⚠️ منع تكرار إنشاء ملف عامل لنفس الحساب — الإعادة تُرجع الملف الموجود."""
+    first = post(client, "/api/contractor/profile", PROFILE, **auth(customer))
 
     r = post(client, "/api/contractor/profile", PROFILE, **auth(customer))
 
-    assert r.status_code == 409, r.content
+    assert r.status_code == 200, r.content
+    assert r.json()["id"] == first.json()["id"]
     assert ContractorProfile.objects.filter(user=customer).count() == 1
 
 

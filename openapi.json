@@ -2089,7 +2089,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CONTRACTOR` only. The profile is always created for the caller — this endpoint accepts no contractor id.\n\nIf the caller already has a profile, the existing profile is returned so retries after a network interruption are safe. Each contractor still has exactly one profile.\n\nThe profile carries the business name and the address the contractor works from, including the coordinates used to measure distance when dispatching bookings.\n\n**Side effects:** the profile always starts `UNAVAILABLE`, so no booking is dispatched to it until availability is switched on via `PATCH /api/contractor/profile/availability`. Availability is ignored if supplied here.",
+        "description": "**Who may call:** `CONTRACTOR` only. The profile is always created for the caller — this endpoint accepts no contractor id.\n\nIf the caller already has a profile, the existing profile is returned so retries after a network interruption are safe. Each contractor still has exactly one profile.\n\nThe profile carries the business name and the address the contractor works from, including the coordinates used to measure distance when dispatching bookings.\n\n**Side effects:** the profile always starts `UNAVAILABLE`. It becomes `AVAILABLE` automatically when an admin first approves the business registration; after that the contractor controls it via `PATCH /api/contractor/profile/availability`. Availability is ignored if supplied here.",
         "tags": [
           "Contractor Profile"
         ],
@@ -3063,7 +3063,7 @@
             }
           }
         },
-        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no government registry or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400` so that a contractor is never rejected silently.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the submission. Approval contributes to the contractor's eligibility, which is computed from the current state of their approved registration and insurance rather than stored as a flag.",
+        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no government registry or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400` so that a contractor is never rejected silently.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the submission. Approval contributes to the contractor's eligibility, which is computed from the current state of their approved registration rather than stored as a flag.",
         "tags": [
           "Admin — Contractors"
         ],
@@ -3162,7 +3162,7 @@
             }
           }
         },
-        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no insurer or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400`.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the document. Approval contributes to the contractor's eligibility. Note that nothing re-checks the expiry date afterwards — there is no scheduled re-verification.",
+        "description": "**Who may call:** `ADMIN` only. This is a **human decision**: no insurer or external verification service is consulted.\n\n**Preconditions:** rejecting requires a `rejection_reason`; a rejection without one is refused with `400`.\n\n**Side effects:** the decision, the reviewing administrator and the review time are recorded on the document. Insurance approval does not affect the contractor's eligibility, which depends on the approved business registration.",
         "tags": [
           "Admin — Contractors"
         ],
@@ -10867,7 +10867,7 @@
         "type": "object"
       },
       "AvailabilityStatus": {
-        "description": "جاهزية المقاول لاستقبال العمل.\n\n⚠️ الافتراضي UNAVAILABLE عمدًا: الملف المنشأ حديثًا ناقص البيانات\n   (غالبًا بلا إحداثيات)، وإتاحته تلقائيًا كانت ستُدخله في حسابات\n   Dispatch قبل أن يكون جاهزًا فعلًا. الإتاحة فعل صريح من المقاول.",
+        "description": "جاهزية المقاول لاستقبال العمل.\n\n⚠️ الافتراضي UNAVAILABLE عمدًا: الملف المنشأ حديثًا ناقص البيانات\n   (غالبًا بلا إحداثيات)، وإتاحته تلقائيًا كانت ستُدخله في حسابات\n   Dispatch قبل أن يكون جاهزًا فعلًا.\n📌 أول اعتماد لتسجيل النشاط يجعله AVAILABLE تلقائيًا (قرار PO —\n   services/verification.py:review_business_registration)، وبعدها\n   الزر بيد المقاول.",
         "enum": [
           "AVAILABLE",
           "UNAVAILABLE"

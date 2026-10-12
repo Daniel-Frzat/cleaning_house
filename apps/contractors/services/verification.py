@@ -321,7 +321,28 @@ def review_business_registration(
     if registration is None:
         raise VerificationNotFoundError("Business registration not found.")
 
-    return _review(user, registration, status, rejection_reason, request=request)
+    # قبل المراجعة: بعدها يصبح هذا السجل نفسه VERIFIED
+    first_approval = not BusinessRegistration.objects.filter(
+        contractor=registration.contractor, status=VerificationStatus.VERIFIED
+    ).exists()
+
+    registration = _review(user, registration, status, rejection_reason, request=request)
+
+    # 📌 قرار PO: العامل المقبول يبدأ AVAILABLE فورًا، لا ينتظر أن يشغّل الزر.
+    # ⚠️ أول اعتماد فقط: اعتماد تقديم لاحق لا يُعيد تشغيل زر أطفأه المقاول بنفسه.
+    if status == VerificationStatus.VERIFIED and first_approval:
+        _make_available(registration.contractor)
+
+    return registration
+
+
+def _make_available(profile):
+    from ..models import AvailabilityStatus
+
+    if profile.availability_status != AvailabilityStatus.AVAILABLE:
+        profile.availability_status = AvailabilityStatus.AVAILABLE
+        profile.save(update_fields=["availability_status", "updated_at"])
+        logger.info("Contractor made available on approval (contractor_id=%s)", profile.id)
 
 
 @transaction.atomic

@@ -114,8 +114,9 @@ def _rating(profile):
         "The profile carries the business name and the address the contractor "
         "works from, including the coordinates used to measure distance when "
         "dispatching bookings.\n\n"
-        "**Side effects:** the profile always starts `UNAVAILABLE`, so no booking "
-        "is dispatched to it until availability is switched on via "
+        "**Side effects:** the profile always starts `UNAVAILABLE`. It becomes "
+        "`AVAILABLE` automatically when an admin first approves the business "
+        "registration; after that the contractor controls it via "
         "`PATCH /api/contractor/profile/availability`. Availability is ignored if "
         "supplied here."
     ),

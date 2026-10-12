@@ -18,6 +18,7 @@ from apps.accounts.models import User
 from apps.accounts.roles import ConfirmedRole
 from apps.accounts.services.tokens import issue_tokens_for_user
 from apps.contractors.models import (
+    AvailabilityStatus,
     BusinessRegistration,
     ContractorProfile,
     InsuranceDocument,
@@ -644,6 +645,38 @@ def _verify(admin_user, instance_kind, instance):
     return vsvc.review_insurance_document(
         admin_user, instance.id, VerificationStatus.VERIFIED
     )
+
+
+@pytest.mark.django_db
+def test_first_approval_makes_contractor_available(db, contractor_a, admin_user):
+    assert profile_of(contractor_a).availability_status == AvailabilityStatus.UNAVAILABLE
+
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    _verify(admin_user, "reg", reg)
+
+    assert profile_of(contractor_a).availability_status == AvailabilityStatus.AVAILABLE
+
+
+@pytest.mark.django_db
+def test_rejection_leaves_contractor_unavailable(db, contractor_a, admin_user):
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    vsvc.review_business_registration(
+        admin_user, reg.id, VerificationStatus.REJECTED, "Name mismatch"
+    )
+
+    assert profile_of(contractor_a).availability_status == AvailabilityStatus.UNAVAILABLE
+
+
+@pytest.mark.django_db
+def test_later_approval_does_not_override_contractor_switch(db, contractor_a, admin_user):
+    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "X"))
+    profile = profile_of(contractor_a)
+    profile.availability_status = AvailabilityStatus.UNAVAILABLE
+    profile.save(update_fields=["availability_status"])
+
+    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "Y"))
+
+    assert profile_of(contractor_a).availability_status == AvailabilityStatus.UNAVAILABLE
 
 
 @pytest.mark.django_db

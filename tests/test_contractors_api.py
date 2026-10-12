@@ -169,10 +169,13 @@ def test_role_enforced_in_service_layer_not_only_api(db):
 @pytest.mark.django_db
 def test_second_profile_for_same_user_is_rejected(client, contractor_a):
     create_via_api(client, contractor_a)
+    existing = ContractorProfile.objects.get(user=contractor_a)
 
+    # idempotent: الإعادة بعد انقطاع الشبكة تُرجع الملف الموجود ولا تنشئ ثانيًا
     r = post(client, "/api/contractor/profile", VALID_PROFILE, **auth(contractor_a))
 
-    assert r.status_code == 409, r.content
+    assert r.status_code == 200, r.content
+    assert r.json()["id"] == str(existing.id)
     assert ContractorProfile.objects.filter(user=contractor_a).count() == 1
 
 

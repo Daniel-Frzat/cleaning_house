@@ -54,7 +54,10 @@ class AvailabilityStatus(models.TextChoices):
 
     ⚠️ الافتراضي UNAVAILABLE عمدًا: الملف المنشأ حديثًا ناقص البيانات
        (غالبًا بلا إحداثيات)، وإتاحته تلقائيًا كانت ستُدخله في حسابات
-       Dispatch قبل أن يكون جاهزًا فعلًا. الإتاحة فعل صريح من المقاول.
+       Dispatch قبل أن يكون جاهزًا فعلًا.
+    📌 أول اعتماد لتسجيل النشاط يجعله AVAILABLE تلقائيًا (قرار PO —
+       services/verification.py:review_business_registration)، وبعدها
+       الزر بيد المقاول.
     """
 
     AVAILABLE = "AVAILABLE", "Available"
