@@ -16,6 +16,7 @@ from django.contrib.admin import helpers
 from django.core.exceptions import ValidationError
 from django.db.models import Count, Q
 from django.template.response import TemplateResponse
+from django.utils.html import format_html
 
 from apps.audit.admin import EMPTY, BackOfficeMixin, ReadOnlyAdminMixin
 
@@ -37,7 +38,7 @@ class _DocumentHistoryInline(BackOfficeMixin, ReadOnlyAdminMixin, admin.TabularI
 
 class BusinessRegistrationInline(_DocumentHistoryInline):
     model = BusinessRegistration
-    fields = ("business_name", "abn", "status", "reviewed_by", "reviewed_at", "rejection_reason", "created_at")
+    fields = ("business_name", "abn", "last_name", "email", "status", "reviewed_by", "reviewed_at", "rejection_reason", "created_at")
     readonly_fields = fields
     verbose_name_plural = "Business registrations (history)"
 
@@ -290,13 +291,13 @@ class BusinessRegistrationAdmin(ReviewableDocumentAdmin):
     review_function = staticmethod(verification_service.review_business_registration)
 
     list_display = ("business_name", "abn", "contractor_link", "status_display", "reviewer_link", "reviewed_at", "created_at")
-    search_fields = ("business_name", "abn", "contractor__business_name", "contractor__user__phone")
+    search_fields = ("business_name", "abn", "last_name", "email", "contractor__business_name", "contractor__user__phone")
     fieldsets = (
-        ("Submission", {"fields": ("id", "contractor_link", "business_name", "abn", "created_at")}),
+        ("Submission", {"fields": ("id", "contractor_link", "business_name", "abn", "last_name", "email", "created_at")}),
         ("Review", {"fields": ("status_display", "reviewer_link", "reviewed_at", "rejection_reason", "updated_at")}),
     )
     readonly_fields = (
-        "id", "contractor_link", "business_name", "abn", "created_at",
+        "id", "contractor_link", "business_name", "abn", "last_name", "email", "created_at",
         "status_display", "reviewer_link", "reviewed_at", "rejection_reason", "updated_at",
     )
 
@@ -320,15 +321,23 @@ class InsuranceDocumentAdmin(ReviewableDocumentAdmin):
     fieldsets = (
         (
             "Submission",
-            {"fields": ("id", "contractor_link", "document_reference", "expiry_date", "is_expired_display", "created_at")},
+            {"fields": ("id", "contractor_link", "document_reference", "expiry_date", "is_expired_display", "attachment_link", "created_at")},
         ),
         ("Review", {"fields": ("status_display", "reviewer_link", "reviewed_at", "rejection_reason", "updated_at")}),
     )
     readonly_fields = (
-        "id", "contractor_link", "document_reference", "expiry_date", "is_expired_display", "created_at",
+        "id", "contractor_link", "document_reference", "expiry_date", "is_expired_display", "attachment_link", "created_at",
         "status_display", "reviewer_link", "reviewed_at", "rejection_reason", "updated_at",
     )
 
     @admin.display(description="Expired", boolean=True)
     def is_expired_display(self, obj):
         return obj.is_expired
+
+    @admin.display(description="Attachment")
+    def attachment_link(self, obj):
+        # رابط موقَّع مؤقّت يُولَّد عند فتح الصفحة — لا رابط دائم
+        url = verification_service.insurance_attachment_url(obj)
+        if not url:
+            return EMPTY
+        return format_html('<a href="{}" target="_blank" rel="noopener">Open ({})</a>', url, obj.attachment_content_type)

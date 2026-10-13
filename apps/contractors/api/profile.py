@@ -21,13 +21,14 @@ Contractor Profile API (self-service) — Contractors Domain
 ⚠️ لا يوجد هنا أي منطق Dispatch/مسافة ولا استدعاء لأي adapter (§34/§4).
 """
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from ninja import Router, Schema
+from ninja import File, Router, Schema, UploadedFile
 
 from apps.accounts.authentication import ActiveUserJWTAuth
 from apps.geo_fields import AccuracyMeters, Latitude, Longitude
@@ -302,6 +303,8 @@ def serialize_business_registration(registration):
         "contractor_id": registration.contractor_id,
         "abn": registration.abn,
         "business_name": registration.business_name,
+        "last_name": registration.last_name,
+        "email": registration.email,
         "status": registration.status,
         "reviewed_by_id": registration.reviewed_by_id,
         "reviewed_at": registration.reviewed_at,
@@ -311,12 +314,18 @@ def serialize_business_registration(registration):
     }
 
 
-def serialize_insurance_document(document):
+def serialize_insurance_document(document, storage_adapter=None):
+    """
+    🔒 attachment_key لا يُكشف — رابط موقَّع مؤقّت فقط، يُولَّد لحظيًا.
+    """
     return {
         "id": document.id,
         "contractor_id": document.contractor_id,
         "document_reference": document.document_reference,
         "expiry_date": document.expiry_date,
+        "has_attachment": document.has_attachment,
+        "attachment_url": vsvc.insurance_attachment_url(document, storage_adapter),
+        "attachment_content_type": document.attachment_content_type or None,
         "status": document.status,
         "reviewed_by_id": document.reviewed_by_id,
         "reviewed_at": document.reviewed_at,
@@ -352,7 +361,8 @@ def _verification_error(exc):
         "**Who may call:** `CONTRACTOR` only, for themselves — the submission is "
         "tied to the caller's profile and no contractor id is accepted.\n\n"
         "**Preconditions:** the caller must already have a contractor profile.\n\n"
-        "Submits an ABN and business name for **manual administrative review**. "
+        "Submits an ABN, business name, last name and email for **manual "
+        "administrative review**. All four fields are required. "
         "The ABN is only checked for shape (11 digits); no government registry or "
         "third-party verification service is contacted.\n\n"
         "**Side effects:** the submission is created as `PENDING` — there is no "
@@ -363,7 +373,7 @@ def _verification_error(exc):
         "responses": {
             403: {"description": "The caller is not a `CONTRACTOR`."},
             404: {"description": "The caller has no contractor profile yet."},
-            422: {"description": "The ABN or business name failed validation."},
+            422: {"description": "The ABN, business name, last name or email failed validation."},
         }
     },
 )
@@ -373,7 +383,11 @@ def submit_business_registration(request, payload: BusinessRegistrationIn):
     """
     try:
         registration = vsvc.submit_business_registration(
-            request.user, abn=payload.abn, business_name=payload.business_name
+            request.user,
+            abn=payload.abn,
+            business_name=payload.business_name,
+            last_name=payload.last_name,
+            email=payload.email,
         )
     except (
         vsvc.InvalidContractorRoleError,
@@ -434,9 +448,11 @@ def list_business_registrations(request):
     description=(
         "**Who may call:** `CONTRACTOR` only, for themselves.\n\n"
         "**Preconditions:** the caller must already have a contractor profile.\n\n"
-        "`document_reference` is a **text reference plus an expiry date, not a "
-        "file upload** — no document bytes are stored by this endpoint. Review is "
-        "manual; no insurer or third-party service is contacted.\n\n"
+        "`document_reference` is a text reference plus an expiry date. To attach "
+        "the policy itself (PDF or photo), call "
+        "`POST /api/contractor/insurance/{document_id}/attachment` with the `id` "
+        "returned here. Review is manual; no insurer or third-party service is "
+        "contacted.\n\n"
         "**Side effects:** the submission is created as `PENDING` and is approved "
         "only by an administrator via "
         "`PATCH /api/admin/insurance/{document_id}`."
@@ -451,7 +467,7 @@ def list_business_registrations(request):
 )
 def submit_insurance(request, payload: InsuranceDocumentIn):
     """
-    ⚠️ document_reference نص وليس ملفًا مرفوعًا (Infra §7).
+    📌 المرفق (اختياري) بطلب منفصل بعد الإنشاء.
     """
     try:
         document = vsvc.submit_insurance_document(
@@ -506,7 +522,73 @@ def list_insurance(request):
     ) as exc:
         return _verification_error(exc)
 
-    return 200, [serialize_insurance_document(d) for d in documents]
+    adapter = vsvc.get_storage_adapter() if any(d.has_attachment for d in documents) else None
+    return 200, [serialize_insurance_document(d, adapter) for d in documents]
+
+
+# ------------------------------------------------------------
+# POST /contractor/insurance/{document_id}/attachment
+# ------------------------------------------------------------
+@router.post(
+    "/insurance/{document_id}/attachment",
+    response={
+        200: InsuranceDocumentOut,
+        400: ErrorOut,
+        403: ErrorOut,
+        404: ErrorOut,
+        409: ErrorOut,
+        503: ErrorOut,
+    },
+    summary="Attach a file or photo to own insurance document (contractor only)",
+    description=(
+        "**Who may call:** `CONTRACTOR` only, on their own insurance document.\n\n"
+        "Send `multipart/form-data` with one field `file`: a **PDF, JPEG, PNG, "
+        "WebP or HEIC** file (10 MB max). The type is detected from the file's "
+        "content, not its name or declared type. The attachment is optional.\n\n"
+        "**Preconditions:** the document must still be `PENDING`. Uploading "
+        "again **replaces** the previous attachment. After review the document "
+        "is frozen (`409 insurance_document_not_editable`).\n\n"
+        "The response carries `attachment_url`, a temporary signed link (1 hour "
+        "by default) — re-fetch the document for a fresh link instead of caching "
+        "it. `503 attachment_storage_unavailable` means storage did not accept "
+        "the file; retry."
+    ),
+    openapi_extra={
+        "responses": {
+            400: {"description": "The file is empty, too large, or not a PDF/image."},
+            403: {"description": "The caller is not a `CONTRACTOR`."},
+            404: {"description": "No such insurance document among the caller's own."},
+            409: {"description": "The document has already been reviewed."},
+            503: {"description": "Storage did not accept the file; retry."},
+        }
+    },
+)
+def upload_insurance_attachment(request, document_id: uuid.UUID, file: UploadedFile = File(...)):
+    # الحجم يُفحص قبل القراءة: ملف ضخم لا يُحمَّل كاملًا في الذاكرة
+    if file.size is not None and file.size > vsvc.max_attachment_bytes():
+        return _error(
+            400,
+            vsvc.AttachmentTooLargeError.code,
+            f"File exceeds the {vsvc.max_attachment_bytes() // (1024 * 1024)} MB limit.",
+        )
+    try:
+        document = vsvc.attach_insurance_file(request.user, document_id, file.read())
+    except (
+        vsvc.InvalidContractorRoleError,
+        vsvc.ContractorProfilePermissionError,
+        vsvc.ContractorProfileNotFoundError,
+    ) as exc:
+        return _verification_error(exc)
+    except vsvc.VerificationNotFoundError as exc:
+        return _error(404, exc.code, str(exc))
+    except vsvc.DocumentNotEditableError as exc:
+        return _error(409, exc.code, str(exc))
+    except vsvc.AttachmentStorageUnavailableError as exc:
+        return _error(503, exc.code, str(exc))
+    except vsvc.AttachmentError as exc:
+        return _error(400, exc.code, str(exc))
+
+    return 200, serialize_insurance_document(document)
 
 
 # ------------------------------------------------------------

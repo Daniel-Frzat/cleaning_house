@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**175 codes.**
+**181 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -24,6 +24,8 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `admin_role_required` | 403, 422 |  | apps/contractors/services/profile.py, apps/services/services/catalog.py |
 | `aftercare_error` | 403, 404, 503 |  | apps/aftercare/services/aftercare.py |
 | `already_reviewed` | 409 | This booking has already been rated; a rating cannot be changed. | apps/aftercare/services/aftercare.py, apps/contractors/services/verification.py |
+| `attachment_storage_unavailable` | 503 |  | apps/contractors/services/verification.py |
+| `attachment_too_large` | 400 |  | apps/contractors/services/verification.py |
 | `booking_error` | 400 |  | apps/bookings/services/bookings.py |
 | `booking_forbidden` | 403 |  | apps/bookings/services/bookings.py |
 | `booking_has_no_price` | 422 |  | apps/payments/services/payments.py, apps/payouts/services/payouts.py |
@@ -44,6 +46,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `device_not_found` | 404 |  | apps/accounts/api/admin_auth.py |
 | `document_expired` | 409, 422 |  | apps/contractors/services/verification.py |
 | `email_already_used` | 409 |  | apps/accounts/services/identity.py |
+| `empty_attachment` | 400 |  | apps/contractors/services/verification.py |
 | `empty_icon` | 422 |  | apps/services/services/icons.py |
 | `empty_photo` | 400 |  | apps/jobs/services/photos.py |
 | `empty_service_selection` | 400 |  | apps/bookings/services/bookings.py, apps/services/services/pricing.py |
@@ -58,6 +61,8 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `icon_too_large` | 413 |  | apps/services/services/icons.py |
 | `inactive_service` | 400 |  | apps/bookings/services/bookings.py, apps/services/services/pricing.py |
 | `inactive_user` | 403 |  | apps/accounts/services/identity.py, apps/accounts/services/social.py |
+| `insurance_attachment_error` | 400 |  | apps/contractors/services/verification.py |
+| `insurance_document_not_editable` | 409 |  | apps/contractors/services/verification.py |
 | `invalid_contractor_role` | 403 |  | apps/bookings/services/offers.py, apps/contractors/services/profile.py |
 | `invalid_credentials` | 401 |  | apps/accounts/services/admin_auth.py |
 | `invalid_customer_role` | 403 |  | apps/bookings/services/bookings.py |
@@ -174,6 +179,7 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `tracking_error` | 400, 409 |  | apps/jobs/services/tracking.py |
 | `tracking_window_closed` | 409 |  | apps/jobs/services/tracking.py |
 | `travel_pricing_error` | 403, 404, 503 |  | apps/services/services/travel_pricing.py |
+| `unsupported_attachment_format` | 400 |  | apps/contractors/services/verification.py |
 | `unsupported_icon_format` | 422 |  | apps/services/services/icons.py |
 | `unsupported_photo_format` | 400, 409 |  | apps/jobs/services/photos.py |
 | `unsupported_provider` | 400 |  | apps/accounts/api/auth.py, apps/accounts/services/social.py |

@@ -417,6 +417,8 @@ RECLEAN_GUARANTEE_HOURS = config("RECLEAN_GUARANTEE_HOURS", default=72, cast=int
 # Job photos — حدود الرفع
 # ------------------------------------------------------------
 JOB_PHOTO_MAX_BYTES = config("JOB_PHOTO_MAX_BYTES", default=10 * 1024 * 1024, cast=int)
+# مرفق وثيقة تأمين المقاول (PDF أو صورة) — نفس adapter التخزين
+INSURANCE_ATTACHMENT_MAX_BYTES = config("INSURANCE_ATTACHMENT_MAX_BYTES", default=10 * 1024 * 1024, cast=int)
 JOB_PHOTO_MAX_PER_JOB = config("JOB_PHOTO_MAX_PER_JOB", default=30, cast=int)
 
 # ------------------------------------------------------------

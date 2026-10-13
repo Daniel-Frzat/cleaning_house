@@ -14,11 +14,16 @@ Contractor Verification Service — Contractors Domain (Change Set §6، Infra �
 
 import logging
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
 from apps.accounts.roles import ConfirmedRole
 from apps.audit.services.audit import record
+from apps.jobs.adapters import get_storage_adapter
+from apps.jobs.adapters.base import StorageUnavailableError
+from apps.jobs.services.photos import sniff_image_type
 
 from ..models import BusinessRegistration, InsuranceDocument, VerificationStatus
 from .profile import (  # noqa: F401 — نعيد استخدام نفس بوابات الدور
@@ -101,7 +106,7 @@ TERMINAL_REVIEW_STATUSES = {
 # تقديم المستندات (المقاول على نفسه)
 # ------------------------------------------------------------
 @transaction.atomic
-def submit_business_registration(user, abn, business_name):
+def submit_business_registration(user, abn, business_name, last_name, email):
     """
     يقدّم تسجيل نشاط جديدًا — يبدأ PENDING دائمًا.
 
@@ -112,10 +117,19 @@ def submit_business_registration(user, abn, business_name):
     profile = get_own_profile(user)
     _assert_no_pending(BusinessRegistration, profile)
 
+    # ⚠️ الـModel يسمح بالفراغ (للسجلات القديمة) — الإلزام يُفرض هنا
+    last_name = (last_name or "").strip()
+    email = (email or "").strip().lower()
+    missing = {f: "This field is required." for f, v in (("last_name", last_name), ("email", email)) if not v}
+    if missing:
+        raise ValidationError(missing)
+
     registration = BusinessRegistration(
         contractor=profile,
         abn=abn,
         business_name=business_name,
+        last_name=last_name,
+        email=email,
         status=VerificationStatus.PENDING,
     )
     registration.full_clean()
@@ -134,7 +148,7 @@ def submit_insurance_document(user, document_reference, expiry_date):
     """
     يقدّم وثيقة تأمين جديدة — تبدأ PENDING دائمًا.
 
-    ⚠️ document_reference نص وليس ملفًا مرفوعًا (Infra §7).
+    📌 المرفق (اختياري) يُرفع بعدها عبر attach_insurance_file.
     🔒 وثيقة منتهية لا تُقدَّم: اعتمادها لا يمنح أهلية أصلًا.
     """
     profile = get_own_profile(user)
@@ -155,6 +169,124 @@ def submit_insurance_document(user, document_reference, expiry_date):
         "Insurance document submitted (id=%s, contractor_id=%s)", document.id, profile.id
     )
     return document
+
+
+# ------------------------------------------------------------
+# مرفق وثيقة التأمين (PDF أو صورة)
+# ------------------------------------------------------------
+ATTACHMENT_TYPES_LABEL = "PDF, JPEG, PNG, WebP or HEIC"
+
+
+class AttachmentError(VerificationError):
+    code = "insurance_attachment_error"
+
+
+class EmptyAttachmentError(AttachmentError):
+    code = "empty_attachment"
+
+
+class AttachmentTooLargeError(AttachmentError):
+    code = "attachment_too_large"
+
+
+class UnsupportedAttachmentFormatError(AttachmentError):
+    """
+    🔒 يُفحص محتوى الملف (magic bytes) لا content_type المُرسَل.
+    """
+
+    code = "unsupported_attachment_format"
+
+
+class DocumentNotEditableError(AttachmentError):
+    """بعد المراجعة تتجمّد الوثيقة: القرار اتُّخذ على ما كان مرفقًا حينها."""
+
+    code = "insurance_document_not_editable"
+
+
+class AttachmentStorageUnavailableError(AttachmentError):
+    code = "attachment_storage_unavailable"
+
+
+def max_attachment_bytes():
+    return getattr(settings, "INSURANCE_ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024)
+
+
+def sniff_attachment_type(data):
+    """PDF أو صورة من بايتاتها الأولى، أو None."""
+    if bytes(data[:5]) == b"%PDF-":
+        return "application/pdf"
+    return sniff_image_type(data)
+
+
+@transaction.atomic
+def attach_insurance_file(user, document_id, file_bytes):
+    """
+    يرفع مرفق وثيقة تأمين المقاول نفسه، ويستبدل أي مرفق سابق.
+
+    🔒 الملكية: الوثيقة من ملف المستخدم الحالي وحده — غيرها 404 لا 403.
+    🔒 الحالة: PENDING فقط، بعد قفل الصف.
+    ⚠️ حذف الملف القديم بعد نجاح المعاملة فقط، وفشله لا يُفشل الطلب.
+    """
+    profile = get_own_profile(user)
+    document = (
+        InsuranceDocument.objects.select_for_update()
+        .filter(pk=document_id, contractor=profile)
+        .first()
+    )
+    if document is None:
+        raise VerificationNotFoundError("Insurance document not found.")
+    if document.status != VerificationStatus.PENDING:
+        raise DocumentNotEditableError(
+            "This insurance document has already been reviewed and can no longer be changed."
+        )
+
+    if not file_bytes:
+        raise EmptyAttachmentError("Uploaded file is empty.")
+    if len(file_bytes) > max_attachment_bytes():
+        raise AttachmentTooLargeError(
+            f"File exceeds the {max_attachment_bytes() // (1024 * 1024)} MB limit."
+        )
+    detected_type = sniff_attachment_type(file_bytes)
+    if detected_type is None:
+        raise UnsupportedAttachmentFormatError(f"Only {ATTACHMENT_TYPES_LABEL} files are accepted.")
+
+    try:
+        result = get_storage_adapter().upload(
+            file_bytes=file_bytes,
+            content_type=detected_type,
+            path_hint=f"contractors/{profile.id}/insurance/{document.id}",
+        )
+    except StorageUnavailableError as exc:
+        raise AttachmentStorageUnavailableError(
+            "The file could not be stored. Please try again."
+        ) from exc
+
+    old_key = document.attachment_key
+    document.attachment_key = result.storage_key
+    document.attachment_content_type = detected_type
+    document.save(update_fields=["attachment_key", "attachment_content_type", "updated_at"])
+
+    if old_key:
+        def _delete_old():
+            try:
+                get_storage_adapter().delete(old_key)
+            except Exception:
+                logger.exception("Storage delete failed (insurance_document_id=%s)", document.id)
+
+        transaction.on_commit(_delete_old)
+
+    logger.info(
+        "Insurance attachment uploaded (id=%s, contractor_id=%s, type=%s)",
+        document.id, profile.id, detected_type,
+    )
+    return document
+
+
+def insurance_attachment_url(document, adapter=None):
+    """رابط مؤقّت للمرفق، أو None. يُولَّد لحظيًا ولا يُخزَّن."""
+    if not document.attachment_key:
+        return None
+    return (adapter or get_storage_adapter()).get_signed_url(document.attachment_key)
 
 
 def _assert_no_pending(model, profile):

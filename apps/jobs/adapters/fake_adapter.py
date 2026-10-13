@@ -27,6 +27,7 @@ _EXTENSION_BY_CONTENT_TYPE = {
     "image/png": ".png",
     "image/webp": ".webp",
     "image/heic": ".heic",
+    "application/pdf": ".pdf",
 }
 
 FAKE_URL_PREFIX = "https://fake-storage.local/signed/"

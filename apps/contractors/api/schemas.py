@@ -119,13 +119,17 @@ class BusinessRegistrationIn(Schema):
     # 11 رقمًا — فحص شكلي فقط، ليس تحققًا من السجل الحكومي
     abn: str = Field(..., pattern=r"^\d{11}$")
     business_name: str = Field(..., min_length=1, max_length=255)
+    # اسم العائلة والبريد — إلزاميان. صيغة البريد يفحصها EmailField في الـModel
+    last_name: str = Field(..., min_length=1, max_length=150)
+    email: str = Field(..., min_length=3, max_length=254)
 
 
 class InsuranceDocumentIn(Schema):
     """
     تقديم وثيقة تأمين.
 
-    ⚠️ document_reference نص (رقم بوليصة) — لا رفع ملفات (Infra §7).
+    📌 document_reference نص (رقم بوليصة). المرفق يُرفع بطلب منفصل:
+       POST /contractor/insurance/{id}/attachment.
     """
 
     document_reference: str = Field(..., min_length=1, max_length=255)
@@ -149,6 +153,8 @@ class BusinessRegistrationOut(Schema):
     contractor_id: uuid.UUID
     abn: str
     business_name: str
+    last_name: str = ""
+    email: str = ""
     status: str
     reviewed_by_id: Optional[uuid.UUID] = None
     reviewed_at: Optional[datetime] = None
@@ -162,6 +168,10 @@ class InsuranceDocumentOut(Schema):
     contractor_id: uuid.UUID
     document_reference: str
     expiry_date: date
+    # المرفق (PDF أو صورة) — رابط موقَّع مؤقّت، None إن لم يُرفع شيء
+    has_attachment: bool = False
+    attachment_url: Optional[str] = None
+    attachment_content_type: Optional[str] = None
     status: str
     reviewed_by_id: Optional[uuid.UUID] = None
     reviewed_at: Optional[datetime] = None

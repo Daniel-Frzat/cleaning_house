@@ -27,7 +27,12 @@ from apps.contractors.models import (
 from apps.contractors.services import verification as vsvc
 
 VALID_ABN = "51824753556"
-VALID_REGISTRATION = {"abn": VALID_ABN, "business_name": "Sparkle Co"}
+VALID_REGISTRATION = {
+    "abn": VALID_ABN,
+    "business_name": "Sparkle Co",
+    "last_name": "Smith",
+    "email": "owner@sparkle.example",
+}
 
 
 # ------------------------------------------------------------
@@ -125,6 +130,45 @@ def test_valid_abn_is_accepted(client, contractor_a):
 
     assert body["abn"] == VALID_ABN
     assert body["business_name"] == "Sparkle Co"
+    assert body["last_name"] == "Smith"
+    assert body["email"] == "owner@sparkle.example"
+
+
+@pytest.mark.django_db
+def test_registration_owner_fields_are_stored_normalized(client, contractor_a):
+    submit_registration(
+        client, contractor_a,
+        {**VALID_REGISTRATION, "last_name": "  Smith ", "email": " Owner@Sparkle.Example "},
+    )
+
+    registration = BusinessRegistration.objects.get()
+    assert registration.last_name == "Smith"
+    assert registration.email == "owner@sparkle.example"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field", ["last_name", "email"])
+def test_registration_owner_field_is_required(client, contractor_a, field):
+    payload = {k: v for k, v in VALID_REGISTRATION.items() if k != field}
+    r = post(client, "/api/contractor/business-registration", payload, **auth(contractor_a))
+
+    assert r.status_code == 422
+    assert not BusinessRegistration.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "override",
+    [{"last_name": "   "}, {"email": "   "}, {"email": "not-an-email"}],
+)
+def test_registration_owner_field_rejects_blank_or_bad_email(client, contractor_a, override):
+    r = post(
+        client, "/api/contractor/business-registration",
+        {**VALID_REGISTRATION, **override}, **auth(contractor_a),
+    )
+
+    assert r.status_code == 422
+    assert not BusinessRegistration.objects.exists()
 
 
 @pytest.mark.django_db
@@ -235,7 +279,7 @@ def test_expired_insurance_cannot_be_submitted(client, contractor_a):
 
 @pytest.mark.django_db
 def test_review_decision_is_final(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     with pytest.raises(vsvc.AlreadyReviewedError):
         vsvc.review_business_registration(
@@ -270,7 +314,7 @@ def test_expired_insurance_cannot_be_approved(db, contractor_a, admin_user):
 @pytest.mark.django_db
 def test_pending_insurance_does_not_change_eligibility(db, contractor_a, admin_user):
     """مراجعة التأمين المعلّق لا تؤثر على أهلية العامل."""
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=10))
     _verify(admin_user, "ins", ins)
@@ -583,7 +627,7 @@ def test_rejection_reason_enforced_at_model_level(db, contractor_a):
 
 @pytest.mark.django_db
 def test_rejection_reason_enforced_in_service_layer(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
 
     with pytest.raises(vsvc.MissingRejectionReasonError):
         vsvc.review_business_registration(admin_user, reg.id, VerificationStatus.REJECTED)
@@ -651,7 +695,7 @@ def _verify(admin_user, instance_kind, instance):
 def test_first_approval_makes_contractor_available(db, contractor_a, admin_user):
     assert profile_of(contractor_a).availability_status == AvailabilityStatus.UNAVAILABLE
 
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
 
     assert profile_of(contractor_a).availability_status == AvailabilityStatus.AVAILABLE
@@ -659,7 +703,7 @@ def test_first_approval_makes_contractor_available(db, contractor_a, admin_user)
 
 @pytest.mark.django_db
 def test_rejection_leaves_contractor_unavailable(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     vsvc.review_business_registration(
         admin_user, reg.id, VerificationStatus.REJECTED, "Name mismatch"
     )
@@ -669,12 +713,12 @@ def test_rejection_leaves_contractor_unavailable(db, contractor_a, admin_user):
 
 @pytest.mark.django_db
 def test_later_approval_does_not_override_contractor_switch(db, contractor_a, admin_user):
-    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "X"))
+    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example"))
     profile = profile_of(contractor_a)
     profile.availability_status = AvailabilityStatus.UNAVAILABLE
     profile.save(update_fields=["availability_status"])
 
-    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "Y"))
+    _verify(admin_user, "reg", vsvc.submit_business_registration(contractor_a, VALID_ABN, "Y", "Smith", "owner@x.example"))
 
     assert profile_of(contractor_a).availability_status == AvailabilityStatus.UNAVAILABLE
 
@@ -686,7 +730,7 @@ def test_eligible_false_when_no_records(db, contractor_a):
 
 @pytest.mark.django_db
 def test_eligible_false_when_both_pending(db, contractor_a):
-    vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
 
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is False
@@ -694,7 +738,7 @@ def test_eligible_false_when_both_pending(db, contractor_a):
 
 @pytest.mark.django_db
 def test_eligible_true_when_only_registration_verified(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
 
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
@@ -702,7 +746,7 @@ def test_eligible_true_when_only_registration_verified(db, contractor_a, admin_u
 
 @pytest.mark.django_db
 def test_eligible_false_when_only_insurance_verified(db, contractor_a, admin_user):
-    vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
     _verify(admin_user, "ins", ins)
 
@@ -711,7 +755,7 @@ def test_eligible_false_when_only_insurance_verified(db, contractor_a, admin_use
 
 @pytest.mark.django_db
 def test_eligible_true_when_insurance_verified_but_expired(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     InsuranceDocument.objects.create(
         contractor=profile_of(contractor_a), document_reference="POL-1",
@@ -725,7 +769,7 @@ def test_eligible_true_when_insurance_verified_but_expired(db, contractor_a, adm
 def test_eligible_true_when_both_verified_and_insurance_current(
     db, contractor_a, admin_user
 ):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
     _verify(admin_user, "ins", ins)
@@ -736,7 +780,7 @@ def test_eligible_true_when_both_verified_and_insurance_current(
 @pytest.mark.django_db
 def test_eligible_true_when_insurance_expires_today(db, contractor_a, admin_user):
     """تاريخ انتهاء التأمين لا يؤثر على أهلية العامل."""
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today())
     _verify(admin_user, "ins", ins)
@@ -746,7 +790,7 @@ def test_eligible_true_when_insurance_expires_today(db, contractor_a, admin_user
 
 @pytest.mark.django_db
 def test_eligible_false_when_registration_rejected(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     vsvc.review_business_registration(
         admin_user, reg.id, VerificationStatus.REJECTED, "Bad ABN."
     )
@@ -758,7 +802,7 @@ def test_eligible_false_when_registration_rejected(db, contractor_a, admin_user)
 
 @pytest.mark.django_db
 def test_eligible_true_when_insurance_rejected(db, contractor_a, admin_user):
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
     vsvc.review_insurance_document(
@@ -775,13 +819,13 @@ def test_latest_record_wins_newer_rejection_revokes_eligibility(
     """
     ⚠️ "الأحدث" يحكم: سجل مرفوض أحدث يُبطل الأهلية رغم وجود معتمد أقدم.
     """
-    old = vsvc.submit_business_registration(contractor_a, VALID_ABN, "Old")
+    old = vsvc.submit_business_registration(contractor_a, VALID_ABN, "Old", "Smith", "owner@x.example")
     _verify(admin_user, "reg", old)
     ins = vsvc.submit_insurance_document(contractor_a, "POL-1", today() + timedelta(days=30))
     _verify(admin_user, "ins", ins)
     assert vsvc.is_contractor_eligible(profile_of(contractor_a)) is True
 
-    new = vsvc.submit_business_registration(contractor_a, "53004085616", "New")
+    new = vsvc.submit_business_registration(contractor_a, "53004085616", "New", "Smith", "owner@x.example")
     vsvc.review_business_registration(
         admin_user, new.id, VerificationStatus.REJECTED, "Mismatch."
     )
@@ -792,7 +836,7 @@ def test_latest_record_wins_newer_rejection_revokes_eligibility(
 @pytest.mark.django_db
 def test_expired_insurance_does_not_change_eligibility(db, contractor_a, admin_user):
     """تأمين العامل غير مؤثر على أهليته، حتى لو انتهت صلاحيته."""
-    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X")
+    reg = vsvc.submit_business_registration(contractor_a, VALID_ABN, "X", "Smith", "owner@x.example")
     _verify(admin_user, "reg", reg)
     # اعتُمدت وهي سارية ثم انتهت — الإنشاء المباشر يحاكي مرور الزمن
     InsuranceDocument.objects.create(
@@ -831,7 +875,11 @@ def test_no_business_registry_adapter_is_wired():
     """
     ⚠️ المرحلة يدوية بالكامل: الـadapter التجريدي يبقى دون استخدام،
        ولا أي استيراد لسجل حكومي أو خدمة تحقق خارجية.
+
+    📌 استثناء واحد: adapter التخزين (apps.jobs.adapters) لمرفق وثيقة
+       التأمين — يحفظ الملف للمراجع البشري ولا يتحقق من شيء.
     """
+    storage_adapters = {"apps.jobs.adapters", "apps.jobs.adapters.base"}
     import ast
     import inspect
 
@@ -851,6 +899,8 @@ def test_no_business_registry_adapter_is_wired():
 
         for name in imported:
             low = name.lower()
+            if name in storage_adapters:
+                continue
             assert "adapter" not in low, f"{mod.__name__} imports adapter: {name}"
             assert "registry" not in low, f"{mod.__name__} imports registry: {name}"
 

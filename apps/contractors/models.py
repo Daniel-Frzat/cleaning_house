@@ -309,6 +309,10 @@ class BusinessRegistration(ReviewableDocument):
         help_text="11-digit ABN. Format and checksum validation only — not a registry lookup.",
     )
     business_name = models.CharField(max_length=255)
+    # بيانات صاحب النشاط للمراجعة الإدارية — إلزامية عند التقديم عبر الـAPI.
+    # ⚠️ blank=True هنا فقط لأن السجلات السابقة لهذين الحقلين فارغة.
+    last_name = models.CharField(max_length=150, blank=True, default="")
+    email = models.EmailField(max_length=254, blank=True, default="")
 
     class Meta(ReviewableDocument.Meta):
         verbose_name = "Business registration"
@@ -326,8 +330,9 @@ class InsuranceDocument(ReviewableDocument):
     """
     وثيقة تأمين المقاول — تُراجَع يدويًا.
 
-    ⚠️ document_reference نص (رقم بوليصة مثلًا) وليس ملفًا مرفوعًا.
-       تكامل تخزين الملفات شأن منفصل لاحقًا (Infra §7) — لا يُبنى الآن.
+    📌 document_reference نص (رقم بوليصة). المرفق (PDF أو صورة) اختياري
+       ويُرفع بطلب منفصل ما دامت الوثيقة PENDING — عبر نفس adapter التخزين
+       (Infra §7). attachment_key مرجع مبهم من الـadapter لا يُكشف للمقاول.
     """
 
     contractor = models.ForeignKey(
@@ -338,9 +343,17 @@ class InsuranceDocument(ReviewableDocument):
 
     document_reference = models.CharField(
         max_length=255,
-        help_text="Policy number or reference. Not a file upload (Infra §7).",
+        help_text="Policy number or reference.",
     )
     expiry_date = models.DateField()
+
+    # المرفق الاختياري — فارغ = لا مرفق
+    attachment_key = models.TextField(blank=True, default="")
+    attachment_content_type = models.CharField(max_length=100, blank=True, default="")
+
+    @property
+    def has_attachment(self):
+        return bool(self.attachment_key)
 
     class Meta(ReviewableDocument.Meta):
         verbose_name = "Insurance document"
