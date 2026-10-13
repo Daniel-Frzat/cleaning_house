@@ -15,6 +15,7 @@ from typing import Optional
 from ninja import Schema
 from pydantic import Field
 
+from apps.bookings.api.schemas import HomeDetailAnswerOut
 from apps.geo_fields import AccuracyMeters, Latitude, Longitude
 
 
@@ -44,6 +45,7 @@ class JobOut(Schema):
     # 🔒 ملاحظات وصول العميل — null لكل من ليس المقاول المُسنَد.
     #    قد تحوي مكان مفتاح المنزل، فالحجب افتراضي في المُسلسِل.
     access_notes: Optional[str] = None
+    home_details: list[HomeDetailAnswerOut] = []
     marked_done_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     auto_confirm_at: Optional[datetime] = Field(

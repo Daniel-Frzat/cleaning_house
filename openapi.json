@@ -2042,6 +2042,1220 @@
         ]
       }
     },
+    "/api/home-details/form": {
+      "get": {
+        "operationId": "apps_services_api_home_details_get_form",
+        "summary": "Questions for the \"Tell us about your home\" screen",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "property_id",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`property_id` belongs to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No property with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** any signed-in user.\n\nReturns the active questions in display order, each with its active options and icons, as configured from the dashboard. Build the screen from this response — nothing about the questions is hard-coded in the app.\n\n* `input_type`: `COUNTER` (− n +, between `min_value` and `max_value`), `YES_NO`, `SINGLE_CHOICE`, `MULTI_CHOICE`.\n* `section`: `MAIN` is always shown; `EXTRA` sits behind \"+ add other conditions (optional)\".\n* `value`: the starting value. With `property_id`, it is the answer last saved for that property (if still valid), otherwise the default.\n* `icon.url` changes whenever the icon is replaced, so it can be cached indefinitely by URL.\n\nSend the answers as `home_details: {key: value}` in `POST /api/bookings`. They are **information only and never change the price**.\n\n**Side effects:** none — read-only.",
+        "tags": [
+          "Home details"
+        ],
+        "security": [
+          {
+            "ActiveUserJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/icons/{icon_id}": {
+      "get": {
+        "operationId": "apps_services_api_home_details_get_icon_file",
+        "summary": "Icon file (public)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "icon_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Icon Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** anyone — no token, so image widgets can load it directly. Use the `url` returned by the API (it carries `?v=` with the content fingerprint); the response is cacheable for a year.\n\nReturns `404` for an unknown icon.",
+        "tags": [
+          "Home details"
+        ]
+      }
+    },
+    "/api/admin/icons": {
+      "get": {
+        "operationId": "apps_services_api_home_details_list_icons",
+        "summary": "List icons with their usage (admin only)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIconListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "apps_services_api_home_details_upload_icon",
+        "summary": "Upload an icon (admin only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIconOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\n`multipart/form-data` with `name` and `file`. PNG, WebP or SVG, up to 200 KB. The type is read from the file itself; SVG files with scripts, event handlers or external links are rejected (`422 unsupported_icon_format`). Recorded in the audit log.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "title": "MultiPartBodyParams",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "file": {
+                    "format": "binary",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "file"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/icons/{icon_id}": {
+      "get": {
+        "operationId": "apps_services_api_home_details_retrieve_icon",
+        "summary": "Retrieve an icon (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "icon_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Icon Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIconOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_services_api_home_details_rename_icon",
+        "summary": "Rename an icon (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "icon_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Icon Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIconOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IconRenameIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "apps_services_api_home_details_delete_icon",
+        "summary": "Delete an unused icon (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "icon_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Icon Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "`409 icon_in_use` while a question or option still uses it.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/icons/{icon_id}/file": {
+      "post": {
+        "operationId": "apps_services_api_home_details_replace_icon_file",
+        "summary": "Replace an icon's file (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "icon_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Icon Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIconOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\n`multipart/form-data` with `file`. Every question and option using this icon shows the new file; its `url` changes so apps fetch it again.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "FileParams",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields": {
+      "get": {
+        "operationId": "apps_services_api_home_details_list_fields",
+        "summary": "List home-detail questions, active and inactive (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "apps_services_api_home_details_create_field",
+        "summary": "Add a home-detail question (admin only)",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "**Who may call:** `ADMIN` only.\n\n`key` is a stable slug (`bedrooms`, `has-pets`) used in `home_details` answers; it and `input_type` cannot change later. `min_value` / `max_value` / `default_value` apply to `COUNTER`; for `YES_NO`, `default_value` is 0 (No) or 1 (Yes). Choice questions get their options through `/options`. The app shows it immediately.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields/order": {
+      "put": {
+        "operationId": "apps_services_api_home_details_reorder_fields",
+        "summary": "Reorder home-detail questions (admin only)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Send every question id exactly once, in display order (`422 invalid_order` otherwise).",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields/{field_id}": {
+      "get": {
+        "operationId": "apps_services_api_home_details_retrieve_field",
+        "summary": "Retrieve a home-detail question (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "apps_services_api_home_details_update_field",
+        "summary": "Edit a home-detail question (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Partial update. `key` and `input_type` are fixed. `is_active: false` hides the question from the app without deleting it. Bookings already placed keep the labels they were made with.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "apps_services_api_home_details_delete_field",
+        "summary": "Delete a home-detail question and its options (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Permanent. Bookings already placed keep their frozen answers; answers saved on properties for this question are ignored from now on.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields/{field_id}/options": {
+      "post": {
+        "operationId": "apps_services_api_home_details_create_option",
+        "summary": "Add an option to a choice question (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Only for `SINGLE_CHOICE` / `MULTI_CHOICE` questions (`422 home_detail_not_choice_field` otherwise). `key` is unique within the question and fixed. Returns the whole question.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields/{field_id}/options/order": {
+      "put": {
+        "operationId": "apps_services_api_home_details_reorder_options",
+        "summary": "Reorder a question's options (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/home-detail-fields/{field_id}/options/{option_id}": {
+      "patch": {
+        "operationId": "apps_services_api_home_details_update_option",
+        "summary": "Edit an option (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "option_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Option Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Admin — Home details"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "apps_services_api_home_details_delete_option",
+        "summary": "Delete an option (admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Field Id",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "option_id",
+            "schema": {
+              "format": "uuid",
+              "title": "Option Id",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFieldOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Permanent. Returns the question without it. Bookings keep their frozen answers.",
+        "tags": [
+          "Admin — Home details"
+        ],
+        "security": [
+          {
+            "AdminJWTAuth": []
+          }
+        ]
+      }
+    },
     "/api/contractor/profile": {
       "post": {
         "operationId": "apps_contractors_api_profile_create_profile",
@@ -3200,7 +4414,7 @@
             }
           },
           "400": {
-            "description": "No services were selected, a selected service is unknown or inactive, a `room_count` is invalid, or `scheduled_at` is in the past or outside business hours (07:00-19:00 local time).",
+            "description": "No services were selected, a selected service is unknown or inactive, a `room_count` is invalid, `scheduled_at` is in the past or outside business hours (07:00-19:00 local time), or `home_details` does not match the current questions (`invalid_home_details`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3250,7 +4464,7 @@
             }
           }
         },
-        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and the property must not have been removed.\n\n**Two kinds of request:**\n* **On-demand (\"request a cleaner now\")** — omit `scheduled_at`. Allowed between 07:00 and 19:00 in the property's local timezone (`400 outside_business_hours` otherwise); no lead time. The response has `is_on_demand: true` and `scheduled_at: null`.\n* **Scheduled ahead** — send `scheduled_at` (ISO 8601). It must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes away (`400 scheduled_at_too_soon`), and between 07:00 and 19:00 property-local. Sent without an offset it is read in the property's timezone; with an offset it is honoured as given. Returned as both `scheduled_at` (UTC) and `scheduled_at_local`.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.",
+        "description": "**Who may call:** `CUSTOMER` only, and only against a property they own.\n\n**Preconditions:** at least one service selection, every selected service must be active in the catalog, and the property must not have been removed.\n\n**Two kinds of request:**\n* **On-demand (\"request a cleaner now\")** — omit `scheduled_at`. Allowed between 07:00 and 19:00 in the property's local timezone (`400 outside_business_hours` otherwise); no lead time. The response has `is_on_demand: true` and `scheduled_at: null`.\n* **Scheduled ahead** — send `scheduled_at` (ISO 8601). It must be in the future, at least `BOOKING_MIN_LEAD_MINUTES` (default 120) minutes away (`400 scheduled_at_too_soon`), and between 07:00 and 19:00 property-local. Sent without an offset it is read in the property's timezone; with an offset it is honoured as given. Returned as both `scheduled_at` (UTC) and `scheduled_at_local`.\n\nThe booking is created as `PENDING` **with no price and no assigned contractor** — `computed_price` and `assigned_contractor_id` are `null` in the response, and the price is not calculated at this point.\n\n**Side effects:** once the booking is committed, auto-dispatch runs and offers it to the nearest available contractor. Dispatch happens outside the creating transaction, so a dispatch failure never undoes a valid booking; finding no eligible contractor is not an error either — the booking simply stays `PENDING` with no active offer.\n\n**Home details** (optional): `home_details` carries the answers from the \"Tell us about your home\" screen as `{key: value}`, using the keys from `GET /api/home-details/form` — a number for `COUNTER`, `true`/`false` for `YES_NO`, an option key (or `null`) for `SINGLE_CHOICE`, a list of option keys for `MULTI_CHOICE`. They are **information only and never change the price**. They are frozen on the booking with their labels (returned as `home_details`) and remembered on the property to pre-fill the screen next time. Omit the field entirely to skip the screen; send it (even `{}`) and required questions are enforced.",
         "tags": [
           "Bookings"
         ],
@@ -10538,6 +11752,825 @@
         "title": "ServicePublicOut",
         "type": "object"
       },
+      "FormQuery": {
+        "properties": {
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          }
+        },
+        "title": "FormQuery",
+        "type": "object"
+      },
+      "FormFieldOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "help_text": {
+            "title": "Help Text",
+            "type": "string"
+          },
+          "input_type": {
+            "$ref": "#/components/schemas/HomeDetailInputType"
+          },
+          "section": {
+            "$ref": "#/components/schemas/HomeDetailSection"
+          },
+          "is_required": {
+            "title": "Is Required",
+            "type": "boolean"
+          },
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IconRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "options": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "help_text",
+          "input_type",
+          "section",
+          "is_required"
+        ],
+        "title": "FormFieldOut",
+        "type": "object"
+      },
+      "FormOut": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FormFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "title": "FormOut",
+        "type": "object"
+      },
+      "HomeDetailInputType": {
+        "description": "كيف يجيب العميل — يحدد شكل العنصر في التطبيق وشكل القيمة.",
+        "enum": [
+          "COUNTER",
+          "YES_NO",
+          "SINGLE_CHOICE",
+          "MULTI_CHOICE"
+        ],
+        "title": "HomeDetailInputType",
+        "type": "string"
+      },
+      "HomeDetailSection": {
+        "description": "MAIN ظاهر دائمًا؛ EXTRA خلف \"+ add other conditions (optional)\".",
+        "enum": [
+          "MAIN",
+          "EXTRA"
+        ],
+        "title": "HomeDetailSection",
+        "type": "string"
+      },
+      "IconRefOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "content_type"
+        ],
+        "title": "IconRefOut",
+        "type": "object"
+      },
+      "OptionOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IconRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label"
+        ],
+        "title": "OptionOut",
+        "type": "object"
+      },
+      "IconListQuery": {
+        "properties": {
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          }
+        },
+        "title": "IconListQuery",
+        "type": "object"
+      },
+      "AdminIconListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminIconOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminIconListOut",
+        "type": "object"
+      },
+      "AdminIconOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "used_by_fields": {
+            "title": "Used By Fields",
+            "type": "integer"
+          },
+          "used_by_options": {
+            "title": "Used By Options",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "content_type",
+          "size",
+          "used_by_fields",
+          "used_by_options",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminIconOut",
+        "type": "object"
+      },
+      "IconRenameIn": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "IconRenameIn",
+        "type": "object"
+      },
+      "AdminFieldListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFieldOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AdminFieldListOut",
+        "type": "object"
+      },
+      "AdminFieldOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "help_text": {
+            "title": "Help Text",
+            "type": "string"
+          },
+          "input_type": {
+            "$ref": "#/components/schemas/HomeDetailInputType"
+          },
+          "section": {
+            "$ref": "#/components/schemas/HomeDetailSection"
+          },
+          "is_required": {
+            "title": "Is Required",
+            "type": "boolean"
+          },
+          "min_value": {
+            "title": "Min Value",
+            "type": "integer"
+          },
+          "max_value": {
+            "title": "Max Value",
+            "type": "integer"
+          },
+          "default_value": {
+            "title": "Default Value",
+            "type": "integer"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IconRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/AdminOptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "help_text",
+          "input_type",
+          "section",
+          "is_required",
+          "min_value",
+          "max_value",
+          "default_value",
+          "sort_order",
+          "is_active",
+          "options",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminFieldOut",
+        "type": "object"
+      },
+      "AdminOptionOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IconRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "sort_order",
+          "is_active"
+        ],
+        "title": "AdminOptionOut",
+        "type": "object"
+      },
+      "FieldIn": {
+        "properties": {
+          "key": {
+            "maxLength": 50,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "input_type": {
+            "$ref": "#/components/schemas/HomeDetailInputType"
+          },
+          "help_text": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Help Text",
+            "type": "string"
+          },
+          "icon_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Id"
+          },
+          "section": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HomeDetailSection"
+              }
+            ],
+            "default": "MAIN"
+          },
+          "is_required": {
+            "default": false,
+            "title": "Is Required",
+            "type": "boolean"
+          },
+          "min_value": {
+            "default": 0,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "Min Value",
+            "type": "integer"
+          },
+          "max_value": {
+            "default": 20,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "Max Value",
+            "type": "integer"
+          },
+          "default_value": {
+            "default": 0,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "Default Value",
+            "type": "integer"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted: placed last.",
+            "title": "Sort Order"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "input_type"
+        ],
+        "title": "FieldIn",
+        "type": "object"
+      },
+      "OrderIn": {
+        "properties": {
+          "ids": {
+            "description": "Every id, exactly once, in display order.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "OrderIn",
+        "type": "object"
+      },
+      "FieldPatch": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "help_text": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help Text"
+          },
+          "icon_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` removes the icon.",
+            "title": "Icon Id"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HomeDetailSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Required"
+          },
+          "min_value": {
+            "anyOf": [
+              {
+                "maximum": 99,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "maximum": 99,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value"
+          },
+          "default_value": {
+            "anyOf": [
+              {
+                "maximum": 99,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "title": "FieldPatch",
+        "type": "object"
+      },
+      "OptionIn": {
+        "properties": {
+          "key": {
+            "maxLength": 50,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "icon_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Id"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted: placed last.",
+            "title": "Sort Order"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "OptionIn",
+        "type": "object"
+      },
+      "OptionPatch": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "icon_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` removes the icon.",
+            "title": "Icon Id"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "title": "OptionPatch",
+        "type": "object"
+      },
       "ContractorProfileOut": {
         "properties": {
           "id": {
@@ -11516,6 +13549,14 @@
             ],
             "title": "Access Notes"
           },
+          "home_details": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeDetailAnswerOut"
+            },
+            "title": "Home Details",
+            "type": "array"
+          },
           "payment": {
             "anyOf": [
               {
@@ -11608,6 +13649,46 @@
           "created_at"
         ],
         "title": "BookingReviewOut",
+        "type": "object"
+      },
+      "HomeDetailAnswerOut": {
+        "description": "إجابة واحدة من شاشة \"تفاصيل المنزل\" كما جُمِّدت على الحجز.\n\nvalue بشكله الخام (رقم، true/false، مفتاح خيار، قائمة مفاتيح)،\nو value_labels جاهزة للعرض (\"3\"، \"Yes\"، \"Carpet\").",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "input_type": {
+            "title": "Input Type",
+            "type": "string"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          },
+          "value_labels": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Value Labels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "input_type",
+          "section"
+        ],
+        "title": "HomeDetailAnswerOut",
         "type": "object"
       },
       "PaymentSummaryOut": {
@@ -11778,6 +13859,19 @@
             "maxLength": 255,
             "title": "Payment Method Reference",
             "type": "string"
+          },
+          "home_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Answers keyed by question `key`. Information only — never affects the price. Omit to skip the screen.",
+            "title": "Home Details"
           }
         },
         "required": [
@@ -12210,6 +14304,14 @@
               "$ref": "#/components/schemas/OfferServiceOut"
             },
             "title": "Services",
+            "type": "array"
+          },
+          "home_details": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeDetailAnswerOut"
+            },
+            "title": "Home Details",
             "type": "array"
           }
         },
@@ -12859,6 +14961,14 @@
             ],
             "title": "Access Notes"
           },
+          "home_details": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeDetailAnswerOut"
+            },
+            "title": "Home Details",
+            "type": "array"
+          },
           "marked_done_at": {
             "anyOf": [
               {
@@ -13172,6 +15282,14 @@
               }
             ],
             "title": "Access Notes"
+          },
+          "home_details": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeDetailAnswerOut"
+            },
+            "title": "Home Details",
+            "type": "array"
           },
           "marked_done_at": {
             "anyOf": [
@@ -15969,6 +18087,14 @@
           "access_notes": {
             "title": "Access Notes",
             "type": "string"
+          },
+          "home_details": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeDetailAnswerOut"
+            },
+            "title": "Home Details",
+            "type": "array"
           },
           "scheduled_at": {
             "anyOf": [

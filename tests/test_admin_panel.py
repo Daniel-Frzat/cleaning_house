@@ -156,6 +156,16 @@ def world(superuser):
         user=customer, audience="CUSTOMER", type="broadcast", title="Hi", body="News", broadcast=broadcast
     )
     DeviceToken.objects.create(user=customer, token="fcm-token-0123456789", platform="ANDROID")
+
+    from apps.services.models import CatalogIcon, HomeDetailField, HomeDetailOption
+
+    icon = CatalogIcon.objects.create(
+        name="Bed", content_type="image/png", data=bytes.fromhex("89504e470d0a1a0a"), size=8, sha256="0" * 64
+    )
+    rooms = HomeDetailField.objects.create(
+        key="room-contents", label="Room contents", input_type="MULTI_CHOICE", icon=icon
+    )
+    HomeDetailOption.objects.create(field=rooms, key="oven", label="Oven", icon=icon)
     return {
         "customer": customer,
         "worker": worker,

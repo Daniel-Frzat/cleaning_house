@@ -12,11 +12,13 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count
+from django.urls import reverse
+from django.utils.html import format_html
 
-from apps.audit.admin import BackOfficeMixin, format_money
+from apps.audit.admin import EMPTY, BackOfficeMixin, ReadOnlyAdminMixin, format_money
 from apps.audit.services.audit import record
 
-from .models import PricingConfig, ServiceType
+from .models import CatalogIcon, HomeDetailField, HomeDetailOption, PricingConfig, ServiceType
 from .services import catalog as catalog_service
 
 
@@ -202,3 +204,56 @@ class PricingConfigAdmin(BackOfficeMixin, admin.ModelAdmin):
                     },
                     request=request,
                 )
+
+
+# ============================================================
+# تفاصيل المنزل والأيقونات — عرض فقط
+# ============================================================
+# 📌 الإنشاء والتعديل والحذف من لوحة التحكم عبر /api/admin (طبقة الخدمة +
+#    سجل التدقيق + فحص محتوى الأيقونات). هنا مرآة للقراءة وحدها، حتى لا
+#    يوجد مسار ثانٍ يتجاوز تلك الفحوص.
+
+
+def _icon_preview(icon):
+    if icon is None:
+        return EMPTY
+    url = reverse("api-1.0.0:catalog_icon_file", kwargs={"icon_id": icon.pk})
+    return format_html('<img src="{}?v={}" alt="" style="height:24px;width:24px">', url, icon.sha256[:12])
+
+
+@admin.register(CatalogIcon)
+class CatalogIconAdmin(ReadOnlyAdminMixin, BackOfficeMixin, admin.ModelAdmin):
+    list_display = ("preview", "name", "content_type", "size", "updated_at")
+    search_fields = ("name",)
+    exclude = ("data",)
+    readonly_fields = ("preview", "id", "name", "content_type", "size", "sha256", "created_at", "updated_at")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).defer("data")
+
+    @admin.display(description="Icon")
+    def preview(self, obj):
+        return _icon_preview(obj)
+
+
+class HomeDetailOptionInline(ReadOnlyAdminMixin, BackOfficeMixin, admin.TabularInline):
+    model = HomeDetailOption
+    fields = ("icon_preview", "key", "label", "sort_order", "is_active")
+    readonly_fields = fields
+    extra = 0
+
+    @admin.display(description="Icon")
+    def icon_preview(self, obj):
+        return _icon_preview(obj.icon)
+
+
+@admin.register(HomeDetailField)
+class HomeDetailFieldAdmin(ReadOnlyAdminMixin, BackOfficeMixin, admin.ModelAdmin):
+    list_display = ("icon_preview", "label", "key", "input_type", "section", "is_required", "sort_order", "is_active")
+    list_filter = ("input_type", "section", "is_active")
+    search_fields = ("label", "key")
+    inlines = [HomeDetailOptionInline]
+
+    @admin.display(description="Icon")
+    def icon_preview(self, obj):
+        return _icon_preview(obj.icon)

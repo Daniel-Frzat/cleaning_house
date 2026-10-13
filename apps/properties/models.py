@@ -82,6 +82,10 @@ class Property(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    # آخر إجابات "تفاصيل المنزل" لهذا العقار {key: value} — لتعبئة الشاشة
+    # مسبقًا فقط. الحجز يحمل لقطته الخاصة، فهذا الحقل لا يُقرأ للتنفيذ.
+    home_details = models.JSONField(default=dict, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

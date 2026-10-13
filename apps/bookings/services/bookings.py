@@ -231,6 +231,7 @@ def create_booking(
     access_notes="",
     quote=None,
     payment_method_reference="",
+    home_details=None,
 ):
     """
     ينشئ حجزًا بحالة PENDING مع أسطر خدماته.
@@ -300,6 +301,15 @@ def create_booking(
     else:
         scheduled_utc = normalize_scheduled_at(scheduled_at, customer_timezone)
 
+    # 📌 تفاصيل المنزل (قرار PO — 2026-10-13): معلومات فقط، لا أثر لها على
+    #    السعر. None = عميل لم يرسل الشاشة (نسخة تطبيق أقدم) → لا لقطة ولا
+    #    فرض للأسئلة الإلزامية. يرفع InvalidHomeDetailsError قبل أي كتابة.
+    home_snapshot, home_answers = [], None
+    if home_details is not None:
+        from apps.services.services.home_details import freeze_answers
+
+        home_snapshot, home_answers = freeze_answers(home_details)
+
     booking = Booking(
         customer=user,
         property=prop,
@@ -308,6 +318,7 @@ def create_booking(
         customer_timezone=customer_timezone,
         # نصّ العميل كما كتبه — التشذيب فقط، بلا أي تفسير
         access_notes=(access_notes or "").strip(),
+        home_details=home_snapshot,
         quote=quote,
         max_total=quote.maximum_total if quote is not None else None,
         pricing_version=quote.pricing_version if quote is not None else None,
@@ -326,6 +337,9 @@ def create_booking(
         )
         selection.full_clean()
         selection.save()
+
+    if home_answers is not None:
+        properties_svc.remember_home_details(prop, home_answers)
 
     logger.info(
         "Booking created (booking_id=%s, customer_id=%s, property_id=%s, lines=%d)",

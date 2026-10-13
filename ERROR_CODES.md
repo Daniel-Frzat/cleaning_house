@@ -6,7 +6,7 @@ Every handled error response has the body `{"code": "...", "detail": "..."}` (au
 
 Generated from the source by `python manage.py export_error_codes` — do not edit by hand. A test fails when this file is out of date, so a new or renamed code always shows up in review.
 
-**162 codes.**
+**175 codes.**
 
 | Code | HTTP | Meaning | Defined in |
 | --- | --- | --- | --- |
@@ -44,8 +44,18 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `device_not_found` | 404 |  | apps/accounts/api/admin_auth.py |
 | `document_expired` | 409, 422 |  | apps/contractors/services/verification.py |
 | `email_already_used` | 409 |  | apps/accounts/services/identity.py |
+| `empty_icon` | 422 |  | apps/services/services/icons.py |
 | `empty_photo` | 400 |  | apps/jobs/services/photos.py |
 | `empty_service_selection` | 400 |  | apps/bookings/services/bookings.py, apps/services/services/pricing.py |
+| `home_detail_error` | 422 |  | apps/services/services/home_details.py |
+| `home_detail_field_not_found` | 404 |  | apps/services/services/home_details.py |
+| `home_detail_key_taken` | 409 |  | apps/services/services/home_details.py |
+| `home_detail_not_choice_field` | 422 |  | apps/services/services/home_details.py |
+| `home_detail_option_not_found` | 404 |  | apps/services/services/home_details.py |
+| `icon_error` | 422 |  | apps/services/services/icons.py |
+| `icon_in_use` | 409 |  | apps/services/services/icons.py |
+| `icon_not_found` | 404 |  | apps/services/services/icons.py |
+| `icon_too_large` | 413 |  | apps/services/services/icons.py |
 | `inactive_service` | 400 |  | apps/bookings/services/bookings.py, apps/services/services/pricing.py |
 | `inactive_user` | 403 |  | apps/accounts/services/identity.py, apps/accounts/services/social.py |
 | `invalid_contractor_role` | 403 |  | apps/bookings/services/offers.py, apps/contractors/services/profile.py |
@@ -53,8 +63,10 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `invalid_customer_role` | 403 |  | apps/bookings/services/bookings.py |
 | `invalid_date_range` | 400 |  | apps/payouts/api/payouts.py |
 | `invalid_distance` | 403, 404, 503 |  | apps/services/services/pricing.py, apps/services/services/travel_pricing.py |
+| `invalid_home_details` | 400 |  | apps/services/services/home_details.py |
 | `invalid_job_status` | 409 |  | apps/jobs/services/jobs.py |
 | `invalid_location` | 400 |  | apps/contractors/services/location.py, apps/jobs/services/tracking.py |
+| `invalid_order` | 422 |  | apps/services/services/home_details.py |
 | `invalid_owner_role` | 403 |  | apps/properties/api/properties.py, apps/properties/services/properties.py |
 | `invalid_phone` | 400 |  | apps/accounts/services/otp.py |
 | `invalid_photo_type` | 400 |  | apps/jobs/services/photos.py |
@@ -118,10 +130,10 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `pricing_error` | 403, 404, 503 |  | apps/services/services/pricing.py |
 | `profile_update_error` | 422 |  | apps/accounts/services/identity.py |
 | `property_error` | 422 |  | apps/properties/services/properties.py |
-| `property_forbidden` | 403 |  | apps/bookings/api/bookings.py, apps/bookings/api/quotes.py, apps/properties/services/properties.py |
+| `property_forbidden` | 403 |  | apps/bookings/api/bookings.py, apps/bookings/api/quotes.py, apps/properties/services/properties.py, apps/services/api/home_details.py |
 | `property_has_active_bookings` | 409 |  | apps/properties/services/properties.py |
 | `property_inactive` | 409 |  | apps/bookings/services/bookings.py |
-| `property_not_found` | 404 |  | apps/bookings/api/bookings.py, apps/bookings/api/quotes.py, apps/properties/api/properties.py, apps/properties/services/admin.py, apps/properties/services/properties.py |
+| `property_not_found` | 404 |  | apps/bookings/api/bookings.py, apps/bookings/api/quotes.py, apps/properties/api/properties.py, apps/properties/services/admin.py, apps/properties/services/properties.py, apps/services/api/home_details.py |
 | `property_not_serviceable` | 400 |  | apps/bookings/services/quotes.py |
 | `provider_already_linked` | 400 |  | apps/accounts/services/social.py |
 | `provider_not_configured` | 401 | This sign-in provider is not configured on the server yet. | adapters/social_auth/google.py |
@@ -162,11 +174,12 @@ Generated from the source by `python manage.py export_error_codes` — do not ed
 | `tracking_error` | 400, 409 |  | apps/jobs/services/tracking.py |
 | `tracking_window_closed` | 409 |  | apps/jobs/services/tracking.py |
 | `travel_pricing_error` | 403, 404, 503 |  | apps/services/services/travel_pricing.py |
+| `unsupported_icon_format` | 422 |  | apps/services/services/icons.py |
 | `unsupported_photo_format` | 400, 409 |  | apps/jobs/services/photos.py |
 | `unsupported_provider` | 400 |  | apps/accounts/api/auth.py, apps/accounts/services/social.py |
 | `user_admin_error` | 403, 404, 503 |  | apps/accounts/services/backoffice_users.py |
 | `user_not_found` | 404 |  | apps/accounts/services/backoffice_users.py, apps/notifications/services/notifications.py |
-| `validation_error` | 400, 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/payouts/services/connect.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/support/api/support.py, config/urls.py |
+| `validation_error` | 400, 422 | The request body, query or path failed schema validation; see `errors[]`. | apps/accounts/api/auth.py, apps/bookings/api/bookings.py, apps/bookings/api/offers.py, apps/contractors/api/admin_contractors.py, apps/contractors/api/profile.py, apps/jobs/api/jobs.py, apps/payouts/services/connect.py, apps/properties/api/properties.py, apps/services/api/catalog.py, apps/services/api/home_details.py, apps/support/api/support.py, config/urls.py |
 | `verification_error` | 403, 404, 503 |  | apps/contractors/services/verification.py |
 | `verification_not_found` | 404 |  | apps/contractors/api/admin_contractors.py, apps/contractors/services/verification.py |
 | `webhook_not_configured` | 503 | The server cannot verify webhooks yet (provider or signing secret not configured). | apps/payments/services/payments.py, apps/payouts/api/connect_webhooks.py, apps/payouts/services/connect.py |

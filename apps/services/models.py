@@ -276,3 +276,159 @@ class PricingConfig(models.Model):
     def delete(self, *args, **kwargs):
         """الـsingleton لا يُحذف — حذفه يترك النظام بلا سعر كيلومتر."""
         raise NotImplementedError("PricingConfig is a singleton and cannot be deleted.")
+
+
+# ============================================================
+# تفاصيل المنزل — شاشة "Tell us about your home" (2026-10-13)
+# ============================================================
+# 📌 قرار PO — 2026-10-13: الإجابات **معلومات فقط** — لا تدخل في أي سعر.
+#    تُجمَّد على الحجز ويراها المقاول والإدارة، وآخرها يُحفظ على العقار
+#    لتعبئة الشاشة مسبقًا في الطلب التالي.
+# ⚠️ لا تربط هذه النماذج بـpricing.py ولا travel_pricing.py: ذلك قرار
+#    منتج جديد، لا تحسين.
+
+
+class CatalogIcon(models.Model):
+    """
+    أيقونة يرفعها الأدمن من لوحة التحكم ويعرضها التطبيق.
+
+    📌 البايتات في قاعدة البيانات لا على القرص: قرص Railway يُمسح عند كل
+       نشر، والأيقونات صغيرة (حدّ MAX_BYTES). تُقدَّم من مسار عام قابل
+       للتخزين المؤقت للأبد، لأن الرابط يحمل بصمة المحتوى (sha256).
+    """
+
+    MAX_BYTES = 200 * 1024
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    # 🔒 يُشتق من محتوى الملف لا مما أرسله المتصفح (services/icons.py)
+    content_type = models.CharField(max_length=40)
+    data = models.BinaryField()
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Icon"
+        verbose_name_plural = "Icons"
+        ordering = ["name", "created_at"]
+
+    def __str__(self):
+        return self.name
+
+
+class HomeDetailInputType(models.TextChoices):
+    """كيف يجيب العميل — يحدد شكل العنصر في التطبيق وشكل القيمة."""
+
+    COUNTER = "COUNTER", "Counter (− n +)"
+    YES_NO = "YES_NO", "Yes / No"
+    SINGLE_CHOICE = "SINGLE_CHOICE", "Single choice"
+    MULTI_CHOICE = "MULTI_CHOICE", "Multiple choice"
+
+
+CHOICE_INPUT_TYPES = (HomeDetailInputType.SINGLE_CHOICE, HomeDetailInputType.MULTI_CHOICE)
+
+
+class HomeDetailSection(models.TextChoices):
+    """MAIN ظاهر دائمًا؛ EXTRA خلف "+ add other conditions (optional)"."""
+
+    MAIN = "MAIN", "Main"
+    EXTRA = "EXTRA", "Other conditions"
+
+
+COUNTER_MAX_LIMIT = 99
+
+
+class HomeDetailField(models.Model):
+    """
+    سؤال واحد في الشاشة: "Bedrooms"، "Any pets at home?"، ...
+
+    🔒 key ثابت بعد الإنشاء: الإجابات المحفوظة على العقار مفهرسة به.
+    📌 الحذف الفعلي آمن: لقطة الحجز تحمل التسمية والقيمة كاملتين ولا
+       تشير إلى هذا الصف.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=50, unique=True)
+    label = models.CharField(max_length=80)
+    help_text = models.CharField(max_length=200, blank=True)
+    icon = models.ForeignKey(
+        CatalogIcon,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="home_detail_fields",
+    )
+    input_type = models.CharField(max_length=16, choices=HomeDetailInputType.choices)
+    section = models.CharField(
+        max_length=8, choices=HomeDetailSection.choices, default=HomeDetailSection.MAIN
+    )
+    is_required = models.BooleanField(default=False)
+
+    # COUNTER وحده: الحدود والقيمة الأولية. YES_NO: default_value 0 أو 1.
+    min_value = models.PositiveSmallIntegerField(default=0)
+    max_value = models.PositiveSmallIntegerField(default=20)
+    default_value = models.PositiveSmallIntegerField(default=0)
+
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Home detail field"
+        verbose_name_plural = "Home detail fields"
+        ordering = ["sort_order", "created_at"]
+
+    def __str__(self):
+        return self.label
+
+    def clean(self):
+        super().clean()
+        if self.input_type == HomeDetailInputType.COUNTER:
+            if self.max_value > COUNTER_MAX_LIMIT:
+                raise ValidationError({"max_value": f"At most {COUNTER_MAX_LIMIT}."})
+            if self.min_value > self.max_value:
+                raise ValidationError({"min_value": "Must not exceed max_value."})
+            if not self.min_value <= self.default_value <= self.max_value:
+                raise ValidationError(
+                    {"default_value": "Must be between min_value and max_value."}
+                )
+        elif self.input_type == HomeDetailInputType.YES_NO:
+            if self.default_value not in (0, 1):
+                raise ValidationError({"default_value": "Use 0 (No) or 1 (Yes)."})
+
+
+class HomeDetailOption(models.Model):
+    """خيار داخل سؤال اختيار (SINGLE_CHOICE / MULTI_CHOICE)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    field = models.ForeignKey(HomeDetailField, on_delete=models.CASCADE, related_name="options")
+    key = models.SlugField(max_length=50)
+    label = models.CharField(max_length=80)
+    icon = models.ForeignKey(
+        CatalogIcon,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="home_detail_options",
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Home detail option"
+        verbose_name_plural = "Home detail options"
+        ordering = ["sort_order", "created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["field", "key"], name="unique_option_key_per_field"),
+        ]
+
+    def __str__(self):
+        return self.label

@@ -22,6 +22,7 @@ from apps.properties.api.admin import AdminAddressOut, serialize_address
 
 from ..models import BookingStatus, DispatchStatus
 from ..services import admin as svc
+from .schemas import HomeDetailAnswerOut
 
 router = Router(tags=["Admin — Bookings"], auth=AdminJWTAuth())
 
@@ -169,6 +170,7 @@ class AdminBookingDetailOut(Schema):
     pricing_version: Optional[int] = None
     currency: str
     access_notes: str
+    home_details: list[HomeDetailAnswerOut] = []
     scheduled_at: Optional[datetime] = None
     customer_timezone: str
     requested_at: datetime
@@ -273,6 +275,7 @@ def _serialize_detail(booking):
         "pricing_version": booking.pricing_version,
         "currency": booking.currency,
         "access_notes": booking.access_notes,
+        "home_details": booking.home_details,
         "scheduled_at": booking.scheduled_at,
         "customer_timezone": booking.customer_timezone,
         "requested_at": booking.requested_at,

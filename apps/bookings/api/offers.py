@@ -83,6 +83,7 @@ def _serialize_offer_detail(offer):
             }
             for sel in booking.service_selections.all()
         ],
+        "home_details": booking.home_details,
     }
 
 

@@ -143,6 +143,8 @@ def _serialize_job(job, photos_with_urls, *, include_storage_key,
         "arrived_at": job.arrived_at,
         "started_at": job.started_at,
         "access_notes": job.booking.access_notes if include_access_notes else None,
+        # ليست سرًّا كملاحظات الوصول: يراها المقاول قبل القبول أصلًا
+        "home_details": job.booking.home_details,
         "marked_done_at": job.marked_done_at,
         "confirmed_at": job.confirmed_at,
         "auto_confirm_at": jobs_svc.auto_confirm_deadline(job),

@@ -135,6 +135,16 @@ def get_property(user, property_id):
     return prop
 
 
+def remember_home_details(prop, answers):
+    """
+    يحفظ آخر إجابات "تفاصيل المنزل" على العقار — للتعبئة المسبقة وحدها.
+
+    📌 تُستدعى من إنشاء الحجز بعد التحقق من الإجابات وملكية العقار.
+    """
+    prop.home_details = answers
+    prop.save(update_fields=["home_details", "updated_at"])
+
+
 def list_properties(user):
     """عقارات المستخدم الحالي فقط."""
     assert_can_own_properties(user)

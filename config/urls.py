@@ -63,6 +63,11 @@ from apps.contractors.api.profile import router as contractor_profile_router
 from apps.contractors.api.payout_accounts import router as contractor_payout_account_router
 from apps.services.api.catalog import router as admin_catalog_router
 from apps.services.api.public_catalog import router as public_services_router
+from apps.services.api.home_details import (
+    admin_router as admin_home_details_router,
+    icon_file_router,
+    public_router as home_details_router,
+)
 from apps.support.api.support import router as support_router
 from apps.notifications.api.admin import router as admin_notifications_router
 from apps.notifications.api.notifications import devices_router as notification_devices_router
@@ -313,6 +318,10 @@ api.add_router("/admin", admin_catalog_router)
 # الكتالوج العام — قراءة فقط لأي مستخدم مصادَق عليه، بلا أي حقل تسعير.
 # مسار منفصل تمامًا عن /admin/services الذي يكشف الأسعار للإدارة.
 api.add_router("/services", public_services_router)
+# شاشة "Tell us about your home": الأسئلة من لوحة التحكم + الأيقونات (عامة).
+api.add_router("/home-details", home_details_router)
+api.add_router("/icons", icon_file_router)
+api.add_router("/admin", admin_home_details_router)
 # ملف المقاول — مسارات ذاتية بالكامل (لا تقبل معرّفًا من العميل).
 api.add_router("/contractor", contractor_profile_router)
 api.add_router("/contractor", contractor_payout_account_router)

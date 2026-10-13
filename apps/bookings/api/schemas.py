@@ -17,12 +17,28 @@ API Schemas — Booking Domain (Change Set §36.1، §20)
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from ninja import Schema
 from pydantic import Field
 
 from ..models import ACCESS_NOTES_MAX_LENGTH
+
+
+class HomeDetailAnswerOut(Schema):
+    """
+    إجابة واحدة من شاشة "تفاصيل المنزل" كما جُمِّدت على الحجز.
+
+    value بشكله الخام (رقم، true/false، مفتاح خيار، قائمة مفاتيح)،
+    و value_labels جاهزة للعرض ("3"، "Yes"، "Carpet").
+    """
+
+    key: str
+    label: str
+    input_type: str
+    section: str
+    value: Any = None
+    value_labels: list[str] = []
 
 
 class ServiceSelectionIn(Schema):
@@ -50,6 +66,14 @@ class BookingIn(Schema):
     access_notes: str = Field("", max_length=ACCESS_NOTES_MAX_LENGTH)
     quote_id: Optional[uuid.UUID] = None
     payment_method_reference: str = Field("", max_length=255)
+    # شاشة "Tell us about your home": {key: value} — راجع GET /api/home-details/form
+    home_details: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Answers keyed by question `key`. Information only — never affects the "
+            "price. Omit to skip the screen."
+        ),
+    )
 
 
 class QuoteIn(Schema):
@@ -210,6 +234,8 @@ class BookingOut(Schema):
     #    هو من يقرّر كشفها (نفس نمط computed_price أعلاه).
     # ⚠️ قد تحوي مكان مفتاح المنزل — لا تُكشف لمقاول لم يقبل بعد.
     access_notes: Optional[str] = None
+    # تفاصيل المنزل المجمَّدة — معلومات فقط، لا أثر لها على السعر
+    home_details: list[HomeDetailAnswerOut] = []
     # 📌 حالة الدفع ومبلغه وطريقته — None ما دام الحجز PENDING: لا توجد
     #    دفعة قبل قبول المقاول أصلًا. نفس شرط computed_price أعلاه.
     # ⚠️ SUCCEEDED ليس شرطًا للظهور: الحجز قد يكون CONFIRMED ودفعته
@@ -292,6 +318,9 @@ class OfferDetailOut(OfferOut):
     postcode: str = ""
     property_type: str = ""
     services: list[OfferServiceOut] = []
+    # 📌 تفاصيل المنزل تُعرض قبل القبول: تساعد المقاول على القرار (حيوانات
+    #    أليفة، عدد الطوابق) ولا تكشف عنوانًا ولا ملاحظات وصول.
+    home_details: list[HomeDetailAnswerOut] = []
 
 
 class OfferResponseOut(Schema):

@@ -31,6 +31,7 @@ from ninja import Query, Router
 from apps.accounts.authentication import ActiveUserJWTAuth
 
 from apps.properties.services import properties as properties_svc
+from apps.services.services.home_details import InvalidHomeDetailsError
 
 from ..models import BookingStatus
 from apps.aftercare.services import aftercare as aftercare_svc
@@ -130,6 +131,7 @@ def _serialize(booking):
         #    الخدمة)، فلا يصل المقاول إلى هنا أصلًا — وصوله إليه عبر
         #    GET /api/bookings/{id}/job بعد الإسناد وحده.
         "access_notes": booking.access_notes,
+        "home_details": booking.home_details,
         # 📌 ملخص الدفع — نفس شرط السعر: لا يظهر قبل CONFIRMED. لا دفعة
         #    تُنشأ قبل قبول المقاول أصلًا، والشرط على الحالة لا على وجود
         #    الصف تمامًا كـcomputed_price أعلاه.
@@ -195,15 +197,26 @@ def _aftercare(booking):
         "offers it to the nearest available contractor. Dispatch happens outside "
         "the creating transaction, so a dispatch failure never undoes a valid "
         "booking; finding no eligible contractor is not an error either — the "
-        "booking simply stays `PENDING` with no active offer."
+        "booking simply stays `PENDING` with no active offer.\n\n"
+        "**Home details** (optional): `home_details` carries the answers from the "
+        "\"Tell us about your home\" screen as `{key: value}`, using the keys from "
+        "`GET /api/home-details/form` — a number for `COUNTER`, `true`/`false` "
+        "for `YES_NO`, an option key (or `null`) for `SINGLE_CHOICE`, a list of "
+        "option keys for `MULTI_CHOICE`. They are **information only and never "
+        "change the price**. They are frozen on the booking with their labels "
+        "(returned as `home_details`) and remembered on the property to pre-fill "
+        "the screen next time. Omit the field entirely to skip the screen; send "
+        "it (even `{}`) and required questions are enforced."
     ),
     openapi_extra={
         "responses": {
             400: {
                 "description": (
                     "No services were selected, a selected service is unknown or "
-                    "inactive, a `room_count` is invalid, or `scheduled_at` is in "
-                    "the past or outside business hours (07:00-19:00 local time)."
+                    "inactive, a `room_count` is invalid, `scheduled_at` is in "
+                    "the past or outside business hours (07:00-19:00 local time), "
+                    "or `home_details` does not match the current questions "
+                    "(`invalid_home_details`)."
                 )
             },
             403: {
@@ -248,7 +261,10 @@ def create_booking(request, payload: BookingIn):
             access_notes=payload.access_notes,
             quote=quote,
             payment_method_reference=payload.payment_method_reference,
+            home_details=payload.home_details,
         )
+    except InvalidHomeDetailsError as exc:
+        return _error(400, exc.code, str(exc))
     except scheduling_svc.SchedulingError as exc:
         # 400: موعد ماضٍ أو خارج ساعات العمل — نفس رتبة بقية قواعد العمل
         return _error(400, exc.code, str(exc))
