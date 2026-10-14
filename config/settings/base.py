@@ -266,8 +266,14 @@ PAYMENTS_ALLOW_FAKE_ADAPTER = config(
 # Stripe (قرار PO — 2026-09-30). المفاتيح السرية في متغيرات البيئة وحدها.
 # PAYMENT_PROVIDER_ADAPTER_CLASS=apps.payments.adapters.stripe_adapter.StripePaymentAdapter
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY", default="")
-STRIPE_WEBHOOK_SECRET = config("STRIPE_WEBHOOK_SECRET", default="")
-STRIPE_CONNECT_WEBHOOK_SECRET = config("STRIPE_CONNECT_WEBHOOK_SECRET", default="")
+# أسرار التوقيع قائمة مفصولة بفواصل: عند نقل الـwebhook إلى نطاق جديد يبقى
+# الـendpoint القديم والجديد معًا (لكلٍّ سرّه) حتى يُحذف القديم.
+def _parse_webhook_secrets(value):
+    return [secret.strip() for secret in value.split(",") if secret.strip()]
+
+
+STRIPE_WEBHOOK_SECRET = config("STRIPE_WEBHOOK_SECRET", default="", cast=_parse_webhook_secrets)
+STRIPE_CONNECT_WEBHOOK_SECRET = config("STRIPE_CONNECT_WEBHOOK_SECRET", default="", cast=_parse_webhook_secrets)
 
 # ------------------------------------------------------------
 # Storage Provider (Jobs Domain — Infra §7)

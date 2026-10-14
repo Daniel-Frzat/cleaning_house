@@ -29,6 +29,13 @@ def _minor_units(amount):
     return int((Decimal(amount) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _webhook_secrets(value):
+    """سرّ واحد (نص) أو عدة أسرار (قائمة أو نص مفصول بفواصل)."""
+    if isinstance(value, str):
+        value = value.split(",")
+    return [secret.strip() for secret in value or () if secret and secret.strip()]
+
+
 class StripePayoutAdapter(BasePayoutProviderAdapter):
     provider_name = "stripe"
 
@@ -37,7 +44,7 @@ class StripePayoutAdapter(BasePayoutProviderAdapter):
 
         self.stripe = stripe
         self.api_key = getattr(settings, "STRIPE_SECRET_KEY", "") or ""
-        self.webhook_secret = getattr(settings, "STRIPE_CONNECT_WEBHOOK_SECRET", "") or ""
+        self.webhook_secrets = _webhook_secrets(getattr(settings, "STRIPE_CONNECT_WEBHOOK_SECRET", ""))
         if not self.api_key:
             raise ImproperlyConfigured("STRIPE_SECRET_KEY is not set.")
 
@@ -108,19 +115,27 @@ class StripePayoutAdapter(BasePayoutProviderAdapter):
         )
 
     def parse_account_event(self, payload, headers):
-        if not self.webhook_secret:
+        if not self.webhook_secrets:
             raise ImproperlyConfigured("STRIPE_CONNECT_WEBHOOK_SECRET is not set.")
-        try:
-            event = self.stripe.Webhook.construct_event(
-                payload,
-                headers.get("Stripe-Signature", ""),
-                self.webhook_secret,
-                api_key=self.api_key,
-            )
-        except (ValueError, self.stripe.SignatureVerificationError) as exc:
+        event, error = None, None
+        for secret in self.webhook_secrets:
+            try:
+                event = self.stripe.Webhook.construct_event(
+                    payload,
+                    headers.get("Stripe-Signature", ""),
+                    secret,
+                    api_key=self.api_key,
+                )
+                break
+            except self.stripe.SignatureVerificationError as exc:
+                error = exc
+            except ValueError as exc:
+                error = exc
+                break
+        if event is None:
             raise PayoutAccountWebhookError(
                 "Invalid connected-account webhook signature."
-            ) from exc
+            ) from error
 
         kind = _get(event, "type")
         event_id = _get(event, "id")

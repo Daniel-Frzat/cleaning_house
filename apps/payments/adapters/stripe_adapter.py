@@ -72,6 +72,13 @@ def method_summary_from(payment_method):
     return {"type": method, "display_name": display, "card_brand": brand, "last4": last4}
 
 
+def _webhook_secrets(value):
+    """سرّ واحد (نص) أو عدة أسرار (قائمة أو نص مفصول بفواصل)."""
+    if isinstance(value, str):
+        value = value.split(",")
+    return [secret.strip() for secret in value or () if secret and secret.strip()]
+
+
 class StripePaymentAdapter(BasePaymentProviderAdapter):
     provider_name = "stripe"
 
@@ -82,7 +89,7 @@ class StripePaymentAdapter(BasePaymentProviderAdapter):
         self.api_key = getattr(settings, "STRIPE_SECRET_KEY", "") or ""
         if not self.api_key:
             raise ImproperlyConfigured("STRIPE_SECRET_KEY is not set.")
-        self.webhook_secret = getattr(settings, "STRIPE_WEBHOOK_SECRET", "") or ""
+        self.webhook_secrets = _webhook_secrets(getattr(settings, "STRIPE_WEBHOOK_SECRET", ""))
 
     # ------------------------------------------------------------ العملاء والبطاقات
     def _unavailable(self, exc):
@@ -266,14 +273,21 @@ class StripePaymentAdapter(BasePaymentProviderAdapter):
 
     # ------------------------------------------------------------ webhook
     def parse_webhook(self, payload, headers):
-        if not self.webhook_secret:
+        if not self.webhook_secrets:
             raise ImproperlyConfigured("STRIPE_WEBHOOK_SECRET is not set.")
-        try:
-            event = self.stripe.Webhook.construct_event(
-                payload, headers.get("Stripe-Signature", ""), self.webhook_secret
-            )
-        except (ValueError, self.stripe.SignatureVerificationError) as exc:
-            raise WebhookSignatureError(str(exc)) from exc
+        event, error = None, None
+        for secret in self.webhook_secrets:
+            try:
+                event = self.stripe.Webhook.construct_event(
+                    payload, headers.get("Stripe-Signature", ""), secret
+                )
+                break
+            except self.stripe.SignatureVerificationError as exc:
+                error = exc
+            except ValueError as exc:
+                raise WebhookSignatureError(str(exc)) from exc
+        if event is None:
+            raise WebhookSignatureError(str(error)) from error
         kind = _get(event, "type")
         intent = _get(_get(event, "data"), "object")
         if kind not in ("payment_intent.succeeded", "payment_intent.payment_failed"):

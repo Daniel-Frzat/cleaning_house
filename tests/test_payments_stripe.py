@@ -245,6 +245,29 @@ def test_webhook_rejects_a_forged_signature(client, stripe_settings, pending_pay
 
 
 @pytest.mark.django_db
+def test_webhook_accepts_any_configured_signing_secret(client, stripe_settings, pending_payment, monkeypatch):
+    """أثناء نقل الـwebhook إلى نطاق جديد: الـendpoint القديم والجديد معًا، لكلٍّ سرّه."""
+    from apps.payments.services import payments as svc
+
+    monkeypatch.setattr(svc, "confirm_payment", lambda pid: None)
+    stripe_settings.STRIPE_WEBHOOK_SECRET = ["whsec_old_domain", "whsec_test_secret"]
+    body = _event("payment_intent.succeeded", {"id": "pi_9", "object": "payment_intent", "metadata": {}})
+    r = client.post("/api/payments/webhooks/stripe", data=body, content_type="application/json",
+                    HTTP_STRIPE_SIGNATURE=_signed(body, "whsec_test_secret"))
+    assert r.status_code == 200, r.content
+    forged = client.post("/api/payments/webhooks/stripe", data=body, content_type="application/json",
+                         HTTP_STRIPE_SIGNATURE=_signed(body, "whsec_attacker"))
+    assert forged.status_code == 400 and forged.json()["code"] == "webhook_signature_invalid"
+
+
+def test_webhook_secrets_setting_is_comma_separated():
+    from config.settings.base import _parse_webhook_secrets
+
+    assert _parse_webhook_secrets("") == []
+    assert _parse_webhook_secrets(" whsec_a , whsec_b,") == ["whsec_a", "whsec_b"]
+
+
+@pytest.mark.django_db
 def test_webhook_failure_marks_failed(client, stripe_settings, pending_payment):
     body = _event("payment_intent.payment_failed", {
         "id": "pi_9", "object": "payment_intent",

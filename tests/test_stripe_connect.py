@@ -239,6 +239,28 @@ def test_connect_webhook_rejects_bad_signature(api_client, stripe_connect_settin
 
 
 @pytest.mark.django_db
+def test_connect_webhook_accepts_any_configured_signing_secret(
+    api_client, stripe_connect_settings
+):
+    stripe_connect_settings.STRIPE_CONNECT_WEBHOOK_SECRET = [
+        "whsec_old_domain",
+        WEBHOOK_SECRET,
+    ]
+    payload = connect_event(
+        "evt_second_secret",
+        "account.updated",
+        {"id": "acct_any", "object": "account"},
+    )
+    response = api_client.post(
+        "/api/payments/webhooks/stripe-connect",
+        data=payload,
+        content_type="application/json",
+        HTTP_STRIPE_SIGNATURE=signed_header(payload),
+    )
+    assert response.status_code == 200, response.content
+
+
+@pytest.mark.django_db
 def test_connect_webhook_unknown_account_is_acknowledged(
     api_client, stripe_connect_settings
 ):
