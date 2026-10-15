@@ -238,7 +238,10 @@ def assign_next_contractor(booking):
        - موعد الزيارة مضى → NO_CONTRACTOR بلا عرض (يمكن إعادة الجدولة).
     """
     caller_booking = booking
-    booking = Booking.objects.select_for_update().select_related(
+    # ⚠️ of=("self",) إلزامي: property__address علاقة عكسية (LEFT OUTER JOIN)،
+    #    وPostgres يرفض FOR UPDATE على الطرف القابل للفراغ من الربط. بدونه
+    #    يفشل كل إسناد في الإنتاج — وsqlite في الاختبارات يتجاهل القفل فلا يكشفه.
+    booking = Booking.objects.select_for_update(of=("self",)).select_related(
         "property__address"
     ).get(pk=booking.pk)
 

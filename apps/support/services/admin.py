@@ -88,7 +88,9 @@ def change_status(actor, request_id, new_status, request=None):
     assert_admin(actor)
 
     obj = (
-        SupportRequest.objects.select_for_update()
+        # of=("self",): booking قابل للفراغ (LEFT OUTER JOIN) وPostgres يرفض
+        # FOR UPDATE على الطرف القابل للفراغ.
+        SupportRequest.objects.select_for_update(of=("self",))
         .select_related("user", "booking")
         .filter(pk=request_id)
         .first()
