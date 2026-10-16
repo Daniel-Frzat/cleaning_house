@@ -149,7 +149,8 @@ def _auth_response(user):
         "number, and an hourly cap per client IP.\n\n"
         "**Test numbers:** numbers listed in the server's `OTP_TEST_NUMBERS` "
         "receive no SMS and accept their fixed configured code. Every other "
-        "number is unaffected.\n\n"
+        "number is unaffected. Store-review numbers (`OTP_REVIEW_NUMBERS`) "
+        "work the same way, never expire and skip the daily cap.\n\n"
         "**Note:** no SMS provider ships with this build, so delivery to real "
         "numbers fails with `503` until one is configured."
     ),

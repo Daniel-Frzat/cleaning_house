@@ -115,6 +115,51 @@ def test_otp_test_numbers_setting_is_validated():
             _parse_otp_test_numbers(bad)
 
 
+# ============================================================
+# 1-ب) حساب مراجعة المتاجر (Google Play / App Store)
+# ============================================================
+REVIEW_PHONE = "+61400000000"
+REVIEW_CODE = "123456"
+
+
+@pytest.mark.django_db
+def test_review_number_logs_in_as_customer_without_sms_after_test_mode_ends(client, settings):
+    """دائم: انتهاء وضع التجريب يوقف أرقام الاختبار، لا حساب المراجعة."""
+    settings.OTP_REVIEW_NUMBERS = {REVIEW_PHONE: REVIEW_CODE}
+    settings.OTP_TEST_MODE_UNTIL = "2020-01-01"
+    settings.SMS_ADAPTER = "tests.test_auth_hardening.BrokenSMSAdapter"
+
+    assert post(client, "/api/auth/otp/request", {"phone": REVIEW_PHONE}).status_code == 200
+    r = post(client, "/api/auth/otp/verify", {"phone": REVIEW_PHONE, "code": REVIEW_CODE})
+    assert r.status_code == 200
+    assert User.objects.get(phone=REVIEW_PHONE).role == ConfirmedRole.CUSTOMER
+
+    # أرقام الاختبار العادية توقفت فعلًا
+    r = post(client, "/api/auth/otp/request", {"phone": TEST_PHONE})
+    assert r.status_code == 503
+
+
+@pytest.mark.django_db
+def test_review_number_skips_the_daily_cap_but_keeps_wrong_code_rejection(client, settings):
+    settings.OTP_REVIEW_NUMBERS = {REVIEW_PHONE: REVIEW_CODE}
+    settings.OTP_MAX_REQUESTS_PER_PHONE_PER_DAY = 2
+    for _ in range(4):
+        assert post(client, "/api/auth/otp/request", {"phone": REVIEW_PHONE}).status_code == 200
+    assert CapturingSMSAdapter.sent == []
+    r = post(client, "/api/auth/otp/verify", {"phone": REVIEW_PHONE, "code": "000000"})
+    assert r.json()["code"] == "otp_invalid_code"
+
+
+def test_review_number_is_never_an_admin_second_factor(settings):
+    from apps.accounts.models import OTPPurpose
+    from apps.accounts.services import otp as otp_service
+
+    settings.OTP_REVIEW_NUMBERS = {REVIEW_PHONE: REVIEW_CODE}
+    settings.OTP_TEST_NUMBERS_ALLOW_ADMIN = True
+    assert otp_service._test_code_for(REVIEW_PHONE, OTPPurpose.ADMIN_LOGIN) is None
+    assert otp_service._test_code_for(REVIEW_PHONE, OTPPurpose.LOGIN) == REVIEW_CODE
+
+
 def test_no_accept_any_code_switch_exists():
     """الخيار القديم كان يفتح كل الحسابات — يجب ألا يعود."""
     root = pathlib.Path(__file__).resolve().parent.parent

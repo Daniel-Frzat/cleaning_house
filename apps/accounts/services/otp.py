@@ -20,6 +20,11 @@ OTP Service — Identity Domain (Phase 1)
     ⚠️ لا يوجد خيار "اقبل أي رمز": كان يفتح كل الحسابات — بما فيها
        ADMIN — لمن يعرف رقم الهاتف فقط.
 
+🧾 أرقام مراجعة المتاجر (OTP_REVIEW_NUMBERS):
+    مثل أرقام الاختبار لكنها دائمة (لا يوقفها OTP_TEST_MODE_UNTIL)، لدخول
+    العملاء وحده، ومعفاة من الحد اليومي للرقم: لا SMS يُستنزف، والرمز
+    مُسلَّم للمراجِعين أصلًا فلا تخمين يُحمى منه. التهدئة وحد الـIP باقيان.
+
 ⚠️ أرقام السياسة (expiry / max attempts / cooldown) تأتي من settings وهي
    defaults آمنة بانتظار تأكيد Product Owner — ليست قواعد عمل محسومة.
 """
@@ -160,15 +165,23 @@ def test_numbers():
     return getattr(settings, "OTP_TEST_NUMBERS", None) or {}
 
 
+def review_code_for(phone, purpose):
+    """الرمز الثابت لرقم مراجعة المتاجر، أو None — لدخول العملاء وحده."""
+    if purpose != OTPPurpose.LOGIN:
+        return None
+    return (getattr(settings, "OTP_REVIEW_NUMBERS", None) or {}).get(phone)
+
+
 def _test_code_for(phone, purpose):
     """
-    الرمز الثابت لرقم اختبار، أو None.
+    الرمز الثابت لرقم اختبار أو مراجعة، أو None.
 
     🔒 دخول العملاء دائمًا؛ العامل الثاني للأدمن فقط إن فُعّل
-       OTP_TEST_NUMBERS_ALLOW_ADMIN صراحةً (وضع تجريب مؤقت).
+       OTP_TEST_NUMBERS_ALLOW_ADMIN صراحةً (وضع تجريب مؤقت) — وأرقام
+       المراجعة لا تكون عاملًا ثانيًا أبدًا.
     """
     if purpose == OTPPurpose.LOGIN:
-        return test_numbers().get(phone)
+        return review_code_for(phone, purpose) or test_numbers().get(phone)
     if purpose == OTPPurpose.ADMIN_LOGIN and getattr(settings, "OTP_TEST_NUMBERS_ALLOW_ADMIN", False):
         return test_numbers().get(phone)
     return None
@@ -233,7 +246,7 @@ def _enforce_request_limits(phone, purpose, ip, policy, now):
 
     # 2) الحد اليومي للرقم
     limit = policy["max_per_phone_per_day"]
-    if limit:
+    if limit and not review_code_for(phone, purpose):
         day_ago = now - timezone.timedelta(days=1)
         recent = OTPVerification.objects.filter(
             phone=phone, purpose=purpose, created_at__gte=day_ago

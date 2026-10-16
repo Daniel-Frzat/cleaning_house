@@ -363,7 +363,7 @@ OTP_MAX_REQUESTS_PER_IP_PER_HOUR = config(
 )
 
 
-def _parse_otp_test_numbers(raw):
+def _parse_otp_test_numbers(raw, name="OTP_TEST_NUMBERS"):
     """
     "+61400000001:123456,+61400000002:654321" → {phone: code}.
 
@@ -379,7 +379,7 @@ def _parse_otp_test_numbers(raw):
         phone, code = phone.strip(), code.strip()
         if not sep or not phone or not code.isdigit() or len(code) != OTP_CODE_LENGTH:
             raise ImproperlyConfigured(
-                f"OTP_TEST_NUMBERS entry {entry!r} must look like "
+                f"{name} entry {entry!r} must look like "
                 f"+61400000001:{'1' * OTP_CODE_LENGTH} (code of OTP_CODE_LENGTH digits)."
             )
         numbers[phone] = code
@@ -395,6 +395,14 @@ OTP_TEST_NUMBERS = _parse_otp_test_numbers(config("OTP_TEST_NUMBERS", default=""
 #     تلقائيًا — حتى لو نُسي حذفها. فارغ = بلا تاريخ انتهاء.
 OTP_TEST_NUMBERS_ALLOW_ADMIN = config("OTP_TEST_NUMBERS_ALLOW_ADMIN", default=False, cast=bool)
 OTP_TEST_MODE_UNTIL = config("OTP_TEST_MODE_UNTIL", default="")
+
+# 🧾 حساب مراجعة المتاجر (Google Play / App Store): رقم برمز ثابت ولا SMS،
+#    بالشكل نفسه "+61400000000:123456". دائم عمدًا — المراجعة تتكرر مع كل
+#    تحديث بعد الإطلاق — فلا يخضع لـOTP_TEST_MODE_UNTIL. دخول العملاء وحده:
+#    لا يكون عاملًا ثانيًا لأدمن أبدًا، حتى مع OTP_TEST_NUMBERS_ALLOW_ADMIN.
+OTP_REVIEW_NUMBERS = _parse_otp_test_numbers(
+    config("OTP_REVIEW_NUMBERS", default=""), name="OTP_REVIEW_NUMBERS"
+)
 
 # عدد البروكسيات الموثوقة أمام التطبيق — لاستخراج IP العميل الحقيقي من
 # X-Forwarded-For (يُستخدم في حد طلبات OTP). 0 = REMOTE_ADDR مباشرةً.
